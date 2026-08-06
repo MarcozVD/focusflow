@@ -1,0 +1,49 @@
+# ---------- secretos / variables ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.pkcs12
+credentials*
+*_credentials.json
+
+# ---------- Rust / Tauri ----------
+**/target/
+*.rs.bk
+**/src-tauri/gen/schemas/
+
+# ---------- Node ----------
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.svelte-kit/
+.vite/
+*.tsbuildinfo
+
+# ---------- bases de datos locales ----------
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---------- logs / runtime ----------
+*.log
+*.err
+*.out
+logs/
+tmp/
+
+# ---------- SO ----------
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ---------- IDE ----------
+.idea/
+.vscode/
+*.code-workspace
