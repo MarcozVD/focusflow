@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { tasks as tasksStore, completeTask, cat, openTaskDetail, openAgenda, widgetHeight } from "./data.svelte";
+  import { fade } from "svelte/transition";
+  import { tasks as tasksStore, completeTask, cat, openTaskRemote, openAgenda, widgetHeight } from "./data.svelte";
 
   const tasks = $derived(tasksStore());
 
@@ -20,12 +21,22 @@
   const upcoming = $derived(
     tasks
       .filter((t) => t.status !== "completada" && !todayTasks.includes(t))
-      .sort((a, b) => a.start.getTime() - b.start.getTime())
-      .slice(0, 4),
+      .sort((a, b) => a.start.getTime() - b.start.getTime()),
   );
 
+  /** Altura máxima configurable del widget (px). Al alcanzarla, se corta con "+N tareas más". */
+  const MAX_H = 560;
+  const ROW_H = 30;
+  const FIXED_H = 148;
+
+  /** Filas que caben dentro de la altura máxima. */
+  const capacity = $derived(Math.max(3, Math.floor((MAX_H - FIXED_H) / ROW_H)));
+
+  const todayShown = $derived(todayTasks.slice(0, capacity));
+  const upcomingShown = $derived(upcoming.slice(0, Math.max(0, capacity - todayTasks.length)));
+
   const hiddenCount = $derived(
-    Math.max(0, tasks.filter((t) => t.status !== "completada").length - todayTasks.length - upcoming.length),
+    Math.max(0, tasks.filter((t) => t.status !== "completada").length - todayShown.length - upcomingShown.length),
   );
 
   const doneToday = $derived(
@@ -80,8 +91,8 @@
       <div class="empty">Sin tareas pendientes. Descansa ✨</div>
     {:else}
       <div class="sec-label">Hoy</div>
-      {#each todayTasks.slice(0, 4) as t (t.id)}
-        <button class="task" type="button" onclick={() => openTaskDetail(t)}>
+      {#each todayShown as t (t.id)}
+        <button class="task" type="button" transition:fade={{ duration: 140 }} onclick={() => openTaskRemote(t.id)}>
           <span class="dot" style="--c: {cat(t.categoryId).color}"></span>
           <span class="ttl">{t.title}</span>
           <span class="due" class:allday={t.allDay}>{timeLabel(t)}</span>
@@ -91,8 +102,8 @@
 
       {#if upcoming.length > 0}
         <div class="sec-label">Próximas</div>
-        {#each upcoming as t (t.id)}
-          <button class="task" type="button" onclick={() => openTaskDetail(t)}>
+        {#each upcomingShown as t (t.id)}
+          <button class="task" type="button" transition:fade={{ duration: 140 }} onclick={() => openTaskRemote(t.id)}>
             <span class="dot" style="--c: {cat(t.categoryId).color}"></span>
             <span class="ttl">{t.title}</span>
             <span class="due">{dueLabel(t.start)}</span>
@@ -110,7 +121,7 @@
 
 <style>
   .widget {
-    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    background: var(--surface);
     border-radius: var(--r-xl);
     box-shadow: var(--shadow-raised-lg);
     border: 1px solid var(--border);

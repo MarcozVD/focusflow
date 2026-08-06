@@ -10,6 +10,8 @@
     suggestionEdit,
     suggestionMerge,
     suggestionRevert,
+    syncNow,
+    syncRunning,
     type Suggestion,
   } from "./data.svelte";
 
@@ -99,10 +101,15 @@
 
 <div class="sug">
   <div class="head">
-    <h2>Eventos detectados</h2>
-    <p class="hint">
-      Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.
-    </p>
+    <div class="head-left">
+      <h2>Eventos detectados</h2>
+      <p class="hint">
+        Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.
+      </p>
+    </div>
+    <button class="btn check-now" onclick={syncNow} disabled={syncRunning()}>
+      {syncRunning() ? "Comprobando…" : "Comprobar correo ahora"}
+    </button>
   </div>
 
   {#if suggestions.length === 0}
@@ -225,6 +232,19 @@
   .head h2 {
     font-size: 20px;
     margin: 0 0 4px;
+  }
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s-4);
+    flex-wrap: wrap;
+  }
+  .head-left {
+    min-width: 0;
+  }
+  .check-now {
+    flex-shrink: 0;
   }
   .hint,
   .sub {

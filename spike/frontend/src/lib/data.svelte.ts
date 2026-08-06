@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, emit } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 
 export type Priority = "alta" | "media" | "baja";
 export type Status = "pendiente" | "completada" | "en-curso" | "vencida";
@@ -153,6 +153,12 @@ export function widgetHeight(px?: number): number {
 export function openAgenda() {
   if (!inTauri()) return;
   invoke("open_agenda").catch(() => {});
+}
+
+/** Abre una tarea directamente en la app principal (desde el widget). */
+export function openTaskRemote(id: number) {
+  if (!inTauri()) return;
+  invoke("open_task", { id }).catch(() => {});
 }
 
 // ---------- caché de tareas por semana ----------
@@ -619,6 +625,7 @@ export interface TaskEditData {
   priority: string;
   startAt: number;
   endAt: number;
+  allDay: boolean;
   tags: string[];
   notes: string;
   links: string[];
@@ -641,6 +648,7 @@ export async function updateTaskDetail(id: number, data: TaskEditData): Promise<
       notes: data.notes,
       links: data.links.join(", "),
       reminderMinutes: data.reminderMinutes,
+      allDay: data.allDay,
     });
     const cur = store.tasks.find((t) => t.id === id);
     if (cur) {
@@ -651,6 +659,7 @@ export async function updateTaskDetail(id: number, data: TaskEditData): Promise<
         priority: data.priority as Priority,
         start: new Date(data.startAt),
         end: new Date(data.endAt),
+        allDay: data.allDay,
         description: data.description,
         tags: data.tags,
         notes: data.notes,
@@ -676,13 +685,20 @@ export async function moveTask(
   id: number,
   startAt: number,
   endAt: number,
+  allDay?: boolean,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!inTauri()) return { ok: true };
   try {
-    await invoke("task_move", { id, startAt: Math.round(startAt), endAt: Math.round(endAt) });
+    await invoke("task_move", {
+      id,
+      startAt: Math.round(startAt),
+      endAt: Math.round(endAt),
+      allDay: allDay ?? null,
+    });
     const cur = store.tasks.find((t) => t.id === id);
     if (cur) {
       const moved: Task = { ...cur, start: new Date(startAt), end: new Date(endAt) };
+      if (allDay !== undefined) moved.allDay = allDay;
       const oldKey = weekKey(cur.start);
       weekCache.get(oldKey)?.delete(id);
       putInCache(moved);
@@ -807,32 +823,96 @@ export function fmtDate(ms: number | null): string {
   });
 }
 
-export function toggleTheme() {
-  const root = document.documentElement;
-  const next = root.dataset.theme === "dark" ? "light" : "dark";
-  root.dataset.theme = next;
+export interface UiPrefs {
+  theme: string;
+  accent: string;
+}
+
+/** Aplica tema + acento al documento y los guarda en localStorage (puente entre ventanas). */
+export function applyUiPrefs(p: { theme?: string; accent?: string }) {
+  if (p.theme === "dark" || p.theme === "light") {
+    document.documentElement.dataset.theme = p.theme;
+  }
+  if (p.accent && /^#[0-9a-fA-F]{6}$/.test(p.accent)) {
+    document.documentElement.style.setProperty("--accent", p.accent);
+  }
   try {
-    localStorage.setItem("ff-theme", next);
+    localStorage.setItem(
+      "ff-ui",
+      JSON.stringify({
+        theme: p.theme ?? document.documentElement.dataset.theme,
+        accent:
+          p.accent ??
+          (getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB"),
+      }),
+    );
   } catch {
     // sin almacenamiento (navegador restringido)
   }
-  if (inTauri()) {
-    emit("theme:changed", next).catch(() => {});
-  }
 }
 
-/** Aplica el tema guardado (se llama en cada ventana al montar). */
-export function applySavedTheme() {
+/** Carga prefs persistidas (backend como fuente de verdad; localStorage como fast path). */
+export async function loadUiPrefs() {
+  if (inTauri()) {
+    try {
+      const v = await invoke<{ theme: string; accent: string }>("ui_prefs_get");
+      applyUiPrefs({ theme: v.theme || undefined, accent: v.accent });
+      return;
+    } catch (e) {
+      console.error("loadUiPrefs", e);
+    }
+  }
   try {
-    const saved = localStorage.getItem("ff-theme");
-    if (saved === "dark" || saved === "light") {
-      document.documentElement.dataset.theme = saved;
-      return saved;
+    const raw = localStorage.getItem("ff-ui");
+    if (raw) {
+      const p = JSON.parse(raw);
+      applyUiPrefs(p);
     }
   } catch {
     // ignorar
   }
-  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+/** Persiste tema/acento en backend y lo difunde a todas las ventanas (widget incluido). */
+export async function setUiPrefs(p: { theme?: string; accent?: string }) {
+  const theme = p.theme ?? (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  const accent =
+    p.accent ?? (getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB");
+  applyUiPrefs({ theme, accent });
+  if (!inTauri()) return;
+  try {
+    await invoke("ui_prefs_set", { theme, accent });
+  } catch (e) {
+    console.error("setUiPrefs", e);
+  }
+}
+
+export function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  setUiPrefs({ theme: next });
+}
+
+/** Aplica el tema/acento guardados (se llama en cada ventana al montar, antes del backend). */
+export function applySavedTheme() {
+  try {
+    const raw = localStorage.getItem("ff-ui");
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p.theme === "dark" || p.theme === "light") document.documentElement.dataset.theme = p.theme;
+      if (p.accent && /^#[0-9a-fA-F]{6}$/.test(p.accent)) {
+        document.documentElement.style.setProperty("--accent", p.accent);
+      }
+      return;
+    }
+  } catch {
+    // ignorar
+  }
+  try {
+    const saved = localStorage.getItem("ff-theme");
+    if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
+  } catch {
+    // ignorar
+  }
 }
 
 export const MONTHS_ES = [

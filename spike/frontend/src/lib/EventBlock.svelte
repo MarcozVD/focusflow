@@ -28,8 +28,8 @@
   } = $props();
 
   const c = $derived(cat(task.categoryId));
-  const compact = $derived(height < 34);
-  const tall = $derived(height >= 58);
+  const compact = $derived(height < 36);
+  const tall = $derived(height >= 62);
 
   function fmt(d: Date): string {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -99,12 +99,12 @@
   .evt {
     position: absolute;
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
-    border-left: 4px solid var(--c);
+    border-left: 3px solid var(--c);
     border-radius: var(--r-sm);
-    padding: 3px 7px;
+    padding: 4px 8px;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     overflow: hidden;
     z-index: 1;
     box-shadow: var(--shadow-inset-sm);
@@ -200,7 +200,7 @@
     position: absolute;
     left: 4px;
     right: 4px;
-    height: 8px;
+    height: 10px;
     cursor: ns-resize;
     opacity: 0;
     transition: opacity var(--dur-fast) var(--ease-out);
@@ -216,20 +216,24 @@
   .evt:hover .resize {
     opacity: 1;
   }
+  .resize:hover {
+    background: color-mix(in srgb, var(--c) 12%, transparent);
+  }
   .resize::after {
     content: "";
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 26px;
-    height: 4px;
+    width: 28px;
+    height: 3px;
     border-radius: var(--r-full);
-    background: color-mix(in srgb, var(--c) 65%, var(--text-1));
+    background: color-mix(in srgb, var(--c) 70%, var(--text-1));
+    box-shadow: var(--shadow-inset-sm);
   }
   .resize.top::after {
-    top: 1px;
+    top: 2px;
   }
   .resize.bottom::after {
-    bottom: 1px;
+    bottom: 2px;
   }
 </style>

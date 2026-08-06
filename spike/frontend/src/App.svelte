@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fade } from "svelte/transition";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import TitleBar from "./lib/TitleBar.svelte";
@@ -10,7 +11,7 @@
   import WidgetPage from "./lib/WidgetPage.svelte";
   import Suggestions from "./lib/Suggestions.svelte";
   import Settings from "./lib/Settings.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, ensureRange, taskDetail, openTaskDetail, applySavedTheme, tasks } from "./lib/data.svelte.ts";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, ensureRange, taskDetail, openTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
 
   let view = $state<"mes" | "semana" | "dia" | "agenda" | "sugerencias" | "ajustes">("semana");
@@ -26,6 +27,7 @@
     loadAiConfig();
     loadEmailConfig();
     loadSyncStatus();
+    loadUiPrefs();
     try {
       isWidget = getCurrentWindow().label === "widget";
       if (isWidget) document.documentElement.dataset.widget = "";
@@ -41,8 +43,8 @@
     listen("nav:agenda", () => {
       view = "agenda";
     });
-    listen("theme:changed", (e) => {
-      document.documentElement.dataset.theme = String(e.payload);
+    listen("ui:prefs", (e) => {
+      applyUiPrefs(e.payload as { theme?: string; accent?: string });
     });
   });
 
@@ -125,7 +127,11 @@
           </div>
         {:else}
           <div class="cal-wrap">
-            <Calendar {view} {date} onSelectDate={selectDate} />
+            {#key view + date.toDateString()}
+              <div transition:fade={{ duration: 160 }}>
+                <Calendar {view} {date} onSelectDate={selectDate} />
+              </div>
+            {/key}
           </div>
         {/if}
       </main>

@@ -47,3 +47,6 @@ desktop.ini
 .idea/
 .vscode/
 *.code-workspace
+
+# ---------- graphify (output generado) ----------
+graphify-out/

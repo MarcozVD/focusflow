@@ -2,16 +2,14 @@
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import Widget from "./Widget.svelte";
-  import { applySavedTheme, init } from "./data.svelte";
+  import { applySavedTheme, applyUiPrefs, init, loadUiPrefs } from "./data.svelte";
 
   onMount(() => {
     init();
     applySavedTheme();
-    const un = listen("theme:changed", (e) => {
-      const v = e.payload;
-      if (v === "dark" || v === "light") {
-        document.documentElement.dataset.theme = v;
-      }
+    loadUiPrefs();
+    const un = listen("ui:prefs", (e) => {
+      applyUiPrefs(e.payload as { theme?: string; accent?: string });
     });
     return () => {
       un.then((f) => f());

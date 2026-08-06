@@ -328,10 +328,12 @@ impl Db {
         Ok(())
     }
 
-    pub fn move_to(&self, id: i64, start_at: i64, end_at: i64) -> rusqlite::Result<()> {
+    pub fn move_to(&self, id: i64, start_at: i64, end_at: i64, all_day: Option<bool>) -> rusqlite::Result<()> {
         self.conn.execute(
-            "UPDATE tasks SET start_at = ?2, end_at = ?3, updated_at = ?4 WHERE id = ?1",
-            rusqlite::params![id, start_at, end_at, now_ms()],
+            "UPDATE tasks SET start_at = ?2, end_at = ?3,
+                    all_day = CASE WHEN ?5 IS NULL THEN all_day ELSE ?5 END,
+                    updated_at = ?4 WHERE id = ?1",
+            rusqlite::params![id, start_at, end_at, now_ms(), all_day],
         )?;
         Ok(())
     }
@@ -349,15 +351,18 @@ impl Db {
         notes: &str,
         links: &str,
         reminder_minutes: Option<i64>,
+        all_day: Option<bool>,
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE tasks SET title = ?2, category_id = ?3, priority = ?4,
                     start_at = ?5, end_at = ?6, description = ?7, tags = ?8, notes = ?9,
-                    links = ?10, reminder_minutes = ?11, updated_at = ?12
+                    links = ?10, reminder_minutes = ?11,
+                    all_day = CASE WHEN ?13 IS NULL THEN all_day ELSE ?13 END,
+                    updated_at = ?12
              WHERE id = ?1 AND deleted_at IS NULL",
             rusqlite::params![
                 id, title, category_id, priority, start_at, end_at,
-                description, tags, notes, links, reminder_minutes, now_ms()
+                description, tags, notes, links, reminder_minutes, now_ms(), all_day
             ],
         )?;
         Ok(())

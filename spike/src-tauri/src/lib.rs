@@ -122,6 +122,7 @@ fn task_move(
     id: i64,
     start_at: i64,
     end_at: i64,
+    all_day: Option<bool>,
 ) -> Result<(), String> {
     let db = state.lock().unwrap();
     // validación de conflictos configurables (solapamiento) antes de guardar
@@ -131,14 +132,14 @@ fn task_move(
         .flatten()
         .map(|v| v != "0")
         .unwrap_or(true);
-    if check_conflicts {
+    if check_conflicts && all_day != Some(true) {
         if let Some((_, other)) = db.find_overlap(id, start_at, end_at).map_err(|e| e.to_string())? {
             return Err(format!("conflicto: se solapa con '{other}'"));
         }
     }
-    db.move_to(id, start_at, end_at).map_err(|e| e.to_string())?;
+    db.move_to(id, start_at, end_at, all_day).map_err(|e| e.to_string())?;
     drop(db);
-    append_log(&app, &format!("task_moved id={id} start={start_at} end={end_at}"));
+    append_log(&app, &format!("task_moved id={id} start={start_at} end={end_at} all_day={all_day:?}"));
     let _ = app.emit("tasks:changed", ());
     Ok(())
 }
@@ -158,16 +159,17 @@ fn task_update(
     notes: String,
     links: String,
     reminder_minutes: Option<i64>,
+    all_day: bool,
 ) -> Result<(), String> {
     state
         .lock()
         .unwrap()
         .update_task_full(
             id, &title, &category_id, &priority, start_at, end_at,
-            &description, &tags, &notes, &links, reminder_minutes,
+            &description, &tags, &notes, &links, reminder_minutes, Some(all_day),
         )
         .map_err(|e| e.to_string())?;
-    append_log(&app, &format!("task_updated id={id} title={title}"));
+    append_log(&app, &format!("task_updated id={id} title={title} all_day={all_day}"));
     let _ = app.emit("tasks:changed", ());
     Ok(())
 }
@@ -570,7 +572,7 @@ fn suggestion_edit(
         .map_err(|e| e.to_string())?;
     // si la sugerencia ya fue aceptada, la tarea creada se mantiene en sincronía
     if let Some(task_id) = db.get_suggestion(id).ok().flatten().and_then(|s| s.result_task_id) {
-        let _ = db.update_task_full(task_id, &title, &category_id, &priority, start_at, end_at, "", "[]", "", "", None);
+        let _ = db.update_task_full(task_id, &title, &category_id, &priority, start_at, end_at, "", "[]", "", "", None, None);
     }
     drop(db);
     let _ = app.emit("tasks:changed", ());
@@ -598,7 +600,7 @@ fn suggestion_merge(
     let start = s.start_at.unwrap_or(existing.start_at);
     let end = s.end_at.unwrap_or(existing.end_at);
     let priority = if s.priority == "media" { existing.priority.clone() } else { s.priority.clone() };
-    db.update_task_full(task_id, &title, &s.category_id, &priority, start, end, "", "[]", "", "", None)
+    db.update_task_full(task_id, &title, &s.category_id, &priority, start, end, "", "[]", "", "", None, None)
         .map_err(|e| e.to_string())?;
     db.set_suggestion_status(id, "merged").map_err(|e| e.to_string())?;
     drop(db);
@@ -632,6 +634,7 @@ fn create_widget(app: &AppHandle) -> Result<(), String> {
         .resizable(true)
         .decorations(false)
         .transparent(true)
+        .always_on_top(true)
         .skip_taskbar(true)
         .build()
         .map_err(|e| e.to_string())?;
@@ -765,6 +768,45 @@ fn general_settings_set(
         &app,
         &format!("general_settings_set start_win={start_with_windows} minimized={start_minimized} tray={close_to_tray_widget}"),
     );
+    Ok(())
+}
+
+// ---------------- preferencias de UI (tema + acento) ----------------
+
+#[derive(Serialize, Clone)]
+struct UiPrefsView {
+    theme: String,
+    accent: String,
+}
+
+#[tauri::command]
+fn ui_prefs_get(state: State<'_, Mutex<Db>>) -> UiPrefsView {
+    let db = state.lock().unwrap();
+    UiPrefsView {
+        theme: db.settings_get("ui.theme").ok().flatten().unwrap_or_default(),
+        accent: db
+            .settings_get("ui.accent")
+            .ok()
+            .flatten()
+            .filter(|v| v.starts_with('#') && v.len() == 7)
+            .unwrap_or_else(|| "#2563EB".into()),
+    }
+}
+
+#[tauri::command]
+fn ui_prefs_set(app: AppHandle, state: State<'_, Mutex<Db>>, theme: String, accent: String) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    let theme = if theme == "light" || theme == "dark" { theme } else { String::new() };
+    let accent = if accent.starts_with('#') && accent.len() == 7 {
+        accent
+    } else {
+        "#2563EB".into()
+    };
+    db.settings_set("ui.theme", &theme).map_err(|e| e.to_string())?;
+    db.settings_set("ui.accent", &accent).map_err(|e| e.to_string())?;
+    drop(db);
+    append_log(&app, &format!("ui_prefs_set theme={theme:?} accent={accent}"));
+    let _ = app.emit("ui:prefs", UiPrefsView { theme, accent });
     Ok(())
 }
 
@@ -982,6 +1024,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             widget_set_height,
             general_settings_get,
             general_settings_set,
+            ui_prefs_get,
+            ui_prefs_set,
             open_app
         ])
         .setup(|app| {
@@ -996,6 +1040,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             db.settings_default("general.start_with_windows", "0").ok();
             db.settings_default("general.start_minimized", "0").ok();
             db.settings_default("general.close_to_tray_widget", "1").ok();
+            db.settings_default("ui.theme", "").ok();
+            db.settings_default("ui.accent", "#2563EB").ok();
             app.manage(Mutex::new(db));
 
             let show = MenuItem::with_id(&handle, "show", "Abrir FocusFlow", true, None::<&str>)?;

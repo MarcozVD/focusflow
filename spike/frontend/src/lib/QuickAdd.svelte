@@ -130,10 +130,10 @@
   .qa {
     display: flex;
     align-items: center;
-    gap: var(--s-3);
+    gap: 10px;
     background: var(--surface-3);
-    border-radius: 16px;
-    height: 48px;
+    border-radius: 15px;
+    height: 44px;
     padding: 0 var(--s-4);
     box-shadow: var(--shadow-inset);
     border: 1px solid var(--border);
@@ -144,7 +144,7 @@
     box-shadow: var(--shadow-inset), 0 0 0 3px var(--primary-soft);
   }
   .qa.expanded {
-    border-radius: 16px 16px 10px 10px;
+    border-radius: 15px 15px 10px 10px;
   }
   .bolt {
     color: var(--primary);
@@ -157,7 +157,7 @@
     border: none;
     background: transparent;
     outline: none;
-    font-size: 14px;
+    font-size: 13.5px;
     line-height: 1.4;
     color: var(--text-1);
     font-family: inherit;
@@ -165,16 +165,16 @@
   }
   input::placeholder {
     color: var(--text-3);
-    font-size: 13.5px;
+    font-size: 13px;
   }
   kbd {
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 600;
     font-family: inherit;
     color: var(--text-3);
     background: var(--surface);
-    border-radius: 8px;
-    padding: 3px 8px;
+    border-radius: 7px;
+    padding: 2px 7px;
     box-shadow: var(--e1);
     white-space: nowrap;
     flex-shrink: 0;
@@ -246,7 +246,7 @@
     align-items: center;
     gap: 8px;
     background: var(--surface);
-    border-left: 4px solid var(--success);
+    border-left: 3px solid var(--success);
     border-radius: var(--r-md);
     box-shadow: var(--e2);
     padding: 10px 18px;

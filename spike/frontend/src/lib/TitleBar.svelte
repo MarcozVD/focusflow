@@ -67,13 +67,14 @@
 
 <style>
   .titlebar {
-    height: 44px;
+    height: 42px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding-left: var(--s-4);
-    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    background: var(--surface);
+    box-shadow: 0 1px 0 var(--border), inset 0 1px 0 color-mix(in srgb, var(--surface-2) 70%, transparent);
     user-select: none;
     -webkit-app-region: drag;
     z-index: 40;

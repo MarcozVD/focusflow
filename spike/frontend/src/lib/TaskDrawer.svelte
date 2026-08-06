@@ -26,6 +26,7 @@
   let eReminder = $state("");
   let eNotes = $state("");
   let eLinks = $state("");
+  let eAllDay = $state(false);
   let saving = $state(false);
   let feedback = $state("");
   let confirmOpen = $state(false);
@@ -52,6 +53,7 @@
     eReminder = t.reminderMinutes != null ? String(t.reminderMinutes) : "";
     eNotes = t.notes ?? "";
     eLinks = (t.links ?? []).join(", ");
+    eAllDay = t.allDay ?? false;
     feedback = "";
   });
 
@@ -65,9 +67,17 @@
     const t = detail;
     if (!t) return;
     saving = true;
-    let startAt = at(eSDate, eSTime);
-    let endAt = at(eEDate, eETime);
-    if (endAt <= startAt) endAt = startAt + 3_600_000;
+    let startAt: number;
+    let endAt: number;
+    if (eAllDay) {
+      const [y, m, d] = eSDate.split("-").map(Number);
+      startAt = new Date(y, m - 1, d).getTime();
+      endAt = startAt;
+    } else {
+      startAt = at(eSDate, eSTime);
+      endAt = at(eEDate, eETime);
+      if (endAt <= startAt) endAt = startAt + 3_600_000;
+    }
     const r = await updateTaskDetail(t.id, {
       title: eTitle.trim() || t.title,
       description: eDesc,
@@ -75,6 +85,7 @@
       priority: ePrio,
       startAt,
       endAt,
+      allDay: eAllDay,
       tags: eTags.split(",").map((s) => s.trim()).filter(Boolean),
       notes: eNotes,
       links: eLinks.split(",").map((s) => s.trim()).filter(Boolean),
@@ -150,20 +161,24 @@
         </label>
       </div>
 
+      <label class="check" title="Sin hora fija: ocupa el día completo">
+        <input type="checkbox" bind:checked={eAllDay} />
+        Todo el día
+      </label>
       <div class="grid2">
         <label>Inicio — fecha
           <input type="date" bind:value={eSDate} />
         </label>
         <label>Inicio — hora
-          <input type="time" bind:value={eSTime} />
+          <input type="time" bind:value={eSTime} disabled={eAllDay} />
         </label>
       </div>
       <div class="grid2">
         <label>Fin — fecha
-          <input type="date" bind:value={eEDate} />
+          <input type="date" bind:value={eEDate} disabled={eAllDay} />
         </label>
         <label>Fin — hora
-          <input type="time" bind:value={eETime} />
+          <input type="time" bind:value={eETime} disabled={eAllDay} />
         </label>
       </div>
 
@@ -306,6 +321,25 @@
     color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+  label.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+    cursor: pointer;
+    padding: 2px 0;
+  }
+  label.check input {
+    width: auto;
+  }
+  input:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
   input,
   select,

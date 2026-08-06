@@ -34,9 +34,28 @@
 
   const days = $derived(view === "semana" ? weekDays(date) : [startOfDay(date)]);
 
-  const PX_HOUR = 56;
   const DEFAULT_START = 6;
   const DEFAULT_END = 22;
+
+  /**
+   * Altura real del área horaria medida con ResizeObserver → px por hora dinámico.
+   * La cuadrícula siempre llega al borde inferior de la ventana, sin huecos;
+   * en ventanas bajas el área nunca cae por debajo de su mínimo (28 px/hora)
+   * y el scroll aparece solo en `.week-body`.
+   */
+  let timeAreaH = $state(0);
+  $effect(() => {
+    const el = dayEls[0];
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      timeAreaH = el.clientHeight;
+    });
+    ro.observe(el);
+    timeAreaH = el.clientHeight;
+    return () => ro.disconnect();
+  });
+  const pxH = $derived(grid.hi > grid.lo && timeAreaH > 0 ? timeAreaH / (grid.hi - grid.lo) : 56);
+  const minTimeAreaH = $derived(hours.length * 28);
 
   /**
    * Franja horaria visible: por defecto 6:00–22:00.
@@ -74,12 +93,12 @@
   }
   function topOf(t: Task): number {
     const mins = t.start.getHours() * 60 + t.start.getMinutes();
-    return (mins - grid.lo * 60) * (PX_HOUR / 60);
+    return (mins - grid.lo * 60) * (pxH / 60);
   }
   function nowTop(): number {
     const n = new Date();
     const mins = n.getHours() * 60 + n.getMinutes();
-    return (mins - grid.lo * 60) * (PX_HOUR / 60);
+    return (mins - grid.lo * 60) * (pxH / 60);
   }
 
   /** Segmento de una tarea para un día concreto (multi-día → solo inicio/fin, ~2 h). */
@@ -162,11 +181,11 @@
         placed.push({
           t: it.t,
           seg: it.seg,
-          top: Math.max(0, (it.s - grid.lo * 60) * (PX_HOUR / 60)),
+          top: Math.max(0, (it.s - grid.lo * 60) * (pxH / 60)),
           height: Math.max(
             20,
-            Math.min((it.e - grid.lo * 60) * (PX_HOUR / 60), (grid.hi - grid.lo) * PX_HOUR) -
-              Math.max(0, (it.s - grid.lo * 60) * (PX_HOUR / 60)),
+            Math.min((it.e - grid.lo * 60) * (pxH / 60), (grid.hi - grid.lo) * pxH) -
+              Math.max(0, (it.s - grid.lo * 60) * (pxH / 60)),
           ),
           left: (ci / n) * 100,
           width: 100 / n,
@@ -174,6 +193,20 @@
       }
     }
     return placed.slice(0, maxCount);
+  }
+
+  /** Layouts por día cacheados: se calculan una vez por cambio de estado, no por render. */
+  const fullLayouts = $derived.by(() => {
+    const m = new Map<string, Placed[]>();
+    if (view === "mes") return m;
+    for (const d of days) m.set(d.toDateString(), layoutDay(d));
+    return m;
+  });
+
+  /** Layout visible (día → todos; semana → primeros 8 + botón "+N más"). */
+  function placedOf(d: Date): Placed[] {
+    const all = fullLayouts.get(d.toDateString()) ?? [];
+    return view === "dia" ? all : all.slice(0, 8);
   }
 
   function hourLabel(h: number): string {
@@ -214,12 +247,21 @@
   const visibleTopChipsOf = (d: Date) => topChipsOf(d).slice(0, 3);
   const restTopChipsOf = (d: Date) => Math.max(0, topChipsOf(d).length - 3);
 
+  /** Chips de mes: todo el día + multi-día en curso + tareas del día (sin duplicados). */
+  const monthChipsOf = (d: Date) => {
+    const seen = new Map<number, Task>();
+    for (const t of [...allDayOf(d), ...continuaOf(d), ...dayTasks(d)]) {
+      if (t.status !== "completada" && !seen.has(t.id)) seen.set(t.id, t);
+    }
+    return [...seen.values()];
+  };
+
   /** Borde inferior del último evento visible (para el botón "+N más"). */
   function lastShownBottom(d: Date): number {
-    const placed = layoutDay(d, 8);
-    if (placed.length === 0) return 8 * PX_HOUR;
-    const last = placed[placed.length - 1];
-    return Math.min(last.top + last.height + 4, 16 * PX_HOUR);
+    const placed = (fullLayouts.get(d.toDateString()) ?? []).slice(0, 8);
+    if (placed.length === 0) return (grid.hi - grid.lo) * pxH;
+    const last = Math.max(...placed.map((p) => p.top + p.height));
+    return Math.min(last + 4, (grid.hi - grid.lo) * pxH);
   }
 
   // ---- drag & drop + redimensionado ----
@@ -232,9 +274,11 @@
     curStart: number;
     curEnd: number;
     moved: boolean;
+    dropAllDay: boolean;
   }
   let drag = $state<DragState | null>(null);
   let dayEls: HTMLElement[] = [];
+  let alldayEls: HTMLElement[] = [];
   let toastMsg = $state("");
 
   let bodyEl: HTMLElement | null = $state(null);
@@ -245,17 +289,40 @@
     }
   });
 
-  function dayColAt(clientX: number): HTMLElement | null {
-    let found: HTMLElement | null = null;
+  /** Columna bajo el puntero usando el área horaria (ignora la fila de todo el día). */
+  function dayColAt(clientX: number, clientY: number): { el: HTMLElement; day: number } | null {
     for (const el of dayEls) {
       if (!el) continue;
       const r = el.getBoundingClientRect();
       if (clientX >= r.left && clientX < r.right) {
-        found = el;
-        break;
+        return { el, day: Number(el.dataset.day) };
       }
     }
-    return found;
+    // fuera de columnas pero dentro del cuerpo → día más cercano
+    const first = dayEls.find((x) => x);
+    if (first && clientY > first.getBoundingClientRect().top) {
+      let best: HTMLElement | null = null;
+      let bd = Infinity;
+      for (const el of dayEls) {
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const d = Math.abs((r.left + r.width / 2) - clientX);
+        if (d < bd) {
+          bd = d;
+          best = el;
+        }
+      }
+      if (best) return { el: best, day: Number(best.dataset.day) };
+    }
+    return null;
+  }
+
+  function alldayHitAt(day: number, clientY: number): boolean {
+    const i = days.findIndex((d) => dayStartOf(d) === day);
+    const el = alldayEls[i];
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return clientY >= r.top && clientY < r.bottom;
   }
 
   function onEventPointerDown(t: Task, mode: "move" | "resize-start" | "resize-end", e: PointerEvent) {
@@ -264,7 +331,7 @@
     e.preventDefault();
     const evtEl = e.currentTarget as HTMLElement;
     const rect = evtEl.getBoundingClientRect();
-    const grabMin = ((e.clientY - rect.top) / PX_HOUR) * 60;
+    const grabMin = ((e.clientY - rect.top) / pxH) * 60;
     drag = {
       task: t,
       mode,
@@ -274,6 +341,7 @@
       curStart: t.start.getTime(),
       curEnd: t.end.getTime(),
       moved: false,
+      dropAllDay: false,
     };
     const onMove = (ev: PointerEvent) => onDragMove(ev);
     const onUp = (ev: PointerEvent) => {
@@ -300,16 +368,28 @@
   function onDragMove(e: PointerEvent) {
     const d = drag;
     if (!d) return;
-    const col = dayColAt(e.clientX);
+    const col = dayColAt(e.clientX, e.clientY);
     if (!col) return;
-    const rect = col.getBoundingClientRect();
-    const colMs = Number(col.dataset.day);
+    const rect = col.el.getBoundingClientRect();
+    const colMs = col.day;
     const spanMin = (grid.hi - grid.lo) * 60;
-    let mins = ((e.clientY - rect.top) / PX_HOUR) * 60;
+    let mins = ((e.clientY - rect.top) / pxH) * 60;
     mins = Math.round(mins / 15) * 15;
     mins = Math.max(0, Math.min(mins, spanMin));
     const clampStart = colMs;
     const clampEnd = colMs + spanMin * 60_000;
+
+    // soltar en la fila "Todo el día" → convierte la tarea en de día completo
+    if (d.mode === "move" && alldayHitAt(colMs, e.clientY)) {
+      d.dropAllDay = true;
+      d.curStart = colMs;
+      d.curEnd = colMs;
+      if (Math.abs(d.curStart - d.startAt) > 60_000 || Math.abs(d.curEnd - d.endAt) > 60_000) {
+        d.moved = true;
+      }
+      return;
+    }
+    d.dropAllDay = false;
     if (d.mode === "move") {
       const dur = d.endAt - d.startAt;
       let ns = colMs + mins * 60_000 - d.grabMin * 60_000;
@@ -334,14 +414,15 @@
     const d = drag;
     if (!d) return;
     const moved = d.moved;
+    const dropAllDay = d.dropAllDay;
     const want = { start: d.curStart, end: d.curEnd };
     drag = null;
     if (moved) {
       suppressClick = true;
       setTimeout(() => (suppressClick = false), 0);
     }
-    if (!moved || want.start === d.startAt && want.end === d.endAt) return;
-    const r = await moveTask(d.task.id, want.start, want.end);
+    if (!moved || (want.start === d.startAt && want.end === d.endAt && !dropAllDay)) return;
+    const r = await moveTask(d.task.id, want.start, want.end, dropAllDay || undefined);
     if (!r.ok) {
       toastMsg = `No se pudo mover: ${r.error ?? "conflicto de horario"}`;
       setTimeout(() => (toastMsg = ""), 4000);
@@ -361,11 +442,11 @@
   );
   function ghostTop(): number {
     if (!drag || !ghostSeg) return 0;
-    return ((ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60) / 60) * PX_HOUR;
+    return ((ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60) / 60) * pxH;
   }
   function ghostHeight(): number {
     if (!drag || !ghostSeg) return 0;
-    return Math.max(26, (ghostSeg.end.getTime() - ghostSeg.start.getTime()) / 3_600_000 * PX_HOUR);
+    return Math.max(26, (ghostSeg.end.getTime() - ghostSeg.start.getTime()) / 3_600_000 * pxH);
   }
 </script>
 
@@ -386,7 +467,7 @@
         >
           <span class="daynum">{d.getDate()}</span>
           <div class="chips">
-            {#each dayTasks(d).slice(0, 3) as t (t.id)}
+            {#each monthChipsOf(d).slice(0, 3) as t (t.id)}
               <button
                 type="button"
                 class="minichip {t.status === 'completada' ? 'done' : ''}"
@@ -395,8 +476,12 @@
                 onclick={(e) => { e.stopPropagation(); openTaskDetail(t); }}
               >{t.title}</button>
             {/each}
-            {#if dayTasks(d).length > 3}
-              <span class="more">+{dayTasks(d).length - 3} más</span>
+            {#if monthChipsOf(d).length > 3}
+              <button
+                type="button"
+                class="more"
+                onclick={(e) => { e.stopPropagation(); popupDay = d; }}
+              >+{monthChipsOf(d).length - 3} más</button>
             {/if}
           </div>
         </div>
@@ -410,15 +495,15 @@
           <button class="pop-close" onclick={() => (popupDay = null)} aria-label="Cerrar">✕</button>
         </div>
         <div class="pop-list">
-          {#if dayTasks(popupDay).length === 0}
+          {#if dayTasks(popupDay).length === 0 && continuaOf(popupDay).length === 0}
             <p class="pop-empty">Sin tareas este día.</p>
           {/if}
-          {#each dayTasks(popupDay) as t (t.id)}
+          {#each monthChipsOf(popupDay) as t (t.id)}
             <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
               <span class="pop-dot"></span>
               <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{t.title}</span>
               <span class="pop-time">
-                {fmtTime(t.start)}–{fmtTime(t.end)}
+                {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
               </span>
             </button>
           {/each}
@@ -441,44 +526,54 @@
     <div class="week-body" bind:this={bodyEl} class:dragging={!!drag}>
       <div class="gutter">
         {#each hours as h}
-          <span class="hour" style="top: {(h - grid.lo) * PX_HOUR}px">{hourLabel(h)}</span>
+          <span class="hour" style="top: {(h - grid.lo) * pxH}px">{hourLabel(h)}</span>
         {/each}
       </div>
       {#each days as d, di (d.toDateString())}
-        <div
-          class="day-col {isToday(d) ? 'today' : ''}"
-          bind:this={dayEls[di]}
-          data-day={new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()}
-        >
-          {#if topChipsOf(d).length > 0}
-            <div class="allday-row">
-              <span class="allday-label">Todo el día</span>
-              {#each visibleTopChipsOf(d) as t (t.id)}
-                {#if t.allDay}
-                  <span class="allday-chip" style="--c: {cat(t.categoryId).color}" title={t.title}>{t.title}</span>
-                {:else}
-                  <span
-                    class="allday-chip cont"
-                    style="--c: {cat(t.categoryId).color}"
-                    title={`Continúa · ${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
-                  >⟳ {t.title}</span>
-                {/if}
-              {/each}
-              {#if restTopChipsOf(d) > 0}
-                <span class="allday-more">+{restTopChipsOf(d)}</span>
+        <div class="day-col {isToday(d) ? 'today' : ''}">
+          <div class="allday-row" bind:this={alldayEls[di]}>
+            <span class="allday-label">Todo el día</span>
+            {#each visibleTopChipsOf(d) as t (t.id)}
+              {#if t.allDay}
+                <button
+                  type="button"
+                  class="allday-chip"
+                  style="--c: {cat(t.categoryId).color}"
+                  title={t.title}
+                  onclick={() => openTaskDetail(t)}
+                >{t.title}</button>
+              {:else}
+                <button
+                  type="button"
+                  class="allday-chip cont"
+                  style="--c: {cat(t.categoryId).color}"
+                  title={`Continúa · ${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
+                  onclick={() => openTaskDetail(t)}
+                >⟳ {t.title}</button>
               {/if}
-            </div>
-          {/if}
-          <div class="time-area">
+            {/each}
+            {#if restTopChipsOf(d) > 0}
+              <span class="allday-more">+{restTopChipsOf(d)}</span>
+            {/if}
+            {#if drag && drag.dropAllDay && sameDay(d, new Date(drag.curStart))}
+              <span class="allday-chip ghost" style="--c: {cat(drag.task.categoryId).color}">{drag.task.title}</span>
+            {/if}
+          </div>
+          <div
+            class="time-area"
+            bind:this={dayEls[di]}
+            data-day={new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()}
+            style="min-height: {minTimeAreaH}px"
+          >
             <div class="slots">
-              {#each hours as h}
+              {#each hours.slice(0, -1) as h}
                 <div class="slot"></div>
               {/each}
             </div>
             {#if isToday(d) && nowInRange}
               <div class="now-line" style="top: {nowTop()}px"></div>
             {/if}
-            {#each layoutDay(d, view === "dia" ? 999 : 8) as p (p.t.id)}
+            {#each placedOf(d) as p (p.t.id)}
               <EventBlock
                 task={p.t}
                 seg={p.seg}
@@ -490,12 +585,12 @@
                 onClick={openFromCard}
               />
             {/each}
-            {#if view === "semana" && layoutDay(d).length > 8}
+            {#if view === "semana" && (fullLayouts.get(d.toDateString())?.length ?? 0) > 8}
               <button class="more-evts" style="top: {lastShownBottom(d)}px" onclick={() => onSelectDate(d)}>
-                +{layoutDay(d).length - 8} más
+                +{(fullLayouts.get(d.toDateString())?.length ?? 0) - 8} más
               </button>
             {/if}
-            {#if drag && sameDay(d, new Date(drag.curStart)) && ghostSeg}
+            {#if drag && !drag.dropAllDay && sameDay(d, new Date(drag.curStart)) && ghostSeg}
               <div
                 class="evt ghost {drag.mode}"
                 style="top: {ghostTop()}px; height: {ghostHeight()}px; left: 6px; right: 6px; --c: {cat(drag.task.categoryId).color}"
@@ -619,10 +714,20 @@
   }
   .more {
     font-size: 10px;
-    font-weight: 600;
-    color: var(--text-3);
-    padding: 0 4px;
+    font-weight: 700;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border: none;
+    border-radius: var(--r-full);
+    padding: 2px 8px;
     flex-shrink: 0;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-out);
+    align-self: flex-start;
+    font-family: inherit;
+  }
+  .more:hover {
+    background: var(--primary-soft-2);
   }
 
   /* popup del día (mes) */
@@ -833,13 +938,19 @@
     align-items: center;
     gap: 4px;
     padding: 5px 4px;
-    min-height: 26px;
+    min-height: 30px;
     border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
     flex-shrink: 0;
     overflow: hidden;
   }
+  .week-body.dragging .allday-row {
+    border-bottom-color: var(--primary-soft-2);
+    background: color-mix(in srgb, var(--primary-soft) 55%, var(--surface-2));
+  }
   .allday-label {
-    font-size: 9.5px;
+    font-size: 9px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -852,12 +963,27 @@
     font-weight: 600;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 14%, var(--surface));
+    border: none;
     border-radius: 7px;
     padding: 2px 7px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+    font-family: inherit;
+    cursor: pointer;
+    flex-shrink: 1;
+    min-width: 0;
+    transition: filter var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  }
+  .allday-chip:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+  .allday-chip.ghost {
+    pointer-events: none;
+    opacity: 0.55;
+    border-left: 2px dashed color-mix(in srgb, var(--c) 70%, transparent);
   }
   .allday-chip.cont {
     border: 1px dashed color-mix(in srgb, var(--c) 45%, transparent);
@@ -871,9 +997,12 @@
   .slots {
     position: absolute;
     inset: 0;
+    display: flex;
+    flex-direction: column;
   }
   .slot {
-    height: 56px;
+    flex: 1 1 0;
+    min-height: 28px;
     border-top: 1px solid var(--border);
     margin-left: 2px;
     margin-right: 2px;
@@ -901,7 +1030,7 @@
   .evt {
     position: absolute;
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
-    border-left: 4px solid var(--c);
+    border-left: 3px solid var(--c);
     border-radius: var(--r-sm);
     padding: 3px 7px;
     display: flex;

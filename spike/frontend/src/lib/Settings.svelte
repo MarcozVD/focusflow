@@ -18,7 +18,29 @@
     generalSettings,
     loadGeneralSettings,
     saveGeneralSettings,
+    setUiPrefs,
+    applySavedTheme,
   } from "./data.svelte";
+
+  const ACCENTS = ["#2563EB", "#7C3AED", "#EC4899", "#F59E0B", "#10B981", "#0EA5E9"];
+
+  let curTheme = $state("light");
+  let curAccent = $state("#2563EB");
+
+  $effect(() => {
+    curTheme = applySavedTheme() === "dark" ? "dark" : "light";
+    curAccent =
+      getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB";
+  });
+
+  function pickTheme(t: "light" | "dark") {
+    curTheme = t;
+    setUiPrefs({ theme: t });
+  }
+  function pickAccent(c: string) {
+    curAccent = c;
+    setUiPrefs({ accent: c });
+  }
 
   let saving = $state(false);
   let saved = $state("");
@@ -212,6 +234,34 @@
 
 <div class="set">
   <section>
+    <h2>Apariencia</h2>
+    <p class="hint">
+      El tema y el color de acento se guardan y se aplican a la vez en la app y en el widget.
+    </p>
+    <div class="row">
+      <button class="btn {curTheme === 'light' ? 'primary' : ''}" onclick={() => pickTheme("light")}>Claro</button>
+      <button class="btn {curTheme === 'dark' ? 'primary' : ''}" onclick={() => pickTheme("dark")}>Oscuro</button>
+    </div>
+    <div class="accents">
+      {#each ACCENTS as c}
+        <button
+          class="swatch {curAccent.toLowerCase() === c.toLowerCase() ? 'on' : ''}"
+          style="--sw: {c}"
+          onclick={() => pickAccent(c)}
+          aria-label={`Acento ${c}`}
+          title={c}
+        >
+          {#if curAccent.toLowerCase() === c.toLowerCase()}
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6.5L4.5 9L10 3" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          {/if}
+        </button>
+      {/each}
+    </div>
+  </section>
+
+  <section>
     <h2>Verificación rápida</h2>
     <p class="hint">
       Comprueba de golpe la conexión con la API de IA (OpenCode Zen) y con tu servidor de correo.
@@ -335,7 +385,7 @@
     <div class="row">
       <button class="btn primary" onclick={saveEmail} disabled={saving}>Guardar correo</button>
       <button class="btn primary-solid" onclick={syncNow} disabled={syncRunning()}>
-        {syncRunning() ? "Verificando…" : "Verificar ahora"}
+        {syncRunning() ? "Comprobando…" : "Comprobar ahora"}
       </button>
     </div>
 
@@ -568,6 +618,32 @@
     gap: 8px;
     flex-wrap: wrap;
     align-items: center;
+  }
+  .accents {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .swatch {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: var(--sw);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+    box-shadow: 0 2px 6px -2px color-mix(in srgb, var(--sw) 55%, transparent);
+  }
+  .swatch:hover {
+    transform: scale(1.12);
+  }
+  .swatch.on {
+    box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--sw);
+    transform: scale(1.08);
   }
   .btn {
     border: none;
