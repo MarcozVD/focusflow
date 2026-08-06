@@ -70,8 +70,7 @@
     border-radius: var(--r-md);
     box-shadow: var(--shadow-raised);
     padding: var(--s-3) var(--s-4);
-    border-left: 4px solid var(--accent);
-    border-left-color: var(--accent);
+    border-left: 3px solid var(--accent);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out),
       opacity var(--dur-base) var(--ease-out);
     cursor: pointer;

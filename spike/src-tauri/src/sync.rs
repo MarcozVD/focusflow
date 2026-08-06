@@ -67,9 +67,17 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sugerencia no encontrada".to_string())?;
-    let start = s.start_at.unwrap_or_else(|| email::now_ms() + 24 * 3_600_000);
-    let end = s.end_at.unwrap_or(start + 3_600_000);
-    let all_day = s.start_at.is_some() && s.end_at.is_some() && s.start_at == s.end_at;
+    // Sin hora de inicio → tarea de Todo el día (hoy), nunca una hora inventada.
+    let start = match s.start_at {
+        Some(ms) => ms,
+        None => {
+            let day = chrono::Local::now().date_naive();
+            let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+            day.and_time(midnight).and_utc().timestamp_millis()
+        }
+    };
+    let end = s.end_at.unwrap_or(start);
+    let all_day = s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at;
     let task = db
         .create(&s.title, &s.category_id, &s.priority, start, end, all_day)
         .map_err(|e| e.to_string())?;
@@ -122,6 +130,10 @@ fn process_email(
                     app,
                     &format!("email_not_relevant uid={} reason={}", raw.uid, parsed.reason),
                 );
+                return Ok(0);
+            }
+            if parsed.events.is_empty() {
+                crate::append_log(app, &format!("email_no_events uid={} reason={}", raw.uid, parsed.reason));
                 return Ok(0);
             }
             let mut count = 0;
@@ -353,6 +365,32 @@ fn notify_new_suggestions(app: &AppHandle, count: usize) {
 
 /// Lazo del scheduler: corre cada `interval_hours` horas en background.
 pub fn scheduler_loop(app: AppHandle) {
+    let prune_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // auto-archivo horario de sugerencias resueltas (retención 1 h por defecto)
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            let h = prune_app.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                let retention_min: i64 = with_db(&h, |db| {
+                    db.settings_get("email.suggestion_retention_minutes")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(60)
+                });
+                let pruned = with_db(&h, |db| {
+                    db.prune_suggestions(email::now_ms() - retention_min * 60_000)
+                });
+                match pruned {
+                    Ok(0) => {}
+                    Ok(n) => crate::append_log(&h, &format!("suggestions_pruned count={n}")),
+                    Err(e) => crate::append_log(&h, &format!("suggestions_prune_error: {e}")),
+                }
+            })
+            .await;
+        }
+    });
     tauri::async_runtime::spawn(async move {
         loop {
             let h = app.clone();
@@ -374,5 +412,3 @@ pub fn scheduler_loop(app: AppHandle) {
         }
     });
 }
-
-pub fn _used() {}

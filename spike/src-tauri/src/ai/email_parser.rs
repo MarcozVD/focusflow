@@ -9,7 +9,8 @@ Hoy es {fecha}.
 Reglas:
 - is_relevant: true solo si el correo contiene información de calendario concreta.
 - Extrae fecha y hora exactas (si el correo dice "el viernes" o "next week", calcula la fecha concreta).
-- Si no hay hora → 09:00. Duración por defecto 1 hora.
+- Si el correo NO indica hora → dejar start_time y end_time vacíos: el evento será de Todo el día. NUNCA inventar una hora (nada de 09:00 por defecto).
+- Si solo hay hora de inicio → duración de 1 hora.
 - category: Universidad, Trabajo, Personal, Finanzas, Salud u Otros.
 - confidence: 0.0-1.0 según claridad de la información.
 - events: vacío si no es relevante.

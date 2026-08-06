@@ -206,10 +206,6 @@
       <label>Enlaces
         <input type="text" bind:value={eLinks} placeholder="https://… (separados por coma)" />
       </label>
-
-      {#if detail.description}
-        <p class="hist-hint">Historial de cambios: próximamente.</p>
-      {/if}
     </div>
 
     <footer class="foot">
@@ -372,12 +368,6 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--s-3);
-  }
-  .hist-hint {
-    font-size: 11.5px;
-    color: var(--text-3);
-    margin: 0;
-    font-style: italic;
   }
   .foot {
     border-top: 1px solid var(--border);

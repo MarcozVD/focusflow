@@ -85,11 +85,17 @@
   {/if}
    <span
      class="resize top"
+     role="separator"
+     aria-orientation="vertical"
+     aria-label="Arrastrar para cambiar el inicio"
      onpointerdown={(e) => { e.stopPropagation(); onResizeStart(e); }}
      title="Arrastrar para cambiar inicio"
    ></span>
   <span
     class="resize bottom"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Arrastrar para cambiar el fin"
     onpointerdown={(e) => { e.stopPropagation(); onResizeEnd(e); }}
     title="Arrastrar para cambiar fin"
   ></span>

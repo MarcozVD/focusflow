@@ -52,5 +52,3 @@ pub fn provider_configured(cfg: &AiConfig) -> bool {
         || !super::default_endpoint().is_empty() && !cfg.model.is_empty()
         || !super::default_model().is_empty() && super::get_ai_key().is_some()
 }
-
-pub fn _unused() {}

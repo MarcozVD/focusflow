@@ -490,6 +490,15 @@ impl Db {
         Ok(())
     }
 
+    /// Auto-archiva (borra) sugerencias resueltas más antiguas que el corte.
+    pub fn prune_suggestions(&self, cutoff_ms: i64) -> rusqlite::Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM suggested_events WHERE status != 'pending' AND updated_at < ?1",
+            [cutoff_ms],
+        )?;
+        Ok(n)
+    }
+
     pub fn set_suggestion_result_task(&self, id: i64, task_id: i64) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE suggested_events SET result_task_id = ?2, updated_at = ?3 WHERE id = ?1",

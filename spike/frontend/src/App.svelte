@@ -11,7 +11,7 @@
   import WidgetPage from "./lib/WidgetPage.svelte";
   import Suggestions from "./lib/Suggestions.svelte";
   import Settings from "./lib/Settings.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, ensureRange, taskDetail, openTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks } from "./lib/data.svelte.ts";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
 
   let view = $state<"mes" | "semana" | "dia" | "agenda" | "sugerencias" | "ajustes">("semana");
@@ -57,6 +57,7 @@
   window.addEventListener("hashchange", () => (hash = window.location.hash));
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && hash === "#/widget") window.location.hash = "";
+    if (e.key === "Escape" && taskDetail()) closeTaskDetail();
   });
 
   function setView(v: "mes" | "semana" | "dia" | "agenda" | "sugerencias" | "ajustes") {

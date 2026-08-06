@@ -529,6 +529,7 @@ fn suggestion_accept(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Re
     let db = state.lock().unwrap();
     let task = sync::accept_suggestion(&db, id)?;
     drop(db);
+    append_log(&app, &format!("suggestion_accepted id={id} task={}", task.id));
     let _ = app.emit("tasks:changed", ());
     let _ = app.emit("email:new-suggestions", ());
     Ok(task)
@@ -541,6 +542,7 @@ fn suggestion_reject(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Re
         .unwrap()
         .set_suggestion_status(id, "rejected")
         .map_err(|e| e.to_string())?;
+    append_log(&app, &format!("suggestion_rejected id={id}"));
     let _ = app.emit("email:new-suggestions", ());
     Ok(())
 }
@@ -550,6 +552,7 @@ fn suggestion_revert(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Re
     let db = state.lock().unwrap();
     sync::revert_suggestion(&db, id)?;
     drop(db);
+    append_log(&app, &format!("suggestion_reverted id={id}"));
     let _ = app.emit("tasks:changed", ());
     let _ = app.emit("email:new-suggestions", ());
     Ok(())
@@ -566,13 +569,14 @@ fn suggestion_edit(
     start_at: i64,
     end_at: i64,
     description: String,
+    all_day: bool,
 ) -> Result<(), String> {
     let db = state.lock().unwrap();
     db.update_suggestion_data(id, &title, &category_id, &priority, start_at, end_at, &description)
         .map_err(|e| e.to_string())?;
     // si la sugerencia ya fue aceptada, la tarea creada se mantiene en sincronía
     if let Some(task_id) = db.get_suggestion(id).ok().flatten().and_then(|s| s.result_task_id) {
-        let _ = db.update_task_full(task_id, &title, &category_id, &priority, start_at, end_at, "", "[]", "", "", None, None);
+        let _ = db.update_task_full(task_id, &title, &category_id, &priority, start_at, end_at, "", "[]", "", "", None, Some(all_day));
     }
     drop(db);
     let _ = app.emit("tasks:changed", ());
@@ -1114,6 +1118,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             sync::scheduler_loop(handle.clone());
+            // prune inicial al arrancar: limpiar resoluciones viejas pendientes de archivar
+            {
+                let db = app.state::<Mutex<Db>>();
+                let db = db.lock().unwrap();
+                let retention_min: i64 = db
+                    .settings_get("email.suggestion_retention_minutes")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(60);
+                if let Ok(n) = db.prune_suggestions(email::now_ms() - retention_min * 60_000) {
+                    if n > 0 {
+                        append_log(&handle, &format!("suggestions_pruned_startup count={n}"));
+                    }
+                }
+            }
             test_hooks(handle.clone());
 
             {

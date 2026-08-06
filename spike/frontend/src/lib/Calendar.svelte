@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DAYS_ES, MONTHS_ES, tasks as tasksStore, cat, openTaskDetail, moveTask, type Task } from "./data.svelte";
+  import { DAYS_ES, tasks as tasksStore, cat, openTaskDetail, moveTask, type Task } from "./data.svelte";
   import EventBlock from "./EventBlock.svelte";
 
   let {
@@ -90,10 +90,6 @@
 
   function dayStartOf(d: Date): number {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  }
-  function topOf(t: Task): number {
-    const mins = t.start.getHours() * 60 + t.start.getMinutes();
-    return (mins - grid.lo * 60) * (pxH / 60);
   }
   function nowTop(): number {
     const n = new Date();

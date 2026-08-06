@@ -219,15 +219,27 @@ export function weekKeysBetween(from: Date, to: Date): string[] {
 }
 
 /** Garantiza que todas las semanas del rango estén cargadas (solo consulta las faltantes). */
+const MAX_CACHED_WEEKS = 64;
+
 export async function ensureRange(from: Date, to: Date) {
   store.lastRange = { from: from.getTime(), to: to.getTime() };
   const missing: string[] = [];
   for (const k of weekKeysBetween(from, to)) {
     if (!weekCache.has(k)) missing.push(k);
   }
-  if (missing.length === 0) return;
-  await Promise.all(missing.map(fetchWeek));
-  rebuildTasks();
+  if (missing.length > 0) {
+    await Promise.all(missing.map(fetchWeek));
+    rebuildTasks();
+  }
+  // memoria acotada: si el caché crece, se evictan las semanas fuera del rango visible
+  if (weekCache.size > MAX_CACHED_WEEKS) {
+    const visible = new Set(weekKeysBetween(from, to));
+    for (const k of [...weekCache.keys()]) {
+      if (weekCache.size <= MAX_CACHED_WEEKS) break;
+      if (!visible.has(k)) weekCache.delete(k);
+    }
+    rebuildTasks();
+  }
 }
 
 /** Recarga (fuerza refetch) las semanas del rango visible. */
@@ -760,7 +772,7 @@ export async function suggestionReject(id: number) {
 
 export async function suggestionEdit(
   id: number,
-  data: { title: string; categoryId: string; priority: string; startAt: number; endAt: number; description: string },
+  data: { title: string; categoryId: string; priority: string; startAt: number; endAt: number; description: string; allDay: boolean },
 ) {
   if (!inTauri()) return;
   try {

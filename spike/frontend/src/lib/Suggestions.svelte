@@ -69,6 +69,7 @@
       startAt,
       endAt,
       description: eDesc,
+      allDay: startAt === endAt,
     });
     editing = null;
   }

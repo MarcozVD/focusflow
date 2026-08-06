@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::AiError;
 
+use chrono::Timelike;
+
 pub fn extract_json(raw: &str) -> Option<serde_json::Value> {
     let trimmed = raw.trim();
     let cleaned = trimmed
@@ -127,15 +129,6 @@ pub fn naive_to_ms(date: chrono::NaiveDate, time: chrono::NaiveTime) -> i64 {
     dt.and_utc().timestamp_millis()
 }
 
-pub fn parse_date_ms(date: &str, time: &str) -> Option<i64> {
-    let d = parse_date(date)?;
-    let t = match parse_time(time) {
-        Some(t) => t,
-        None => chrono::NaiveTime::from_hms_opt(9, 0, 0)?,
-    };
-    Some(naive_to_ms(d, t))
-}
-
 const HOUR: i64 = 3_600_000;
 
 /// Construye una ParsedTask a partir del JSON devuelto por la IA.
@@ -189,15 +182,30 @@ pub fn validate_task_json(v: &serde_json::Value) -> Result<ParsedTask, AiError> 
 
     let start_time_raw = obj.get("start_time").and_then(|s| s.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let end_time_raw = obj.get("end_time").and_then(|s| s.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let all_day = start_time_raw.is_none() || end_time_raw.is_none();
+    // Una hora presente pero ilegible se trata como AUSENTE: nunca se inventa una hora
+    // arbitraria tipo 09:00. Sin hora de inicio → tarea de Todo el día.
+    let start_time = start_time_raw.as_ref().and_then(|s| parse_time(s));
+    let end_time = end_time_raw.as_ref().and_then(|s| parse_time(s));
+    let all_day = start_time.is_none();
 
-    let start_time = match &start_time_raw {
-        Some(s) => parse_time(s).unwrap_or(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
-        None => chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
-    };
-    let end_time = match &end_time_raw {
-        Some(s) => parse_time(s).unwrap_or(start_time),
-        None => start_time,
+    let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+    let start_time = start_time.unwrap_or(midnight);
+    let end_time = if all_day {
+        // sin hora de inicio: se ignora cualquier hora final residual → día completo
+        start_time
+    } else {
+        match end_time {
+            Some(t) => t,
+            // solo hay hora de inicio → duración de 1 hora (regla del prompt)
+            None => {
+                let h = start_time.hour() + 1;
+                if h >= 24 {
+                    chrono::NaiveTime::from_hms_opt(23, 59, 0).unwrap()
+                } else {
+                    chrono::NaiveTime::from_hms_opt(h, start_time.minute(), 0).unwrap()
+                }
+            }
+        }
     };
 
     let mut start_ms = naive_to_ms(start_date, start_time);
@@ -234,16 +242,17 @@ pub fn validate_email_json(v: &serde_json::Value) -> Result<EmailParseResult, Ai
     let obj = v
         .as_object()
         .ok_or_else(|| AiError::InvalidJson("la raíz debe ser un objeto".into()))?;
-    let is_relevant = obj.get("is_relevant").and_then(|b| b.as_bool()).unwrap_or(false);
+    let mut is_relevant = obj.get("is_relevant").and_then(|b| b.as_bool()).unwrap_or(false);
     let confidence = obj
         .get("confidence")
         .and_then(|c| c.as_f64())
         .map(|c| c.clamp(0.0, 1.0))
         .unwrap_or(0.0);
-    let reason = obj.get("reason").and_then(|r| r.as_str()).unwrap_or("").to_string();
+    let mut reason = obj.get("reason").and_then(|r| r.as_str()).unwrap_or("").to_string();
     let mut events = Vec::new();
     if let Some(arr) = obj.get("events").and_then(|e| e.as_array()) {
-        for ev in arr {
+        // cordura: nunca más de 5 eventos por correo
+        for ev in arr.iter().take(5) {
             let task = validate_task_json(ev)?;
             events.push(ParsedEvent {
                 title: task.title,
@@ -257,6 +266,14 @@ pub fn validate_email_json(v: &serde_json::Value) -> Result<EmailParseResult, Ai
                 tags: task.tags,
             });
         }
+    }
+    if is_relevant && events.is_empty() {
+        // "relevante" sin ningún evento extraíble → no es útil; se descarta como irrelevante
+        is_relevant = false;
+        if !reason.is_empty() {
+            reason.push_str(" ");
+        }
+        reason.push_str("(relevante pero sin eventos extraíbles)");
     }
     Ok(EmailParseResult {
         is_relevant,
