@@ -401,18 +401,18 @@
       const dur = d.endAt - d.startAt;
       // Borde superior del evento = cursor − punto de agarre (sin redondeo:
       // el evento sigue al cursor con precisión; el snap ocurre al soltar).
-      let startMin = (py - d.grabY) / pxH * 60;
-      startMin = Math.max(0, Math.min(startMin, spanMin - dur / 60_000));
+      let startMin = grid.lo * 60 + ((py - d.grabY) / pxH) * 60;
+      startMin = Math.max(grid.lo * 60, Math.min(startMin, grid.hi * 60 - dur / 60_000));
       d.curStart = clampStart + startMin * 60_000;
       d.curEnd = d.curStart + dur;
     } else if (d.mode === "resize-end") {
-      let endMin = (py / pxH) * 60;
-      endMin = Math.max((d.curStart - colMs) / 60_000 + 30, Math.min(endMin, spanMin));
+      let endMin = grid.lo * 60 + (py / pxH) * 60;
+      endMin = Math.max((d.curStart - colMs) / 60_000 + 30, Math.min(endMin, grid.hi * 60));
       d.curEnd = colMs + endMin * 60_000;
     } else {
-      let startMin = (py / pxH) * 60;
+      let startMin = grid.lo * 60 + (py / pxH) * 60;
       startMin = Math.min(startMin, (d.curEnd - colMs) / 60_000 - 30);
-      d.curStart = Math.max(clampStart, colMs + Math.max(0, startMin) * 60_000);
+      d.curStart = Math.max(clampStart, colMs + Math.max(grid.lo * 60, startMin) * 60_000);
     }
     if (Math.abs(d.curStart - d.startAt) > 60_000 || Math.abs(d.curEnd - d.endAt) > 60_000) {
       d.moved = true;
