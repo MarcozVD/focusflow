@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use chrono::TimeZone;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -73,7 +74,11 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         None => {
             let day = chrono::Local::now().date_naive();
             let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-            day.and_time(midnight).and_utc().timestamp_millis()
+            chrono::Local
+                .from_local_datetime(&day.and_time(midnight))
+                .earliest()
+                .map(|d| d.timestamp_millis())
+                .unwrap_or_else(|| day.and_time(midnight).and_utc().timestamp_millis())
         }
     };
     let end = s.end_at.unwrap_or(start);

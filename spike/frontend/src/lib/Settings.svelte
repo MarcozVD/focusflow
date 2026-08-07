@@ -295,6 +295,40 @@
       Proveedor intercambiable (OpenCode Zen, OpenAI, Anthropic, Gemini…). API compatible con
       chat completions. Las claves se guardan cifradas en Windows Credential Manager.
     </p>
+    <details class="guide">
+      <summary>Paso a paso: cómo sacar la clave de API</summary>
+      <ol class="steps">
+        <li>
+          Crea una cuenta en el proveedor de IA que quieras usar
+          (OpenAI: <code>platform.openai.com</code> · OpenCode Zen: <code>opencode.ai</code>).
+        </li>
+        <li>
+          Entra en <strong>API keys</strong>:
+          OpenAI → <code>platform.openai.com/api-keys</code> · OpenCode Zen → sección
+          <em>API keys</em> de tu panel.
+        </li>
+        <li>
+          Pulsa <strong>Create new secret key</strong> (o <em>Generate key</em>).
+        </li>
+        <li>
+          Ponle un nombre (por ejemplo «FocusFlow») y pulsa <strong>Crear</strong>.
+        </li>
+        <li>
+          <strong>Copia la clave</strong>: empieza por <code>sk-…</code> y solo se muestra
+          una vez. Si la pierdes, crea otra.
+        </li>
+        <li>
+          Pégala aquí en <em>Clave de API</em> y pulsa <strong>Guardar IA</strong>.
+        </li>
+        <li>
+          En <em>Endpoint</em> pon <code>https://api.openai.com/v1</code> (o el de tu proveedor)
+          y en <em>Modelo</em> uno válido (por ejemplo <code>gpt-4o-mini</code>).
+        </li>
+        <li>
+          Pulsa <strong>Probar conexión</strong> para confirmar que funciona.
+        </li>
+      </ol>
+    </details>
     <div class="grid">
       <label>Endpoint (base URL)
         <input type="text" bind:value={aiEndpoint} placeholder="https://…/v1" />
@@ -339,6 +373,43 @@
       La IA revisa los correos nuevos cada {emailInterval} h en segundo plano.
       Solo se revisan correos de los últimos {emailMaxAge} días (el avance queda registrado y no se repite).
     </p>
+    <details class="guide">
+      <summary>Paso a paso: cómo sacar la contraseña de aplicación (Gmail)</summary>
+      <ol class="steps">
+        <li>
+          Requisito: tu cuenta de Google debe tener la
+          <strong>verificación en 2 pasos</strong> activada
+          (<code>myaccount.google.com/security</code> → <em>Verificación en 2 pasos</em>).
+        </li>
+        <li>
+          Entra en <code>myaccount.google.com/apppasswords</code>
+          (te pedirá confirmar tu contraseña).
+        </li>
+        <li>
+          En <em>Nombre de la aplicación</em> escribe «FocusFlow» y pulsa <strong>Crear</strong>.
+        </li>
+        <li>
+          Google te muestra una <strong>contraseña de 16 letras</strong> (por ejemplo
+          <code>abcd efgh ijkl mnop</code>). Cópiala.
+        </li>
+        <li>
+          Pégala aquí en <em>Contraseña de aplicación</em> (los espacios no importan) y pulsa
+          <strong>Guardar correo</strong>.
+        </li>
+        <li>
+          Deja <em>Servidor IMAP</em> en <code>imap.gmail.com</code>, puerto <code>993</code> y
+          <em>SSL: Sí</em>.
+        </li>
+        <li>
+          Pulsa <strong>Comprobar ahora</strong> para verificar la conexión.
+        </li>
+      </ol>
+      <p class="hint">
+        ¿No usas Gmail? Outlook: <code>outlook.office365.com</code> con tu contraseña normal.
+        Universidades: usa el servidor IMAP que te den y, si piden contraseña de aplicación,
+        sácala del panel de tu institución.
+      </p>
+    </details>
     <label class="check">
       <input type="checkbox" bind:checked={emailEnabled} />
       Revisar correo automáticamente
@@ -581,6 +652,38 @@
     font-size: 12.5px;
     color: var(--text-3);
     line-height: 1.5;
+  }
+  .guide {
+    margin: 6px 0 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    padding: 8px 12px;
+    font-size: 12.5px;
+  }
+  .guide summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-2);
+    user-select: none;
+  }
+  .guide summary:hover {
+    color: var(--primary);
+  }
+  .steps {
+    margin: 8px 0 4px;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    color: var(--text-1);
+    line-height: 1.45;
+  }
+  .steps code {
+    background: var(--surface-3);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11.5px;
   }
   .grid {
     display: grid;

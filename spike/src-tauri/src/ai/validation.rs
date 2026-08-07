@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AiError;
 
-use chrono::Timelike;
+use chrono::{TimeZone, Timelike};
 
 pub fn extract_json(raw: &str) -> Option<serde_json::Value> {
     let trimmed = raw.trim();
@@ -124,9 +124,16 @@ fn parse_time(s: &str) -> Option<chrono::NaiveTime> {
     None
 }
 
+/// Convierte fecha/hora LOCAL (la que devuelve la IA: "20:00" = 8pm de la
+/// zona del usuario) a milisegundos. Antes se interpretaba como UTC y la
+/// tarea quedaba desplazada (8pm → 3pm con UTC-5).
 pub fn naive_to_ms(date: chrono::NaiveDate, time: chrono::NaiveTime) -> i64 {
     let dt = date.and_time(time);
-    dt.and_utc().timestamp_millis()
+    chrono::Local
+        .from_local_datetime(&dt)
+        .earliest()
+        .map(|d| d.timestamp_millis())
+        .unwrap_or_else(|| dt.and_utc().timestamp_millis())
 }
 
 const HOUR: i64 = 3_600_000;
@@ -168,7 +175,8 @@ pub fn validate_task_json(v: &serde_json::Value) -> Result<ParsedTask, AiError> 
         .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
-    let now = chrono::Utc::now().date_naive();
+    // "hoy" en la zona del usuario, no en UTC: la IA genera la fecha local.
+    let now = chrono::Local::now().date_naive();
     let start_date = obj
         .get("start_date")
         .and_then(|s| s.as_str())

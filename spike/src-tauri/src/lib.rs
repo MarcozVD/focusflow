@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::TimeZone;
 use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -506,12 +507,11 @@ struct SyncStatusView {
 fn sync_status(state: State<'_, Mutex<Db>>) -> SyncStatusView {
     let db = state.lock().unwrap();
     let now = chrono::Local::now();
-    let start_of_day = now
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc()
-        .timestamp_millis();
+    let start_of_day = chrono::Local
+        .from_local_datetime(&now.date_naive().and_hms_opt(0, 0, 0).unwrap())
+        .earliest()
+        .map(|d| d.timestamp_millis())
+        .unwrap_or_else(|| now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
     let today = db.sync_history_today(start_of_day).unwrap_or_default();
     let last_history = db.sync_history_last(10).unwrap_or_default();
     let last_sync_at = last_history.first().map(|h| h.started_at);

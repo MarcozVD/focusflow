@@ -1,5 +1,7 @@
 use super::validation::ParsedTask;
 
+use chrono::TimeZone;
+
 const HOUR: i64 = 3_600_000;
 const DAY: i64 = 24 * HOUR;
 
@@ -102,6 +104,16 @@ fn parse_hora(text: &str) -> Option<(u32, u32)> {
     None
 }
 
+/// Fecha/hora naive LOCAL → ms (la hora del usuario, no UTC: `.and_utc()`
+/// desplazaba las tareas según la zona horaria).
+fn local_ms(dt: chrono::NaiveDateTime) -> i64 {
+    chrono::Local
+        .from_local_datetime(&dt)
+        .earliest()
+        .map(|d| d.timestamp_millis())
+        .unwrap_or_else(|| dt.and_utc().timestamp_millis())
+}
+
 /// Calcula el día de inicio en ms.
 fn parse_day(text: &str) -> Option<i64> {
     let now = chrono::Local::now();
@@ -109,13 +121,13 @@ fn parse_day(text: &str) -> Option<i64> {
     let lower = text.to_lowercase();
 
     if lower.contains("pasado mañana") || lower.contains("pasado manana") {
-        return Some((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+        return Some(local_ms((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap()));
     }
     if lower.contains("mañana") || lower.contains("manana") {
-        return Some((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+        return Some(local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap()));
     }
     if lower.contains("hoy") {
-        return Some(today.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+        return Some(local_ms(today.and_hms_opt(0, 0, 0).unwrap()));
     }
 
     // "el 15" / "el día 15" → próximo día 15 (o mes siguiente si ya pasó)
@@ -130,7 +142,7 @@ fn parse_day(text: &str) -> Option<i64> {
                 let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
                 chrono::NaiveDate::from_ymd_opt(ny, nm, d)?
             };
-            return Some(candidate.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+            return Some(local_ms(candidate.and_hms_opt(0, 0, 0).unwrap()));
         }
     }
 
@@ -138,7 +150,7 @@ fn parse_day(text: &str) -> Option<i64> {
     for t in lower.split_whitespace() {
         if let Some(wd) = weekday_from_name(t) {
             let delta = weekday_delta(wd);
-            return Some((today + chrono::Duration::days(delta)).and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+            return Some(local_ms((today + chrono::Duration::days(delta)).and_hms_opt(0, 0, 0).unwrap()));
         }
     }
     None
@@ -155,7 +167,7 @@ pub fn parse_task_nl(text: &str) -> Option<ParsedTask> {
     let day_ms = parse_day(&lower).unwrap_or_else(|| {
         // por defecto mañana
         let today = chrono::Local::now().date_naive();
-        (today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis()
+        local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
     });
 
     let (start_min, end_min, all_day) = match parse_hora(&lower) {
