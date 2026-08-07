@@ -80,6 +80,7 @@ export interface GeneralSettingsView {
   start_with_windows: boolean;
   start_minimized: boolean;
   close_to_tray_widget: boolean;
+  conflict_strict: boolean;
   autostart_actual: boolean;
 }
 
@@ -104,6 +105,8 @@ const store = $state({
   syncToday: [] as SyncHistoryRow[],
   lastSyncAt: null as number | null,
   nextSyncAt: null as number | null,
+  theme: "" as "" | "light" | "dark",
+  accent: "#2563EB",
 });
 
 export const tasks = () => store.tasks;
@@ -126,6 +129,8 @@ export const generalSettings = () => store.general;
 export const syncToday = () => store.syncToday;
 export const lastSyncAt = () => store.lastSyncAt;
 export const nextSyncAt = () => store.nextSyncAt;
+export const uiTheme = () => store.theme;
+export const uiAccent = () => store.accent;
 
 export function openTaskDetail(t: Task) {
   store.taskDetail = t;
@@ -395,9 +400,15 @@ export async function completeTask(id: number) {
   t.progress = done ? 100 : t.progress;
 }
 
+/** El widget y la ventana principal montan App + WidgetPage: los listeners
+ *  de eventos solo se registran una vez por proceso. */
+let listenersReady = false;
+
 export async function init() {
   await initTasks();
   if (!inTauri()) return;
+  if (listenersReady) return;
+  listenersReady = true;
   try {
     await listen("tasks:changed", () => {
       refreshTasks();
@@ -504,6 +515,10 @@ export interface SyncHistoryRow {
   note: string;
 }
 
+export interface TaskMoveResult {
+  conflict: string | null;
+}
+
 export interface TaskFromTextResult {
   task: {
     id: number;
@@ -589,6 +604,7 @@ export async function saveGeneralSettings(v: {
   startWithWindows: boolean;
   startMinimized: boolean;
   closeToTrayWidget: boolean;
+  conflictStrict: boolean;
 }): Promise<{ ok: boolean; error?: string }> {
   if (!inTauri()) return { ok: true };
   try {
@@ -596,6 +612,7 @@ export async function saveGeneralSettings(v: {
       startWithWindows: v.startWithWindows,
       startMinimized: v.startMinimized,
       closeToTrayWidget: v.closeToTrayWidget,
+      conflictStrict: v.conflictStrict,
     });
     store.general = { ...v, autostart_actual: v.startWithWindows };
     return { ok: true };
@@ -604,7 +621,12 @@ export async function saveGeneralSettings(v: {
   }
 }
 
+/** Contador de solicitudes de lenguaje natural: la última solicitud gana
+ *  y las respuestas antiguas se descartan (cancelación de la pendiente). */
+let nlReqId = 0;
+
 export async function createTaskFromText(text: string): Promise<{ ok: boolean; source: string; error?: string }> {
+  const myId = ++nlReqId;
   if (!inTauri()) {
     store.tasks.push({
       id: Math.max(0, ...store.tasks.map((x) => x.id)) + 1,
@@ -620,13 +642,15 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
   store.nlBusy = true;
   try {
     const r = await invoke<TaskFromTextResult>("task_from_text", { text });
+    if (myId !== nlReqId) return { ok: false, source: "stale", error: "cancelada" };
     putInCache(toTask(r.task));
     rebuildTasks();
     return { ok: true, source: r.source };
   } catch (e) {
+    if (myId !== nlReqId) return { ok: false, source: "stale", error: "cancelada" };
     return { ok: false, source: "error", error: String(e) };
   } finally {
-    store.nlBusy = false;
+    if (myId === nlReqId) store.nlBusy = false;
   }
 }
 
@@ -692,16 +716,17 @@ export async function updateTaskDetail(id: number, data: TaskEditData): Promise<
   }
 }
 
-/** Mueve/redimensiona una tarea (drag & drop). Valida conflictos en el backend. */
+/** Mueve/redimensiona una tarea (drag & drop). El backend valida conflictos
+ *  de horario: por defecto avisa sin impedir; en modo estricto devuelve error. */
 export async function moveTask(
   id: number,
   startAt: number,
   endAt: number,
   allDay?: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; conflict?: string }> {
   if (!inTauri()) return { ok: true };
   try {
-    await invoke("task_move", {
+    const r = await invoke<TaskMoveResult>("task_move", {
       id,
       startAt: Math.round(startAt),
       endAt: Math.round(endAt),
@@ -717,7 +742,7 @@ export async function moveTask(
       rebuildTasks();
       if (store.taskDetail?.id === id) store.taskDetail = moved;
     }
-    return { ok: true };
+    return { ok: true, conflict: r.conflict ?? undefined };
   } catch (e) {
     const msg = String(e);
     const m = msg.match(/conflicto: se solapa con '(.*)'/);
@@ -844,18 +869,18 @@ export interface UiPrefs {
 export function applyUiPrefs(p: { theme?: string; accent?: string }) {
   if (p.theme === "dark" || p.theme === "light") {
     document.documentElement.dataset.theme = p.theme;
+    store.theme = p.theme;
   }
   if (p.accent && /^#[0-9a-fA-F]{6}$/.test(p.accent)) {
     document.documentElement.style.setProperty("--accent", p.accent);
+    store.accent = p.accent;
   }
   try {
     localStorage.setItem(
       "ff-ui",
       JSON.stringify({
-        theme: p.theme ?? document.documentElement.dataset.theme,
-        accent:
-          p.accent ??
-          (getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB"),
+        theme: p.theme ?? (store.theme || "light"),
+        accent: p.accent ?? store.accent,
       }),
     );
   } catch {
@@ -887,9 +912,8 @@ export async function loadUiPrefs() {
 
 /** Persiste tema/acento en backend y lo difunde a todas las ventanas (widget incluido). */
 export async function setUiPrefs(p: { theme?: string; accent?: string }) {
-  const theme = p.theme ?? (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
-  const accent =
-    p.accent ?? (getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB");
+  const theme = p.theme ?? store.theme;
+  const accent = p.accent ?? store.accent;
   applyUiPrefs({ theme, accent });
   if (!inTauri()) return;
   try {
@@ -900,31 +924,40 @@ export async function setUiPrefs(p: { theme?: string; accent?: string }) {
 }
 
 export function toggleTheme() {
-  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  const next = store.theme === "dark" ? "light" : "dark";
   setUiPrefs({ theme: next });
 }
 
-/** Aplica el tema/acento guardados (se llama en cada ventana al montar, antes del backend). */
-export function applySavedTheme() {
+/** Aplica el tema/acento guardados (se llama en cada ventana al montar, antes del backend).
+ *  Devuelve el tema resuelto: el selector y la UI derivan siempre del mismo estado. */
+export function applySavedTheme(): "" | "light" | "dark" {
+  let theme: "" | "light" | "dark" = "";
   try {
     const raw = localStorage.getItem("ff-ui");
     if (raw) {
       const p = JSON.parse(raw);
-      if (p.theme === "dark" || p.theme === "light") document.documentElement.dataset.theme = p.theme;
+      if (p.theme === "dark" || p.theme === "light") theme = p.theme;
       if (p.accent && /^#[0-9a-fA-F]{6}$/.test(p.accent)) {
         document.documentElement.style.setProperty("--accent", p.accent);
+        store.accent = p.accent;
       }
-      return;
     }
   } catch {
     // ignorar
   }
-  try {
-    const saved = localStorage.getItem("ff-theme");
-    if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
-  } catch {
-    // ignorar
+  if (!theme) {
+    try {
+      const saved = localStorage.getItem("ff-theme");
+      if (saved === "dark" || saved === "light") theme = saved;
+    } catch {
+      // ignorar
+    }
   }
+  if (theme) {
+    document.documentElement.dataset.theme = theme;
+    store.theme = theme;
+  }
+  return theme;
 }
 
 export const MONTHS_ES = [

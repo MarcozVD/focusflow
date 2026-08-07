@@ -266,7 +266,10 @@
     mode: "move" | "resize-start" | "resize-end";
     startAt: number;
     endAt: number;
-    grabMin: number;
+    /** Desfase del agarre en PÍXELES (cursor − borde superior del evento).
+     *  Se guarda en píxeles para que el punto de agarre se conserve exacto
+     *  aunque pxH cambie durante el arrastre (redimensionado de ventana). */
+    grabY: number;
     curStart: number;
     curEnd: number;
     moved: boolean;
@@ -327,13 +330,15 @@
     e.preventDefault();
     const evtEl = e.currentTarget as HTMLElement;
     const rect = evtEl.getBoundingClientRect();
-    const grabMin = ((e.clientY - rect.top) / pxH) * 60;
+    // Punto de agarre en píxeles: el evento NO se mueve al iniciar, el cursor
+    // conserva exactamente la misma posición relativa durante todo el arrastre.
+    const grabY = e.clientY - rect.top;
     drag = {
       task: t,
       mode,
       startAt: t.start.getTime(),
       endAt: t.end.getTime(),
-      grabMin,
+      grabY,
       curStart: t.start.getTime(),
       curEnd: t.end.getTime(),
       moved: false,
@@ -366,14 +371,20 @@
     if (!d) return;
     const col = dayColAt(e.clientX, e.clientY);
     if (!col) return;
+    const body = bodyEl;
+    if (body) {
+      const br = body.getBoundingClientRect();
+      const edge = 28;
+      if (e.clientY < br.top + edge) body.scrollTop -= 14;
+      else if (e.clientY > br.bottom - edge) body.scrollTop += 14;
+    }
     const rect = col.el.getBoundingClientRect();
     const colMs = col.day;
-    const spanMin = (grid.hi - grid.lo) * 60;
-    let mins = ((e.clientY - rect.top) / pxH) * 60;
-    mins = Math.round(mins / 15) * 15;
-    mins = Math.max(0, Math.min(mins, spanMin));
+    // Posición del cursor dentro de la columna, en píxeles y en minutos.
+    // La conversión píxel → minuto usa grid.lo como referencia (igual que el
+    // render): el borde superior de la cuadrícula es grid.lo, no medianoche.
+    const py = e.clientY - rect.top;
     const clampStart = colMs;
-    const clampEnd = colMs + spanMin * 60_000;
 
     // soltar en la fila "Todo el día" → convierte la tarea en de día completo
     if (d.mode === "move" && alldayHitAt(colMs, e.clientY)) {
@@ -388,18 +399,20 @@
     d.dropAllDay = false;
     if (d.mode === "move") {
       const dur = d.endAt - d.startAt;
-      let ns = colMs + mins * 60_000 - d.grabMin * 60_000;
-      ns = Math.max(clampStart, Math.min(ns, clampEnd - dur));
-      d.curStart = ns;
-      d.curEnd = ns + dur;
+      // Borde superior del evento = cursor − punto de agarre (sin redondeo:
+      // el evento sigue al cursor con precisión; el snap ocurre al soltar).
+      let startMin = (py - d.grabY) / pxH * 60;
+      startMin = Math.max(0, Math.min(startMin, spanMin - dur / 60_000));
+      d.curStart = clampStart + startMin * 60_000;
+      d.curEnd = d.curStart + dur;
     } else if (d.mode === "resize-end") {
-      let ne = colMs + mins * 60_000;
-      ne = Math.max(d.curStart + 30 * 60_000, Math.min(ne, clampEnd));
-      d.curEnd = ne;
+      let endMin = (py / pxH) * 60;
+      endMin = Math.max((d.curStart - colMs) / 60_000 + 30, Math.min(endMin, spanMin));
+      d.curEnd = colMs + endMin * 60_000;
     } else {
-      let ns = colMs + mins * 60_000;
-      ns = Math.min(ns, d.curEnd - 30 * 60_000);
-      d.curStart = Math.max(clampStart, ns);
+      let startMin = (py / pxH) * 60;
+      startMin = Math.min(startMin, (d.curEnd - colMs) / 60_000 - 30);
+      d.curStart = Math.max(clampStart, colMs + Math.max(0, startMin) * 60_000);
     }
     if (Math.abs(d.curStart - d.startAt) > 60_000 || Math.abs(d.curEnd - d.endAt) > 60_000) {
       d.moved = true;
@@ -411,7 +424,20 @@
     if (!d) return;
     const moved = d.moved;
     const dropAllDay = d.dropAllDay;
-    const want = { start: d.curStart, end: d.curEnd };
+    // El snap a 5 minutos ocurre al soltar, nunca durante el arrastre:
+    // así el evento sigue al cursor sin saltos y solo se redondea al persistir.
+    let start = d.curStart;
+    let end = d.curEnd;
+    const dur = d.endAt - d.startAt;
+    if (d.mode === "move") {
+      start = Math.round(start / 300_000) * 300_000;
+      end = start + dur;
+    } else if (d.mode === "resize-end") {
+      end = Math.max(start + 30 * 60_000, Math.round(end / 300_000) * 300_000);
+    } else {
+      start = Math.min(end - 30 * 60_000, Math.round(start / 300_000) * 300_000);
+    }
+    const want = { start, end };
     drag = null;
     if (moved) {
       suppressClick = true;
@@ -421,6 +447,9 @@
     const r = await moveTask(d.task.id, want.start, want.end, dropAllDay || undefined);
     if (!r.ok) {
       toastMsg = `No se pudo mover: ${r.error ?? "conflicto de horario"}`;
+      setTimeout(() => (toastMsg = ""), 4000);
+    } else if (r.conflict) {
+      toastMsg = `Movida con aviso: se solapa con «${r.conflict}»`;
       setTimeout(() => (toastMsg = ""), 4000);
     }
   }
@@ -438,11 +467,18 @@
   );
   function ghostTop(): number {
     if (!drag || !ghostSeg) return 0;
-    return ((ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60) / 60) * pxH;
+    const mins = ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60;
+    return Math.max(0, mins * (pxH / 60));
   }
+  /** Mismas métricas que layoutDay: el fantasma coincide exactamente con el original. */
   function ghostHeight(): number {
     if (!drag || !ghostSeg) return 0;
-    return Math.max(26, (ghostSeg.end.getTime() - ghostSeg.start.getTime()) / 3_600_000 * pxH);
+    const spanPx = (grid.hi - grid.lo) * pxH;
+    const sMin = ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60;
+    const eMin = ghostSeg.end.getHours() * 60 + ghostSeg.end.getMinutes() - grid.lo * 60;
+    const topPx = Math.max(0, sMin * (pxH / 60));
+    const bottomPx = Math.min(eMin * (pxH / 60), spanPx);
+    return Math.max(20, bottomPx - topPx);
   }
 </script>
 
@@ -521,9 +557,12 @@
     </div>
     <div class="week-body" bind:this={bodyEl} class:dragging={!!drag}>
       <div class="gutter">
-        {#each hours as h}
-          <span class="hour" style="top: {(h - grid.lo) * pxH}px">{hourLabel(h)}</span>
-        {/each}
+        <div class="allday-spacer"></div>
+        <div class="hours-area">
+          {#each hours as h}
+            <span class="hour" style="top: {(h - grid.lo) * pxH}px">{hourLabel(h)}</span>
+          {/each}
+        </div>
       </div>
       {#each days as d, di (d.toDateString())}
         <div class="day-col {isToday(d) ? 'today' : ''}">
@@ -900,6 +939,21 @@
     width: 56px;
     flex-shrink: 0;
     position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Espejo de la fila "Todo el día" para que las etiquetas de hora queden
+     alineadas con la cuadrícula (mismas medidas que .allday-row). */
+  .allday-spacer {
+    flex-shrink: 0;
+    min-height: 30px;
+    padding: 5px 4px;
+    border-bottom: 1px solid transparent;
+  }
+  .hours-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
   }
   .hour {
     position: absolute;
@@ -1055,6 +1109,7 @@
     border-left-style: dashed;
     z-index: 4;
     transition: none;
+    will-change: top, height;
   }
   .drag-toast {
     position: absolute;
@@ -1076,6 +1131,15 @@
   .week-body.dragging .day-col,
   .week-body.dragging .evt {
     cursor: grabbing;
+  }
+  /* Durante el arrastre: sin hover transform (desfasaría el punto de agarre)
+     y original atenuado para que el fantasma sea la única referencia visual. */
+  :global(.week-body.dragging .evt) {
+    transform: none !important;
+    transition: none;
+  }
+  :global(.week-body.dragging .evt:not(.ghost)) {
+    opacity: 0.3;
   }
   .evt.inicio,
   .evt.fin {

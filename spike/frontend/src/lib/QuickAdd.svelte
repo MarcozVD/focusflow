@@ -57,9 +57,10 @@
   }
 
   async function confirm() {
-    if (!text.trim() || nlBusy()) return;
+    if (!text.trim()) return;
     const input = text;
     const r = await createTaskFromText(input);
+    if (r.source === "stale") return;
     if (r.ok) {
       flashText =
         r.source === "ai"
@@ -108,7 +109,9 @@
           <span class="chip" style="--c: {d.color}">{d.label}</span>
         {/each}
       </div>
-      <button class="create" onclick={confirm} disabled={nlBusy()}>Crear tarea</button>
+      <button class="create" onclick={confirm}>
+        {nlBusy() ? "Procesando…" : "Crear tarea"}
+      </button>
     </div>
   {/if}
 

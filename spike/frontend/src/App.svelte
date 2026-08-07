@@ -34,18 +34,23 @@
     } catch {
       // navegador
     }
-    listen("task:open", (e) => {
+    const un1 = listen("task:open", (e) => {
       const id = Number(e.payload);
       const t = tasks().find((x) => x.id === id);
       if (t) openTaskDetail(t);
       else refreshAndOpen(id);
     });
-    listen("nav:agenda", () => {
+    const un2 = listen("nav:agenda", () => {
       view = "agenda";
     });
-    listen("ui:prefs", (e) => {
+    const un3 = listen("ui:prefs", (e) => {
       applyUiPrefs(e.payload as { theme?: string; accent?: string });
     });
+    return () => {
+      un1.then((f) => f());
+      un2.then((f) => f());
+      un3.then((f) => f());
+    };
   });
 
   async function refreshAndOpen(id: number) {

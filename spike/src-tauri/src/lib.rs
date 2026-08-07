@@ -19,7 +19,7 @@ pub mod email;
 mod store;
 pub mod sync;
 
-use ai::AiConfig;
+use ai::{validation::ParsedTask, AiConfig};
 use store::{Db, TaskRow};
 
 pub(crate) fn log_dir() -> PathBuf {
@@ -115,6 +115,11 @@ fn task_delete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(
     Ok(())
 }
 
+#[derive(Serialize)]
+struct TaskMoveResult {
+    conflict: Option<String>,
+}
+
 #[tauri::command]
 fn task_move(
     app: AppHandle,
@@ -123,25 +128,30 @@ fn task_move(
     start_at: i64,
     end_at: i64,
     all_day: Option<bool>,
-) -> Result<(), String> {
+) -> Result<TaskMoveResult, String> {
     let db = state.lock().unwrap();
-    // validación de conflictos configurables (solapamiento) antes de guardar
-    let check_conflicts = db
-        .settings_get("calendar.conflict_check")
-        .ok()
-        .flatten()
-        .map(|v| v != "0")
-        .unwrap_or(true);
+    // validación de conflictos configurables (solapamiento) antes de guardar.
+    // Por defecto el movimiento se permite y solo se avisa; si el usuario activa
+    // `calendar.conflict_strict` (restricciones), el movimiento conflictivo se bloquea.
+    let check_conflicts = setting_bool(&db, "calendar.conflict_check", true);
+    let strict = setting_bool(&db, "calendar.conflict_strict", false);
+    let mut conflict = None;
     if check_conflicts && all_day != Some(true) {
         if let Some((_, other)) = db.find_overlap(id, start_at, end_at).map_err(|e| e.to_string())? {
-            return Err(format!("conflicto: se solapa con '{other}'"));
+            if strict {
+                return Err(format!("conflicto: se solapa con '{other}'"));
+            }
+            conflict = Some(other);
         }
     }
     db.move_to(id, start_at, end_at, all_day).map_err(|e| e.to_string())?;
     drop(db);
-    append_log(&app, &format!("task_moved id={id} start={start_at} end={end_at} all_day={all_day:?}"));
+    append_log(
+        &app,
+        &format!("task_moved id={id} start={start_at} end={end_at} all_day={all_day:?} conflict={conflict:?}"),
+    );
     let _ = app.emit("tasks:changed", ());
-    Ok(())
+    Ok(TaskMoveResult { conflict })
 }
 
 #[tauri::command]
@@ -208,41 +218,49 @@ struct TaskFromTextResult {
 }
 
 #[tauri::command]
-fn task_from_text(
+async fn task_from_text(
     app: AppHandle,
     state: State<'_, Mutex<Db>>,
     text: String,
 ) -> Result<TaskFromTextResult, String> {
-    let db = state.lock().unwrap();
-    let cfg = ai_config_from_db(&db);
-
-    let mut used_ai = false;
-    let (parsed, source) = match ai::provider_from_config(&cfg) {
-        Ok(provider) => {
-            used_ai = true;
-            let r = ai::task_parser::parse_task_text(&text, provider.as_ref(), true);
-            match r {
-                Ok(p) => p,
-                Err(e) => {
-                    append_log(&app, &format!("nl_ai_fail: {e}"));
-                    let local = ai::nl::parse_task_nl(&text)
-                        .map(|t| (t, "local".into()))
-                        .ok_or_else(|| "no se pudo interpretar el texto".to_string())?;
-                    (local.0, local.1)
-                }
-            }
-        }
-        Err(_) => {
-            let local = ai::nl::parse_task_nl(&text)
-                .ok_or_else(|| "no se pudo interpretar el texto".to_string())?;
-            (local, "local".into())
-        }
+    // La configuración se lee bajo un lock corto. La llamada a la IA es
+    // bloqueante (hasta 90 s) y se ejecuta en otro hilo, fuera del mutex,
+    // para que la app siga respondiendo mientras se interpreta el texto.
+    let cfg = {
+        let db = state.lock().unwrap();
+        ai_config_from_db(&db)
     };
 
-    let task = db
-        .create(&parsed.title, &parsed.category_id, &parsed.priority, parsed.start_ms, parsed.end_ms, parsed.all_day)
-        .map_err(|e| e.to_string())?;
-    drop(db);
+    let log_app = app.clone();
+    let (parsed, source, used_ai) = tauri::async_runtime::spawn_blocking(move || {
+        let mut used_ai = false;
+        let parsed: (ParsedTask, String) = match ai::provider_from_config(&cfg) {
+            Ok(provider) => {
+                used_ai = true;
+                match ai::task_parser::parse_task_text(&text, provider.as_ref(), true) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        append_log(&log_app, &format!("nl_ai_fail: {e}"));
+                        ai::nl::parse_task_nl(&text)
+                            .map(|t| (t, "local".into()))
+                            .ok_or_else(|| "no se pudo interpretar el texto".to_string())?
+                    }
+                }
+            }
+            Err(_) => ai::nl::parse_task_nl(&text)
+                .map(|t| (t, "local".into()))
+                .ok_or_else(|| "no se pudo interpretar el texto".to_string())?,
+        };
+        Ok::<(ParsedTask, String, bool), String>((parsed.0, parsed.1, used_ai))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let task = {
+        let db = state.lock().unwrap();
+        db.create(&parsed.title, &parsed.category_id, &parsed.priority, parsed.start_ms, parsed.end_ms, parsed.all_day)
+            .map_err(|e| e.to_string())?
+    };
     append_log(
         &app,
         &format!("nl_task source={source} ai={used_ai} title={} start={}", parsed.title, parsed.start_ms),
@@ -734,6 +752,7 @@ struct GeneralSettingsView {
     start_with_windows: bool,
     start_minimized: bool,
     close_to_tray_widget: bool,
+    conflict_strict: bool,
     autostart_actual: bool,
 }
 
@@ -744,6 +763,7 @@ fn general_settings_get(state: State<'_, Mutex<Db>>) -> GeneralSettingsView {
         start_with_windows: setting_bool(&db, "general.start_with_windows", false),
         start_minimized: setting_bool(&db, "general.start_minimized", false),
         close_to_tray_widget: setting_bool(&db, "general.close_to_tray_widget", true),
+        conflict_strict: setting_bool(&db, "calendar.conflict_strict", false),
         autostart_actual: autostart_enabled(),
     }
 }
@@ -755,6 +775,7 @@ fn general_settings_set(
     start_with_windows: bool,
     start_minimized: bool,
     close_to_tray_widget: bool,
+    conflict_strict: bool,
 ) -> Result<(), String> {
     let db = state.lock().unwrap();
     db.settings_set("general.start_with_windows", if start_with_windows { "1" } else { "0" })
@@ -766,11 +787,13 @@ fn general_settings_set(
         if close_to_tray_widget { "1" } else { "0" },
     )
     .map_err(|e| e.to_string())?;
+    db.settings_set("calendar.conflict_strict", if conflict_strict { "1" } else { "0" })
+        .map_err(|e| e.to_string())?;
     drop(db);
     autostart_set(start_with_windows)?;
     append_log(
         &app,
-        &format!("general_settings_set start_win={start_with_windows} minimized={start_minimized} tray={close_to_tray_widget}"),
+        &format!("general_settings_set start_win={start_with_windows} minimized={start_minimized} tray={close_to_tray_widget} conflict_strict={conflict_strict}"),
     );
     Ok(())
 }

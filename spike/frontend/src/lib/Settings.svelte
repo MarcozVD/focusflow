@@ -19,18 +19,18 @@
     loadGeneralSettings,
     saveGeneralSettings,
     setUiPrefs,
-    applySavedTheme,
+    uiTheme,
+    uiAccent,
   } from "./data.svelte";
 
   const ACCENTS = ["#2563EB", "#7C3AED", "#EC4899", "#F59E0B", "#10B981", "#0EA5E9"];
 
-  let curTheme = $state("light");
+  let curTheme = $state<"light" | "dark">("light");
   let curAccent = $state("#2563EB");
 
   $effect(() => {
-    curTheme = applySavedTheme() === "dark" ? "dark" : "light";
-    curAccent =
-      getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB";
+    curTheme = uiTheme() === "dark" ? "dark" : "light";
+    curAccent = uiAccent();
   });
 
   function pickTheme(t: "light" | "dark") {
@@ -74,6 +74,7 @@
   let gStartWin = $state(false);
   let gStartMinimized = $state(false);
   let gCloseTray = $state(true);
+  let gConflictStrict = $state(false);
   let gSaving = $state(false);
 
   $effect(() => {
@@ -82,6 +83,7 @@
       gStartWin = g.start_with_windows;
       gStartMinimized = g.start_minimized;
       gCloseTray = g.close_to_tray_widget;
+      gConflictStrict = g.conflict_strict;
     }
   });
 
@@ -92,6 +94,7 @@
         startWithWindows: gStartWin,
         startMinimized: gStartMinimized,
         closeToTrayWidget: gCloseTray,
+        conflictStrict: gConflictStrict,
       });
       await loadGeneralSettings();
       saved = r.ok ? "Ajustes de inicio guardados" : `Error: ${r.error}`;
@@ -472,6 +475,10 @@
     <label class="check">
       <input type="checkbox" bind:checked={gCloseTray} />
       Al cerrar la ventana, minimizar a la bandeja y abrir el widget
+    </label>
+    <label class="check">
+      <input type="checkbox" bind:checked={gConflictStrict} />
+      Bloquear movimientos que solapan otra tarea (si no, se permiten con aviso)
     </label>
     <div class="row">
       <button class="btn primary" onclick={saveGeneral} disabled={gSaving}>
