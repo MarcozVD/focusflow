@@ -651,12 +651,17 @@ fn trusted_senders_remove(state: State<'_, Mutex<Db>>, sender: String) -> Result
 fn create_widget(app: &AppHandle) -> Result<(), String> {
     let w = tauri::WebviewWindowBuilder::new(app, "widget", tauri::WebviewUrl::App("index.html".into()))
         .title("FocusFlow Widget")
-        .inner_size(340.0, 440.0)
-        .min_inner_size(300.0, 240.0)
-        .resizable(true)
+        .inner_size(340.0, 500.0)
+        .resizable(false)
         .decorations(false)
         .transparent(true)
-        .always_on_top(true)
+        // Fondo del webview explícitamente transparente: sin esto, en algunas
+        // configuraciones de Windows (efectos visuales reducidos) la superficie
+        // del webview pinta un recuadro sólido alrededor del widget.
+        .background_color(tauri::utils::config::Color::from((0, 0, 0, 0)))
+        // Se queda detrás de las ventanas normales (solo escritorio),
+        // no encima de las apps como el always_on_top.
+        .always_on_bottom(true)
         .skip_taskbar(true)
         .build()
         .map_err(|e| e.to_string())?;
@@ -693,9 +698,8 @@ fn widget_info(app: AppHandle) -> String {
     match app.get_webview_window("widget") {
         Some(w) => {
             let vis = w.is_visible().unwrap_or(false);
-            let top = w.is_always_on_top().unwrap_or(false);
-            append_log(&app, &format!("widget_info visible={vis} always_on_top={top}"));
-            format!("visible={vis} always_on_top={top}")
+            append_log(&app, &format!("widget_info visible={vis}"));
+            format!("visible={vis}")
         }
         None => {
             append_log(&app, "widget_info none");
@@ -880,10 +884,19 @@ fn open_agenda(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn widget_set_height(app: AppHandle, height: f64) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("widget") {
-        let h = height.round().clamp(120.0, 760.0) as u32;
+        // `height` viene en px de CSS (offsetHeight). set_size con Size::Physical
+        // los interpretaría como px físicos → en pantallas con escala >100% la
+        // ventana quedaba más corta que el contenido y el webview re-renderizaba
+        // el contenido desplazado en cada cambio. Se usa LogicalSize: Tauri
+        // convierte por la escala del monitor.
+        let h = height.round().clamp(120.0, 760.0);
         let size = w.outer_size().map_err(|e| e.to_string())?;
-        if (size.height as f64 - h as f64).abs() > 4.0 {
-            let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(size.width, h)));
+        let sf = w.scale_factor().unwrap_or(1.0);
+        if (size.height as f64 - h * sf).abs() > 4.0 * sf {
+            let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                size.width as f64 / sf,
+                h,
+            )));
         }
     }
     Ok(())

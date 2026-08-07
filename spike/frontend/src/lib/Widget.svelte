@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade } from "svelte/transition";
-  import { tasks as tasksStore, completeTask, cat, openTaskRemote, openAgenda, widgetHeight } from "./data.svelte";
+  import { tasks as tasksStore, completeTask, cat, openTaskRemote } from "./data.svelte";
 
   const tasks = $derived(tasksStore());
 
@@ -22,21 +22,6 @@
     tasks
       .filter((t) => t.status !== "completada" && !todayTasks.includes(t))
       .sort((a, b) => a.start.getTime() - b.start.getTime()),
-  );
-
-  /** Altura máxima configurable del widget (px). Al alcanzarla, se corta con "+N tareas más". */
-  const MAX_H = 560;
-  const ROW_H = 30;
-  const FIXED_H = 148;
-
-  /** Filas que caben dentro de la altura máxima. */
-  const capacity = $derived(Math.max(3, Math.floor((MAX_H - FIXED_H) / ROW_H)));
-
-  const todayShown = $derived(todayTasks.slice(0, capacity));
-  const upcomingShown = $derived(upcoming.slice(0, Math.max(0, capacity - todayTasks.length)));
-
-  const hiddenCount = $derived(
-    Math.max(0, tasks.filter((t) => t.status !== "completada").length - todayShown.length - upcomingShown.length),
   );
 
   const doneToday = $derived(
@@ -63,61 +48,48 @@
     if (days === 1) return "mañana";
     return d.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
   }
-
-  let rootEl = $state<HTMLElement | null>(null);
-  $effect(() => {
-    if (!rootEl) return;
-    const ro = new ResizeObserver(() => widgetHeight(rootEl.offsetHeight));
-    ro.observe(rootEl);
-    widgetHeight(rootEl.offsetHeight);
-    return () => ro.disconnect();
-  });
 </script>
 
-<div class="widget" bind:this={rootEl}>
-  <header class="head" data-tauri-drag-region>
-    <span class="brand" data-tauri-drag-region>
-      <span class="logo" data-tauri-drag-region>F</span>
-      <span data-tauri-drag-region>FocusFlow</span>
-    </span>
-    <span class="status" title="Sincronizado">
-      <span class="pulse"></span>
-      hoy · {doneToday} hecha{doneToday === 1 ? "" : "s"}
-    </span>
-  </header>
+  <div class="widget">
+    <header class="head" data-tauri-drag-region>
+      <span class="brand" data-tauri-drag-region>
+        <span class="logo" data-tauri-drag-region>F</span>
+        <span data-tauri-drag-region>FocusFlow</span>
+      </span>
+      <span class="status" title="Sincronizado">
+        <span class="pulse"></span>
+        hoy · {doneToday} hecha{doneToday === 1 ? "" : "s"}
+      </span>
+    </header>
 
-  <div class="body">
-    {#if todayTasks.length === 0 && upcoming.length === 0}
-      <div class="empty">Sin tareas pendientes. Descansa ✨</div>
-    {:else}
-      <div class="sec-label">Hoy</div>
-      {#each todayShown as t (t.id)}
-        <button class="task" type="button" transition:fade={{ duration: 140 }} onclick={() => openTaskRemote(t.id)}>
-          <span class="dot" style="--c: {cat(t.categoryId).color}"></span>
-          <span class="ttl">{t.title}</span>
-          <span class="due" class:allday={t.allDay}>{timeLabel(t)}</span>
-          <span class="check" onclick={(e) => { e.stopPropagation(); completeTask(t.id); }} title="Completar">✓</span>
-        </button>
-      {/each}
-
-      {#if upcoming.length > 0}
-        <div class="sec-label">Próximas</div>
-        {#each upcomingShown as t (t.id)}
+    <div class="body">
+      {#if todayTasks.length === 0 && upcoming.length === 0}
+        <div class="empty">Sin tareas pendientes. Descansa ✨</div>
+      {:else}
+        <div class="sec-label">Hoy</div>
+        {#each todayTasks as t (t.id)}
           <button class="task" type="button" transition:fade={{ duration: 140 }} onclick={() => openTaskRemote(t.id)}>
             <span class="dot" style="--c: {cat(t.categoryId).color}"></span>
             <span class="ttl">{t.title}</span>
-            <span class="due">{dueLabel(t.start)}</span>
+            <span class="due" class:allday={t.allDay}>{timeLabel(t)}</span>
             <span class="check" onclick={(e) => { e.stopPropagation(); completeTask(t.id); }} title="Completar">✓</span>
           </button>
         {/each}
-      {/if}
-    {/if}
-  </div>
 
-  {#if hiddenCount > 0}
-    <button class="more" type="button" onclick={openAgenda}>+{hiddenCount} tareas más</button>
-  {/if}
-</div>
+        {#if upcoming.length > 0}
+          <div class="sec-label">Próximas</div>
+          {#each upcoming as t (t.id)}
+            <button class="task" type="button" transition:fade={{ duration: 140 }} onclick={() => openTaskRemote(t.id)}>
+              <span class="dot" style="--c: {cat(t.categoryId).color}"></span>
+              <span class="ttl">{t.title}</span>
+              <span class="due">{dueLabel(t.start)}</span>
+              <span class="check" onclick={(e) => { e.stopPropagation(); completeTask(t.id); }} title="Completar">✓</span>
+            </button>
+          {/each}
+        {/if}
+      {/if}
+    </div>
+  </div>
 
 <style>
   .widget {
@@ -164,12 +136,20 @@
   .status {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 5px;
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-3);
+    /* Ancho estable: al cambiar "1 hecha" → "12 hechas" el texto no empuja
+       ni se corre a la derecha (el contador crece hacia la izquierda). */
+    min-width: 96px;
+    white-space: nowrap;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
   }
   .pulse {
     width: 7px;
@@ -182,6 +162,12 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    /* La ventana es de tamaño fijo (sin resizing dinámico: causaba que el
+       contenido se desplazara). Si la lista crece, hace scroll interno. */
+    max-height: 340px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
   .sec-label {
     font-size: 9.5px;
@@ -224,6 +210,10 @@
     text-overflow: ellipsis;
   }
   .due {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 56px;
     font-size: 10.5px;
     font-weight: 600;
     color: var(--text-2);
@@ -232,6 +222,8 @@
     padding: 2px 9px;
     flex-shrink: 0;
     white-space: nowrap;
+    /* Dígitos de ancho fijo: "09:00" y "10:30" miden igual → sin reflow. */
+    font-variant-numeric: tabular-nums;
   }
   .due.allday {
     color: var(--primary);
@@ -265,21 +257,5 @@
     color: var(--text-3);
     padding: 10px 8px;
     text-align: center;
-  }
-  .more {
-    border: 1px dashed var(--border);
-    background: transparent;
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-    border-radius: var(--r-sm);
-    padding: 6px;
-    cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
-  }
-  .more:hover {
-    color: var(--primary);
-    border-color: var(--primary);
-    background: var(--primary-soft);
   }
 </style>

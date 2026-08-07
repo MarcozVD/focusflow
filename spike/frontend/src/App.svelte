@@ -183,6 +183,9 @@
     padding: 0 var(--s-8) var(--s-8);
     min-height: 0;
   }
+  :global([data-widget] html) {
+    background: transparent;
+  }
   :global([data-widget] body) {
     background: transparent;
   }

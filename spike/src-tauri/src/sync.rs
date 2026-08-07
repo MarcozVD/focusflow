@@ -365,6 +365,23 @@ fn notify_new_suggestions(app: &AppHandle, count: usize) {
 
 /// Lazo del scheduler: corre cada `interval_hours` horas en background.
 pub fn scheduler_loop(app: AppHandle) {
+    // Revisión inmediata al abrir la app: no esperar al intervalo (8 h por
+    // defecto) para la primera verificación de correo. Corre en background
+    // para no bloquear el arranque; si el correo está deshabilitado o sin
+    // configurar, solo queda el error en el log.
+    {
+        let h = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = tauri::async_runtime::spawn_blocking(move || match run_sync(&h) {
+                Ok(s) => crate::append_log(
+                    &h,
+                    &format!("startup_sync_ok suggestions={}", s.total_suggestions),
+                ),
+                Err(e) => crate::append_log(&h, &format!("startup_sync_error: {e}")),
+            })
+            .await;
+        });
+    }
     let prune_app = app.clone();
     tauri::async_runtime::spawn(async move {
         // auto-archivo horario de sugerencias resueltas (retención 1 h por defecto)
