@@ -139,21 +139,6 @@ export function closeTaskDetail() {
   store.taskDetail = null;
 }
 
-let widgetHFlush: ReturnType<typeof setTimeout> | null = null;
-let _widgetHeight = 0;
-
-/** Consulta o actualiza (con debounce) la altura del widget en el backend. */
-export function widgetHeight(px?: number): number {
-  if (px == null) return _widgetHeight;
-  _widgetHeight = Math.max(0, Math.round(px));
-  if (!inTauri()) return _widgetHeight;
-  if (widgetHFlush) clearTimeout(widgetHFlush);
-  widgetHFlush = setTimeout(() => {
-    invoke("widget_set_height", { height: _widgetHeight }).catch(() => {});
-  }, 60);
-  return _widgetHeight;
-}
-
 /** Abre la app principal en la vista Agenda (desde el widget). */
 export function openAgenda() {
   if (!inTauri()) return;

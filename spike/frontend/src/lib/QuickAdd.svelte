@@ -42,15 +42,13 @@
     if (!text.trim()) return [];
     const out: Detect[] = [];
     const t = text.toLowerCase();
-    if (/\bmañana\b/.test(t)) out.push({ label: "Mañana", color: "#2563EB", id: "" });
+    if (/\b(mañana|tomorrow)\b/.test(t)) out.push({ label: "Mañana", color: "#2563EB", id: "" });
     if (/\bel \d{1,2}\b/.test(t)) out.push({ label: "Fecha detectada", color: "#2563EB", id: "" });
-    if (/\bprox(imo)?\s*lunes\b/.test(t)) out.push({ label: "Próximo lunes", color: "#2563EB", id: "" });
-    if (/de \d{1,2}(:?\d{2})?\s*(a|pm|am)/.test(t) || /\ba las \d/.test(t))
+    if (/\b(próximo lunes|proximo lunes|next monday)\b/.test(t)) out.push({ label: "Próximo lunes", color: "#2563EB", id: "" });
+    if (/de \d{1,2}(:?\d{2})?\s*(a|pm|am)/.test(t) || /\ba las \d/.test(t) || /\bat \d/.test(t))
       out.push({ label: "Horario", color: "#059669", id: "" });
-    if (/\b(todos los lunes|cada mes|cada año|cada \d+ días)\b/.test(t))
-      out.push({ label: "Repetición", color: "#7C3AED", id: "" });
-    if (/\burgente\b/.test(t)) out.push({ label: "Prioridad alta", color: "#DC2626", id: "" });
-    if (/\brecord(a|arme)\b/.test(t)) out.push({ label: "Recordatorio", color: "#F59E0B", id: "" });
+    if (/\burgente\b/.test(t) || /\burgent\b/.test(t)) out.push({ label: "Prioridad alta", color: "#DC2626", id: "" });
+    if (/\brec(ord|uerd)/.test(t)) out.push({ label: "Recordatorio", color: "#F59E0B", id: "" });
     const c = findCat(t);
     if (c) out.push(c);
     return out.slice(0, 4);

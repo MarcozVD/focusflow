@@ -12,7 +12,7 @@ Reglas:
 - category siempre uno de: Universidad, Trabajo, Personal, Finanzas, Salud, Otros.
 - priority: Alta solo si es urgente, examen o entrega cercana.
 - Si no hay fecha → mañana. Si hay hora → tarea con hora. Si NO hay hora → NO inventar hora: dejar start_time y end_time vacíos (la tarea será de Todo el día).
-- Duración: de la hora de inicio a la hora final si se indica; si solo hay hora de inicio, 1 hora.
+- Duración: si el texto indica duración ("2 horas", "for two hours", "durante 3h") Y hay hora de inicio → end_time = start_time + duración. Si hay duración pero NO hora de inicio → start_time vacío (Todo el día), nunca inventar hora. Si solo hay hora de inicio sin duración → 1 hora.
 - reminders: formato corto "1d", "1h", "30m", "1w". Vacío si no se pide recordatorio.
 
 RANGOS DE FECHAS (importante):

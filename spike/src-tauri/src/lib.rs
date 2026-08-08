@@ -17,6 +17,8 @@ use winreg::RegKey;
 
 pub mod ai;
 pub mod email;
+pub mod engine;
+pub mod reminders;
 mod store;
 pub mod sync;
 
@@ -49,21 +51,6 @@ pub(crate) fn append_log(_app: &AppHandle, line: &str) {
 #[tauri::command]
 fn log_line(app: AppHandle, line: String) {
     append_log(&app, &line);
-}
-
-#[tauri::command]
-fn notify(app: AppHandle) {
-    use tauri_plugin_notification::NotificationExt;
-    match app
-        .notification()
-        .builder()
-        .title("FocusFlow")
-        .body("Recordatorio: tienes una tarea pendiente.")
-        .show()
-    {
-        Ok(_) => append_log(&app, "notification_shown"),
-        Err(e) => append_log(&app, &format!("notification_error: {e}")),
-    }
 }
 
 // ---------------- tasks ----------------
@@ -208,6 +195,11 @@ pub(crate) fn ai_config_from_db(db: &Db) -> AiConfig {
             .ok()
             .flatten()
             .unwrap_or_else(|| ai::default_model()),
+        provider: db
+            .settings_get("ai.provider")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| ai::default_provider()),
     }
 }
 
@@ -259,8 +251,14 @@ async fn task_from_text(
 
     let task = {
         let db = state.lock().unwrap();
-        db.create(&parsed.title, &parsed.category_id, &parsed.priority, parsed.start_ms, parsed.end_ms, parsed.all_day)
-            .map_err(|e| e.to_string())?
+        let t = db
+            .create(&parsed.title, &parsed.category_id, &parsed.priority, parsed.start_ms, parsed.end_ms, parsed.all_day)
+            .map_err(|e| e.to_string())?;
+        // conservar el recordatorio sugerido por la IA ("1d", "3h", ...)
+        if let Some(min) = parsed.reminders.first().and_then(|s| reminders::parse_reminder_minutes(s)) {
+            db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
+        }
+        t
     };
     append_log(
         &app,
@@ -881,27 +879,6 @@ fn open_agenda(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn widget_set_height(app: AppHandle, height: f64) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("widget") {
-        // `height` viene en px de CSS (offsetHeight). set_size con Size::Physical
-        // los interpretaría como px físicos → en pantallas con escala >100% la
-        // ventana quedaba más corta que el contenido y el webview re-renderizaba
-        // el contenido desplazado en cada cambio. Se usa LogicalSize: Tauri
-        // convierte por la escala del monitor.
-        let h = height.round().clamp(120.0, 760.0);
-        let size = w.outer_size().map_err(|e| e.to_string())?;
-        let sf = w.scale_factor().unwrap_or(1.0);
-        if (size.height as f64 - h * sf).abs() > 4.0 * sf {
-            let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                size.width as f64 / sf,
-                h,
-            )));
-        }
-    }
-    Ok(())
-}
-
 fn auto_start_behavior(app: &AppHandle, db: &Db) {
     if setting_bool(db, "general.start_minimized", false) {
         if let Some(w) = app.get_webview_window("main") {
@@ -1028,7 +1005,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             log_line,
-            notify,
             task_list,
             task_list_range,
             task_create,
@@ -1061,7 +1037,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             widget_info,
             open_task,
             open_agenda,
-            widget_set_height,
             general_settings_get,
             general_settings_set,
             ui_prefs_get,
@@ -1154,6 +1129,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             sync::scheduler_loop(handle.clone());
+            reminders::reminder_loop(handle.clone());
             // prune inicial al arrancar: limpiar resoluciones viejas pendientes de archivar
             {
                 let db = app.state::<Mutex<Db>>();

@@ -29,6 +29,7 @@ pub struct TaskRow {
     pub notes: String,
     pub links: String,
     pub reminder_minutes: Option<i64>,
+    pub reminder_fired_at: Option<i64>,
 }
 
 fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<TaskRow> {
@@ -49,11 +50,23 @@ fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<TaskRow> {
         notes: r.get("notes")?,
         links: r.get("links")?,
         reminder_minutes: r.get("reminder_minutes")?,
+        reminder_fired_at: r.get("reminder_fired_at")?,
     })
 }
 
 pub struct Db {
     conn: Connection,
+}
+
+/// Recordatorio por disparar (ventana vencida y sin marca de disparo).
+#[derive(Debug, Clone)]
+pub struct DueReminder {
+    pub task_id: i64,
+    pub title: String,
+    pub start_at: i64,
+    pub end_at: i64,
+    pub all_day: bool,
+    pub reminder_minutes: i64,
 }
 
 impl Db {
@@ -68,11 +81,37 @@ impl Db {
         Ok(db)
     }
 
+    #[cfg(test)]
+    fn open_memory() -> rusqlite::Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.pragma_update(None, "busy_timeout", 2000)?;
+        let db = Db { conn };
+        db.migrate()?;
+        db.seed_if_empty()?;
+        Ok(db)
+    }
+
     fn migrate(&self) -> rusqlite::Result<()> {
         self.migrate_0001()?;
         self.migrate_0002()?;
         self.migrate_0003()?;
-        self.migrate_0004()
+        self.migrate_0004()?;
+        self.migrate_0005()
+    }
+
+    /// Marca de disparo del recordatorio (null = sin disparar; al cambiar el
+    /// recordatorio se rearma automáticamente).
+    fn migrate_0005(&self) -> rusqlite::Result<()> {
+        let cols: Vec<String> = self
+            .conn
+            .prepare("SELECT name FROM pragma_table_info('tasks')")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        if !cols.iter().any(|c| c == "reminder_fired_at") {
+            self.conn
+                .execute_batch("ALTER TABLE tasks ADD COLUMN reminder_fired_at INTEGER")?;
+        }
+        Ok(())
     }
 
     /// result_task_id: tarea creada al aceptar una sugerencia (para revertir/editar enlazado)
@@ -353,6 +392,14 @@ impl Db {
         reminder_minutes: Option<i64>,
         all_day: Option<bool>,
     ) -> rusqlite::Result<()> {
+        let prev: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT reminder_minutes FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
         self.conn.execute(
             "UPDATE tasks SET title = ?2, category_id = ?3, priority = ?4,
                     start_at = ?5, end_at = ?6, description = ?7, tags = ?8, notes = ?9,
@@ -365,6 +412,13 @@ impl Db {
                 description, tags, notes, links, reminder_minutes, now_ms(), all_day
             ],
         )?;
+        // FR-30: cambiar el recordatorio rearma el disparo (no refirar si no cambió)
+        if prev != reminder_minutes {
+            self.conn.execute(
+                "UPDATE tasks SET reminder_fired_at = NULL WHERE id = ?1 AND reminder_fired_at IS NOT NULL",
+                [id],
+            )?;
+        }
         Ok(())
     }
 
@@ -372,6 +426,46 @@ impl Db {
         self.conn
             .query_row("SELECT * FROM tasks WHERE id = ?1 AND deleted_at IS NULL", [id], task_from_row)
             .optional()
+    }
+
+    /// Recordatorio con la ventana de disparo vencida y sin marcar.
+    pub fn due_reminders(&self, now: i64) -> rusqlite::Result<Vec<DueReminder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, start_at, end_at, all_day, reminder_minutes FROM tasks
+             WHERE deleted_at IS NULL
+               AND status != 'completada'
+               AND reminder_minutes IS NOT NULL
+               AND reminder_fired_at IS NULL
+               AND start_at - reminder_minutes * 60000 <= ?1",
+        )?;
+        let rows = stmt.query_map([now], |r| {
+            Ok(DueReminder {
+                task_id: r.get(0)?,
+                title: r.get(1)?,
+                start_at: r.get(2)?,
+                end_at: r.get(3)?,
+                all_day: r.get::<_, i64>(4)? != 0,
+                reminder_minutes: r.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn mark_reminder_fired(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE tasks SET reminder_fired_at = ?2, updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_task_reminder(&self, id: i64, minutes: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE tasks SET reminder_minutes = ?2, reminder_fired_at = NULL, updated_at = ?3
+             WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![id, minutes, now_ms()],
+        )?;
+        Ok(())
     }
 
     pub fn duplicate(&self, id: i64) -> rusqlite::Result<Option<TaskRow>> {
@@ -760,4 +854,106 @@ fn title_similar(a: &str, b: &str) -> bool {
     let common = ta.iter().filter(|w| tb.contains(w)).count();
     let union = ta.len() + tb.len() - common;
     common as f64 / union as f64 >= 0.6
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> Db {
+        Db::open_memory().unwrap()
+    }
+
+    #[test]
+    fn migration_0005_adds_fired_column() {
+        let db = db();
+        let cols: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM pragma_table_info('tasks')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(cols.iter().any(|c| c == "reminder_fired_at"));
+    }
+
+    #[test]
+    fn due_reminders_fires_overdue_and_marks_once() {
+        let db = db();
+        let now = now_ms();
+        let t = db
+            .create("parcial", "uni", "alta", now - 2 * 3_600_000, now - 1_800_000, false)
+            .unwrap();
+        db.set_task_reminder(t.id, 60).unwrap();
+
+        let due = db.due_reminders(now).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].task_id, t.id);
+        assert_eq!(due[0].reminder_minutes, 60);
+
+        db.mark_reminder_fired(t.id).unwrap();
+        assert!(db.due_reminders(now).unwrap().is_empty());
+    }
+
+    #[test]
+    fn due_reminders_ignores_future_and_completed() {
+        let db = db();
+        let now = now_ms();
+
+        let futura = db
+            .create("futura", "uni", "media", now + 3_600_000 * 2, now + 5_400_000, false)
+            .unwrap();
+        db.set_task_reminder(futura.id, 60).unwrap();
+        assert!(db.due_reminders(now).unwrap().is_empty());
+
+        let pasada = db
+            .create("pasada", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .unwrap();
+        db.set_task_reminder(pasada.id, 60).unwrap();
+        db.set_completed(pasada.id, true).unwrap();
+        assert!(db.due_reminders(now).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reminder_rearms_only_when_changed() {
+        let db = db();
+        let now = now_ms();
+        let t = db
+            .create("tarea", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .unwrap();
+        db.set_task_reminder(t.id, 60).unwrap();
+        db.mark_reminder_fired(t.id).unwrap();
+        assert!(db.due_reminders(now).unwrap().is_empty());
+
+        // cambiar el recordatorio → rearma
+        db.update_task_full(
+            t.id, "tarea", "uni", "media", now - 3_600_000, now - 1_800_000,
+            "", "[]", "", "", Some(30), Some(false),
+        )
+        .unwrap();
+        assert_eq!(db.due_reminders(now).unwrap().len(), 1);
+
+        // mismo valor → no refira
+        db.mark_reminder_fired(t.id).unwrap();
+        db.update_task_full(
+            t.id, "tarea", "uni", "media", now - 3_600_000, now - 1_800_000,
+            "", "[]", "", "", Some(30), Some(false),
+        )
+        .unwrap();
+        assert!(db.due_reminders(now).unwrap().is_empty());
+    }
+
+    #[test]
+    fn move_to_does_not_refire() {
+        let db = db();
+        let now = now_ms();
+        let t = db
+            .create("tarea", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .unwrap();
+        db.set_task_reminder(t.id, 60).unwrap();
+        db.mark_reminder_fired(t.id).unwrap();
+        db.move_to(t.id, now + 3_600_000, now + 5_400_000, None).unwrap();
+        assert!(db.due_reminders(now).unwrap().is_empty());
+    }
 }
