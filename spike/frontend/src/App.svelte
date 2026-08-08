@@ -173,6 +173,9 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    /* La vista mes tiene altura fija: si la resolución no alcanza, el scroll
+       aparece SOLO dentro del área del calendario (sidebar/header fijos). */
+    overflow-y: auto;
   }
   .cal-wrap :global(.cal) {
     flex: 1;

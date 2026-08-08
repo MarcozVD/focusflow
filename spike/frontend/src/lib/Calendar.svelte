@@ -231,22 +231,50 @@
 
   const allDayOf = (d: Date) =>
     tasks.filter((t) => t.allDay && sameDay(t.start, d) && t.status !== "completada");
-  /** Multi-día en día intermedio (ni inicio ni fin): ocupa todo el día. */
-  const continuaOf = (d: Date) => {
+
+  /**
+   * Modo de representación de un evento de rango (inicio y fin en días distintos).
+   * Punto de extensión: en el futuro, "continuo" servirá para vacaciones/ausencias
+   * (ocuparía todos los días intermedios). Por ahora el modo predeterminado es
+   * "solo_extremos": el evento se muestra ÚNICAMENTE en su día de inicio y su día
+   * de fin, aunque internamente conserve el rango completo (para conocer duración
+   * y poder abrir el detalle). Los días intermedios quedan vacíos.
+   */
+  function rangeMode(t: Task): "solo_extremos" | "continuo" {
+    return "solo_extremos";
+  }
+  const esExtremos = (t: Task) => rangeMode(t) === "solo_extremos" || !sameDay(t.start, t.end);
+
+  /** Multi-día en su DÍA DE FIN (modo solo_extremos): no ocupa los días intermedios. */
+  const finDeOf = (d: Date) => {
     const ds = startOfDay(d).getTime();
     const de = ds + 86_400_000;
     return tasks.filter(
-      (t) => t.status !== "completada" && !t.allDay && t.start.getTime() < ds && t.end.getTime() > de,
+      (t) =>
+        t.status !== "completada" &&
+        esExtremos(t) &&
+        !sameDay(t.start, t.end) &&
+        t.end.getTime() >= ds &&
+        t.end.getTime() < de,
     );
   };
-  const topChipsOf = (d: Date) => [...allDayOf(d), ...continuaOf(d)];
+
+  /** Texto del chip según el rol del día (inicio, fin o único). */
+  function chipText(t: Task, d: Date): string {
+    if (sameDay(t.start, t.end)) return t.title;
+    const ds = startOfDay(d).getTime();
+    if (t.end.getTime() >= ds && t.end.getTime() < ds + 86_400_000) return `Fin · ${t.title}`;
+    return `Inicio · ${t.title}`;
+  }
+
+  const topChipsOf = (d: Date) => [...allDayOf(d), ...finDeOf(d)];
   const visibleTopChipsOf = (d: Date) => topChipsOf(d).slice(0, 3);
   const restTopChipsOf = (d: Date) => Math.max(0, topChipsOf(d).length - 3);
 
-  /** Chips de mes: todo el día + multi-día en curso + tareas del día (sin duplicados). */
+  /** Chips de mes: todo el día + fin de multi-día + tareas del día (sin duplicados). */
   const monthChipsOf = (d: Date) => {
     const seen = new Map<number, Task>();
-    for (const t of [...allDayOf(d), ...continuaOf(d), ...dayTasks(d)]) {
+    for (const t of [...allDayOf(d), ...finDeOf(d), ...dayTasks(d)]) {
       if (t.status !== "completada" && !seen.has(t.id)) seen.set(t.id, t);
     }
     return [...seen.values()];
@@ -499,21 +527,21 @@
         >
           <span class="daynum">{d.getDate()}</span>
           <div class="chips">
-            {#each monthChipsOf(d).slice(0, 3) as t (t.id)}
+            {#each monthChipsOf(d).slice(0, 2) as t (t.id)}
               <button
                 type="button"
                 class="minichip {t.status === 'completada' ? 'done' : ''}"
                 style="--c: {cat(t.categoryId).color}"
                 title={t.title}
                 onclick={(e) => { e.stopPropagation(); openTaskDetail(t); }}
-              >{t.title}</button>
+              >{chipText(t, d)}</button>
             {/each}
-            {#if monthChipsOf(d).length > 3}
+            {#if monthChipsOf(d).length > 2}
               <button
                 type="button"
                 class="more"
                 onclick={(e) => { e.stopPropagation(); popupDay = d; }}
-              >+{monthChipsOf(d).length - 3} más</button>
+              >+{monthChipsOf(d).length - 2} más</button>
             {/if}
           </div>
         </div>
@@ -521,19 +549,19 @@
     </div>
 
     {#if popupDay}
-      <div class="day-popup">
+        <div class="day-popup">
         <div class="pop-head">
           <strong>{popupDay.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</strong>
           <button class="pop-close" onclick={() => (popupDay = null)} aria-label="Cerrar">✕</button>
         </div>
         <div class="pop-list">
-          {#if dayTasks(popupDay).length === 0 && continuaOf(popupDay).length === 0}
+          {#if monthChipsOf(popupDay).length === 0}
             <p class="pop-empty">Sin tareas este día.</p>
           {/if}
           {#each monthChipsOf(popupDay) as t (t.id)}
             <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
               <span class="pop-dot"></span>
-              <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{t.title}</span>
+              <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipText(t, popupDay)}</span>
               <span class="pop-time">
                 {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
               </span>
@@ -569,23 +597,15 @@
           <div class="allday-row" bind:this={alldayEls[di]}>
             <span class="allday-label">Todo el día</span>
             {#each visibleTopChipsOf(d) as t (t.id)}
-              {#if t.allDay}
-                <button
-                  type="button"
-                  class="allday-chip"
-                  style="--c: {cat(t.categoryId).color}"
-                  title={t.title}
-                  onclick={() => openTaskDetail(t)}
-                >{t.title}</button>
-              {:else}
-                <button
-                  type="button"
-                  class="allday-chip cont"
-                  style="--c: {cat(t.categoryId).color}"
-                  title={`Continúa · ${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
-                  onclick={() => openTaskDetail(t)}
-                >⟳ {t.title}</button>
-              {/if}
+              <button
+                type="button"
+                class="allday-chip {!t.allDay ? 'cont' : ''}"
+                style="--c: {cat(t.categoryId).color}"
+                title={sameDay(t.start, t.end)
+                  ? t.title
+                  : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
+                onclick={() => openTaskDetail(t)}
+              >{chipText(t, d)}</button>
             {/each}
             {#if restTopChipsOf(d) > 0}
               <span class="allday-more">+{restTopChipsOf(d)}</span>
@@ -676,10 +696,11 @@
     flex-shrink: 0;
   }
   .month-grid {
-    flex: 1;
+    /* 6 filas de altura FIJA: todos los meses se ven idénticos, con o sin
+       tareas. Si la ventana no alcanza, el scroll aparece en .cal-wrap. */
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    grid-template-rows: repeat(6, 1fr);
+    grid-template-rows: repeat(6, 80px);
     min-height: 0;
     gap: 6px;
     padding: 0 var(--s-4) var(--s-4);
@@ -688,11 +709,11 @@
     background: var(--surface-2);
     border: none;
     border-radius: var(--r-md);
-    padding: 6px 7px;
+    padding: 4px 5px;
     text-align: left;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     overflow: hidden;
     min-width: 0;
@@ -709,11 +730,11 @@
     box-shadow: inset 0 0 0 2px var(--primary-soft-2);
   }
   .daynum {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-2);
-    width: 24px;
-    height: 24px;
+    width: 18px;
+    height: 18px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -727,34 +748,37 @@
   .chips {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1.5px;
     overflow: hidden;
     min-height: 0;
   }
   .minichip {
-    font-size: 10.5px;
+    font-size: 9.5px;
     font-weight: 500;
+    line-height: 1.25;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-radius: 7px;
-    padding: 1.5px 7px;
+    padding: 1px 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex-shrink: 0;
+    /* si el espacio escasea, se truncan los chips ANTES que el "+N más" */
+    flex-shrink: 1;
+    min-height: 0;
   }
   .minichip.done {
     text-decoration: line-through;
     opacity: 0.55;
   }
   .more {
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 700;
     color: var(--primary);
     background: var(--primary-soft);
     border: none;
     border-radius: var(--r-full);
-    padding: 2px 8px;
+    padding: 1px 7px;
     flex-shrink: 0;
     cursor: pointer;
     transition: all var(--dur-fast) var(--ease-out);

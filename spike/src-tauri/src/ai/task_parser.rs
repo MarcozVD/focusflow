@@ -13,7 +13,22 @@ Reglas:
 - priority: Alta solo si es urgente, examen o entrega cercana.
 - Si no hay fecha → mañana. Si hay hora → tarea con hora. Si NO hay hora → NO inventar hora: dejar start_time y end_time vacíos (la tarea será de Todo el día).
 - Duración: de la hora de inicio a la hora final si se indica; si solo hay hora de inicio, 1 hora.
-- reminders: formato corto "1d", "1h", "30m", "1w". Vacío si no se pide recordatorio."#;
+- reminders: formato corto "1d", "1h", "30m", "1w". Vacío si no se pide recordatorio.
+
+RANGOS DE FECHAS (importante):
+- Expresiones como "desde el 5 de agosto hasta el 23 de agosto", "del 5 al 23 de agosto",
+  "entre el 5 y el 23 de agosto", "del 5 de agosto al 23 de agosto", "estará habilitado desde
+  el 5 hasta el 23", "disponible hasta el 23" indican un RANGO con dos fechas distintas:
+  pon la fecha inicial en start_date y la fecha FINAL en end_date (pueden ser distintos meses
+  o años).
+- SIEMPRE extrae la fecha final aunque la frase no la marque con "hasta/al":
+  "del 5 al 23" → start_date=5, end_date=23.
+- Si el texto menciona UNA sola fecha → end_date = start_date (mismo día, evento de un día).
+- end_date NUNCA puede ser anterior a start_date.
+- Horas del rango: start_time solo si el texto da hora de inicio explícita ("desde el 5 a las
+  10 AM"), end_time solo si da hora final explícita ("hasta el 23 a las 6 PM", "termina a las
+  18:00"). Si solo hay hora de fin → start_time vacío (inicio Todo el día) y end_time con la
+  hora. Nunca inventar horas ni fechas que no estén en el texto."#;
 
 pub fn system_prompt_now() -> String {
     let now = chrono::Local::now();
