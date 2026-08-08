@@ -19,6 +19,10 @@
 //!   `lookahead_days` (14) desde hoy, primero sin penalización soft y luego
 //!   con la menor penalización; empate → el slot más temprano.
 
+pub mod planner;
+
+pub use planner::{PlanReport, PlanSession, PlannedItem, Planner};
+
 use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 
 use crate::ai::intent::{ConstraintKind, Intent, IntentType};

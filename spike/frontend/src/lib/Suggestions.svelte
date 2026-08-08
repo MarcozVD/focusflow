@@ -10,9 +10,12 @@
     suggestionEdit,
     suggestionMerge,
     suggestionRevert,
+    suggestionDelete,
     syncNow,
     syncRunning,
     type Suggestion,
+    KIND_LABELS,
+    KIND_EMOJI,
   } from "./data.svelte";
 
   const suggestions = $derived(suggestionsStore());
@@ -173,6 +176,7 @@
     {:else}
       <div class="card">
         <div class="top">
+          <span class="kind">{KIND_EMOJI[s.kind] ?? "📌"} {KIND_LABELS[s.kind] ?? "Evento"}</span>
           <span class="status {s.status}">{statusLabel[s.status] ?? s.status}</span>
           {#if s.source_sender}
             <span class="sender">{s.source_sender}</span>
@@ -190,8 +194,15 @@
           <span class="chip" style="--c: {cat(s.category_id).color}">
             {cat(s.category_id).name}
           </span>
-          {#if s.start_at}
+          {#if s.kind === "deadline" && s.deadline_at}
+            <span class="deadline">⏰ Vence {fmtDate(s.deadline_at)} {fmtMs(s.deadline_at)}</span>
+          {:else if s.kind === "availability" && s.start_at && s.end_at}
+            <span class="range">🟢 {fmtDate(s.start_at)} → {fmtDate(s.end_at)}</span>
+          {:else if s.start_at}
             <span>{fmtDate(s.start_at)} · {fmtMs(s.start_at)}</span>
+          {/if}
+          {#if s.prep_min > 0}
+            <span class="prep">prep {s.prep_min} min</span>
           {/if}
           {#if s.priority === "alta"}
             <span class="prio">Prioridad alta</span>
@@ -206,6 +217,9 @@
             <button class="btn" onclick={() => startEdit(s)}>Editar</button>
             <button class="btn" onclick={() => startMerge(s)}>Fusionar</button>
             <button class="btn danger" onclick={() => suggestionReject(s.id)}>Rechazar</button>
+            <button class="btn danger ghost" title="Eliminar definitivamente" onclick={() => suggestionDelete(s.id)}>
+              Borrar
+            </button>
           </div>
         {:else if settled(s)}
           <div class="row settled-row">
@@ -215,6 +229,7 @@
             <span class="spacer"></span>
             <button class="btn" onclick={() => startEdit(s)}>Editar</button>
             <button class="btn ghost" onclick={() => suggestionRevert(s.id)}>Revertir</button>
+            <button class="btn danger ghost" onclick={() => suggestionDelete(s.id)}>Borrar</button>
           </div>
         {/if}
       </div>
@@ -291,6 +306,14 @@
     background: var(--surface-3);
     color: var(--text-2);
   }
+  .kind {
+    font-weight: 700;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: var(--r-full);
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
   .status.pending {
     background: var(--primary-soft);
     color: var(--primary);
@@ -365,6 +388,13 @@
   .prio {
     color: var(--danger);
     font-weight: 600;
+  }
+  .deadline,
+  .range {
+    font-weight: 600;
+  }
+  .prep {
+    color: var(--text-3);
   }
   .dupe {
     margin: 0;

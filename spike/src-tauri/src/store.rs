@@ -11,7 +11,7 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct TaskRow {
     pub id: i64,
     pub title: String,
@@ -30,6 +30,7 @@ pub struct TaskRow {
     pub links: String,
     pub reminder_minutes: Option<i64>,
     pub reminder_fired_at: Option<i64>,
+    pub metadata: String,
 }
 
 fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<TaskRow> {
@@ -51,6 +52,7 @@ fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<TaskRow> {
         links: r.get("links")?,
         reminder_minutes: r.get("reminder_minutes")?,
         reminder_fired_at: r.get("reminder_fired_at")?,
+        metadata: r.get("metadata")?,
     })
 }
 
@@ -91,12 +93,68 @@ impl Db {
         Ok(db)
     }
 
+    /// Base de datos efímera para pruebas de integración (tests/).
+    #[doc(hidden)]
+    pub fn open_memory_pub() -> rusqlite::Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.pragma_update(None, "busy_timeout", 2000)?;
+        let db = Db { conn };
+        db.migrate()?;
+        db.seed_if_empty()?;
+        Ok(db)
+    }
+
     fn migrate(&self) -> rusqlite::Result<()> {
         self.migrate_0001()?;
         self.migrate_0002()?;
         self.migrate_0003()?;
         self.migrate_0004()?;
-        self.migrate_0005()
+        self.migrate_0005()?;
+        self.migrate_0006()?;
+        self.migrate_0007()
+    }
+
+    /// Inteligencia de correo (fase 8): tipo de compromiso por sugerencia
+    /// (event | deadline | availability | task), vencimiento, preparación y
+    /// asunto de origen para deduplicación entre correos.
+    fn migrate_0007(&self) -> rusqlite::Result<()> {
+        let cols: Vec<String> = self
+            .conn
+            .prepare("SELECT name FROM pragma_table_info('suggested_events')")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let add = |name: &str, ddl: &str| -> rusqlite::Result<()> {
+            if !cols.iter().any(|c| c == name) {
+                self.conn.execute_batch(&format!("ALTER TABLE suggested_events ADD COLUMN {ddl}"))?;
+            }
+            Ok(())
+        };
+        add("kind", "kind TEXT NOT NULL DEFAULT 'event' CHECK (kind IN ('event','deadline','availability','task'))")?;
+        add("deadline_at", "deadline_at INTEGER")?;
+        add("prep_min", "prep_min INTEGER NOT NULL DEFAULT 0")?;
+        add("source_subject", "source_subject TEXT NOT NULL DEFAULT ''")?;
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS idx_suggestions_kind ON suggested_events(kind)")?;
+        Ok(())
+    }
+
+    /// Propuestas de planificación (fase 7): texto → intents → plan. El
+    /// payload guarda la propuesta completa en JSON; el estado va de
+    /// `pending` → `accepted` | `rejected`. Aceptar crea las tareas reales.
+    fn migrate_0006(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS plan_proposals (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                text       TEXT NOT NULL,
+                status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
+                payload    TEXT NOT NULL DEFAULT '{}',
+                source     TEXT NOT NULL DEFAULT 'local',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_plan_proposals_status ON plan_proposals(status);
+            ",
+        )
     }
 
     /// Marca de disparo del recordatorio (null = sin disparar; al cambiar el
@@ -468,6 +526,58 @@ impl Db {
         Ok(())
     }
 
+    /// Metadata JSON en `tasks.metadata` (ej: enlace a la propuesta de plan
+    /// que creó la tarea).
+    pub fn set_task_metadata(&self, id: i64, metadata: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE tasks SET metadata = ?2, updated_at = ?3 WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![id, metadata, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    // ---------------- propuestas de planificación (fase 7) ----------------
+
+    pub fn insert_plan_proposal(&self, text: &str, payload: &str, source: &str) -> rusqlite::Result<i64> {
+        let now = now_ms();
+        self.conn.execute(
+            "INSERT INTO plan_proposals (text, status, payload, source, created_at, updated_at)
+             VALUES (?1, 'pending', ?2, ?3, ?4, ?4)",
+            rusqlite::params![text, payload, source, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_plan_proposal(&self, id: i64) -> rusqlite::Result<Option<PlanProposalRow>> {
+        self.conn
+            .query_row(
+                "SELECT id, text, status, payload, source, created_at, updated_at FROM plan_proposals WHERE id = ?1",
+                [id],
+                plan_proposal_from_row,
+            )
+            .optional()
+    }
+
+    pub fn list_plan_proposals(&self, only_pending: bool) -> rusqlite::Result<Vec<PlanProposalRow>> {
+        let mut stmt = self.conn.prepare(if only_pending {
+            "SELECT id, text, status, payload, source, created_at, updated_at FROM plan_proposals
+             WHERE status = 'pending' ORDER BY created_at DESC"
+        } else {
+            "SELECT id, text, status, payload, source, created_at, updated_at FROM plan_proposals
+             ORDER BY created_at DESC LIMIT 50"
+        })?;
+        let rows = stmt.query_map([], plan_proposal_from_row)?;
+        rows.collect()
+    }
+
+    pub fn set_plan_proposal_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE plan_proposals SET status = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, status, now_ms()],
+        )?;
+        Ok(())
+    }
+
     pub fn duplicate(&self, id: i64) -> rusqlite::Result<Option<TaskRow>> {
         let Some(t) = self.get_task(id)? else { return Ok(None) };
         let now = now_ms();
@@ -521,17 +631,22 @@ impl Db {
     }
 
     // ---- suggested_events ----
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_suggestion(
         &self,
         source: &str,
         email_id: Option<&str>,
         sender: Option<&str>,
+        subject: &str,
+        kind: &str,
         title: &str,
         description: &str,
         category_id: &str,
         priority: &str,
         start_at: Option<i64>,
         end_at: Option<i64>,
+        deadline_at: Option<i64>,
+        prep_min: u32,
         location: &str,
         tags: &str,
         confidence: f64,
@@ -543,16 +658,67 @@ impl Db {
         let now = now_ms();
         self.conn.execute(
             "INSERT INTO suggested_events
-             (source, source_email_id, source_sender, title, description, category_id, priority,
-              start_at, end_at, location, tags, confidence, reason, status, dedupe_task_id, dedupe_note, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)",
+             (source, source_email_id, source_sender, source_subject, kind, title, description,
+              category_id, priority, start_at, end_at, deadline_at, prep_min, location, tags,
+              confidence, reason, status, dedupe_task_id, dedupe_note, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?21)",
             rusqlite::params![
-                source, email_id, sender, title, description, category_id, priority,
-                start_at, end_at, location, tags, confidence, reason, status,
-                dedupe_task_id, dedupe_note, now
+                source, email_id, sender, subject, kind, title, description,
+                category_id, priority, start_at, end_at, deadline_at, prep_min as i64,
+                location, tags, confidence, reason, status, dedupe_task_id, dedupe_note, now
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+
+    /// ¿Ya existe una sugerencia pendiente (o auto-aprobada) equivalente de
+    /// OTRO correo? Mismo compromiso en varios correos → una sola sugerencia
+    /// (fase 8). `exclude_email_id` evita chocar con la del propio correo.
+    pub fn find_similar_suggestion(
+        &self,
+        title: &str,
+        start_at: Option<i64>,
+        end_at: Option<i64>,
+        exclude_email_id: Option<&str>,
+    ) -> rusqlite::Result<Option<(i64, String)>> {
+        let window_start = start_at.unwrap_or(i64::MIN) - 48 * 3_600_000;
+        let window_end = end_at.unwrap_or(i64::MIN) + 48 * 3_600_000;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title FROM suggested_events
+             WHERE status IN ('pending','auto_approved')
+               AND start_at BETWEEN ?1 AND ?2
+               AND (?4 IS NULL OR source_email_id != ?4)
+             ORDER BY created_at ASC",
+        )?;
+        let candidates: Vec<(i64, String)> = stmt
+            .query_map(rusqlite::params![window_start, window_end, window_end, exclude_email_id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        for (id, t) in candidates {
+            if title_similar(title, &t) {
+                return Ok(Some((id, t)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Elimina la sugerencia por completo (control del usuario: "borrar").
+    /// Si tenía una tarea creada, también se borra.
+    pub fn delete_suggestion(&self, id: i64) -> rusqlite::Result<()> {
+        let task_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT result_task_id FROM suggested_events WHERE id = ?1 AND result_task_id IS NOT NULL AND result_task_id != 0",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(tid) = task_id {
+            let _ = self.delete(tid);
+        }
+        self.conn.execute("DELETE FROM suggested_events WHERE id = ?1", [id])?;
+        Ok(())
     }
 
     pub fn list_suggestions(&self, only_pending: bool, retention_ms: i64) -> rusqlite::Result<Vec<SuggestionRow>> {
@@ -770,12 +936,16 @@ fn suggestion_from_row(r: &rusqlite::Row) -> rusqlite::Result<SuggestionRow> {
         source: r.get("source")?,
         source_email_id: r.get("source_email_id")?,
         source_sender: r.get("source_sender")?,
+        source_subject: r.get("source_subject")?,
+        kind: r.get("kind")?,
         title: r.get("title")?,
         description: r.get("description")?,
         category_id: r.get("category_id")?,
         priority: r.get("priority")?,
         start_at: r.get("start_at")?,
         end_at: r.get("end_at")?,
+        deadline_at: r.get("deadline_at")?,
+        prep_min: r.get("prep_min")?,
         location: r.get("location")?,
         tags: r.get("tags")?,
         confidence: r.get("confidence")?,
@@ -795,12 +965,16 @@ pub struct SuggestionRow {
     pub source: String,
     pub source_email_id: Option<String>,
     pub source_sender: Option<String>,
+    pub source_subject: String,
+    pub kind: String,
     pub title: String,
     pub description: String,
     pub category_id: String,
     pub priority: String,
     pub start_at: Option<i64>,
     pub end_at: Option<i64>,
+    pub deadline_at: Option<i64>,
+    pub prep_min: u32,
     pub location: String,
     pub tags: String,
     pub confidence: f64,
@@ -811,6 +985,29 @@ pub struct SuggestionRow {
     pub result_task_id: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PlanProposalRow {
+    pub id: i64,
+    pub text: String,
+    pub status: String,
+    pub payload: String,
+    pub source: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn plan_proposal_from_row(r: &rusqlite::Row) -> rusqlite::Result<PlanProposalRow> {
+    Ok(PlanProposalRow {
+        id: r.get(0)?,
+        text: r.get(1)?,
+        status: r.get(2)?,
+        payload: r.get(3)?,
+        source: r.get(4)?,
+        created_at: r.get(5)?,
+        updated_at: r.get(6)?,
+    })
 }
 
 #[derive(Serialize, Clone)]
@@ -955,5 +1152,94 @@ mod tests {
         db.mark_reminder_fired(t.id).unwrap();
         db.move_to(t.id, now + 3_600_000, now + 5_400_000, None).unwrap();
         assert!(db.due_reminders(now).unwrap().is_empty());
+    }
+
+    fn ins_suggestion(db: &Db, email_id: &str, subject: &str, kind: &str, title: &str, start: i64) -> i64 {
+        db.insert_suggestion(
+            "email", Some(email_id), Some("a@b.c"), subject, kind, title, "", "otr", "media",
+            Some(start), Some(start + 3_600_000), None, 0, "", "[]", 0.9, "test", None, "", "pending",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn migration_0007_adds_email_intel_columns() {
+        let db = db();
+        let cols: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM pragma_table_info('suggested_events')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for c in ["kind", "deadline_at", "prep_min", "source_subject"] {
+            assert!(cols.iter().any(|x| x == c), "falta columna {c}");
+        }
+    }
+
+    #[test]
+    fn insert_suggestion_roundtrips_new_fields() {
+        let db = db();
+        let id = db
+            .insert_suggestion(
+                "email", Some("m1"), Some("jefe@x.com"), "Asunto", "deadline",
+                "Informe", "desc", "tra", "alta", Some(5), Some(5), Some(5), 240,
+                "", "[]", 0.9, "entrega", None, "", "pending",
+            )
+            .unwrap();
+        let s = db.get_suggestion(id).unwrap().unwrap();
+        assert_eq!(s.kind, "deadline");
+        assert_eq!(s.source_subject, "Asunto");
+        assert_eq!(s.deadline_at, Some(5));
+        assert_eq!(s.prep_min, 240);
+    }
+
+    #[test]
+    fn find_similar_suggestion_dedupes_across_emails() {
+        let db = db();
+        let start = now_ms() + 86_400_000;
+        let first = ins_suggestion(&db, "email-1", "Re: Informe", "event", "Informe del proyecto", start);
+        // mismo compromiso desde OTRO correo → detectado
+        let (id, _) = db
+            .find_similar_suggestion("Informe del proyecto", Some(start), Some(start + 3_600_000), Some("email-2"))
+            .unwrap()
+            .expect("duplicado detectado");
+        assert_eq!(id, first);
+        // el mismo correo que la creó no debe chocar consigo mismo
+        assert!(
+            db.find_similar_suggestion("Informe del proyecto", Some(start), Some(start + 3_600_000), Some("email-1"))
+                .unwrap()
+                .is_none(),
+            "excluye su propio correo"
+        );
+        // título distinto → no duplicado
+        assert!(
+            db.find_similar_suggestion("Cena familiar", Some(start), Some(start + 3_600_000), Some("email-2"))
+                .unwrap()
+                .is_none()
+        );
+        // ventana muy lejana → no duplicado
+        assert!(
+            db.find_similar_suggestion("Informe del proyecto", Some(start + 30 * 86_400_000), Some(start + 30 * 86_400_000 + 3_600_000), Some("email-2"))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn delete_suggestion_removes_row_and_created_task() {
+        let db = db();
+        let now = now_ms();
+        let id = ins_suggestion(&db, "email-1", "Asunto", "event", "Reunión", now);
+        db.set_suggestion_status(id, "accepted").unwrap();
+        let t = db
+            .create("Reunión", "tra", "media", now, now + 3_600_000, false)
+            .unwrap();
+        db.set_suggestion_result_task(id, t.id).unwrap();
+
+        db.delete_suggestion(id).unwrap();
+        assert!(db.get_suggestion(id).unwrap().is_none());
+        assert!(db.get_task(t.id).unwrap().is_none(), "tarea creada también borrada");
     }
 }

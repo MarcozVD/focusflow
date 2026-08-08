@@ -18,8 +18,9 @@ use winreg::RegKey;
 pub mod ai;
 pub mod email;
 pub mod engine;
+pub mod planning;
 pub mod reminders;
-mod store;
+pub mod store;
 pub mod sync;
 
 use ai::{validation::ParsedTask, AiConfig};
@@ -574,6 +575,19 @@ fn suggestion_revert(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Re
     Ok(())
 }
 
+/// Elimina la sugerencia por completo (control del usuario). Si tenía tarea
+/// creada, la borra también. No se puede recuperar.
+#[tauri::command]
+fn suggestion_delete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    db.delete_suggestion(id).map_err(|e| e.to_string())?;
+    drop(db);
+    append_log(&app, &format!("suggestion_deleted id={id}"));
+    let _ = app.emit("tasks:changed", ());
+    let _ = app.emit("email:new-suggestions", ());
+    Ok(())
+}
+
 #[tauri::command]
 fn suggestion_edit(
     app: AppHandle,
@@ -642,6 +656,83 @@ fn trusted_senders_add(state: State<'_, Mutex<Db>>, sender: String) -> Result<()
 #[tauri::command]
 fn trusted_senders_remove(state: State<'_, Mutex<Db>>, sender: String) -> Result<(), String> {
     state.lock().unwrap().trusted_remove(&sender).map_err(|e| e.to_string())
+}
+
+// ---------------- propuestas de planificación (fase 7) ----------------
+
+#[tauri::command]
+async fn plan_from_text(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    text: String,
+) -> Result<planning::PlanProposalView, String> {
+    let cfg = {
+        let db = state.lock().unwrap();
+        ai_config_from_db(&db)
+    };
+    let log_app = app.clone();
+    // La IA es bloqueante: se interpreta el texto fuera del mutex.
+    let text_ai = text.clone();
+    let (intents, source) = tauri::async_runtime::spawn_blocking(move || {
+        let (provider, configured) = match ai::provider_from_config(&cfg) {
+            Ok(p) => (Some(p), true),
+            Err(_) => (None, false),
+        };
+        let batch = match ai::intent_parser::parse_intent(&text_ai, provider.as_deref(), configured) {
+            Ok(b) => b,
+            Err(e) => {
+                append_log(&log_app, &format!("plan_ai_fail: {e}"));
+                return Err("no se pudo interpretar el texto".to_string());
+            }
+        };
+        Ok::<(Vec<ai::intent::Intent>, String), String>((batch.intents, batch.source))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let view = {
+        let db = state.lock().unwrap();
+        planning::plan_from_text(&db, &text, &intents, &source)?
+    };
+    append_log(&app, &format!("plan_created id={} source={} items={}", view.id, view.source, view.items.len()));
+    let _ = app.emit("plans:changed", ());
+    Ok(view)
+}
+
+#[tauri::command]
+fn plan_proposal_get(state: State<'_, Mutex<Db>>, id: i64) -> Result<Option<planning::PlanProposalView>, String> {
+    planning::get_plan(&state.lock().unwrap(), id)
+}
+
+#[tauri::command]
+fn plan_proposals_list(state: State<'_, Mutex<Db>>, only_pending: bool) -> Result<Vec<store::PlanProposalRow>, String> {
+    state.lock().unwrap().list_plan_proposals(only_pending).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn plan_accept(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    id: i64,
+    edit: Option<planning::EditedPlan>,
+) -> Result<Vec<TaskRow>, String> {
+    let db = state.lock().unwrap();
+    let tasks = planning::accept_plan(&db, id, &edit.unwrap_or_default())?;
+    drop(db);
+    append_log(&app, &format!("plan_accepted id={id} tasks={}", tasks.len()));
+    let _ = app.emit("tasks:changed", ());
+    let _ = app.emit("plans:changed", ());
+    Ok(tasks)
+}
+
+#[tauri::command]
+fn plan_reject(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    planning::reject_plan(&db, id)?;
+    drop(db);
+    append_log(&app, &format!("plan_rejected id={id}"));
+    let _ = app.emit("plans:changed", ());
+    Ok(())
 }
 
 // ---------------- widget ----------------
@@ -1030,9 +1121,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             suggestion_revert,
             suggestion_edit,
             suggestion_merge,
+            suggestion_delete,
             trusted_senders_list,
             trusted_senders_add,
             trusted_senders_remove,
+            plan_from_text,
+            plan_proposal_get,
+            plan_proposals_list,
+            plan_accept,
+            plan_reject,
             toggle_widget,
             widget_info,
             open_task,

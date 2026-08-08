@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
-  import { categories, quickadd, createTaskFromText, nlBusy } from "./data.svelte";
+  import { categories, quickadd, createTaskFromText, planFromText, nlBusy, planBusy } from "./data.svelte";
+  import PlanProposal from "./PlanProposal.svelte";
 
   let text = $state("");
   let showPreview = $state(false);
@@ -57,26 +58,39 @@
   async function confirm() {
     if (!text.trim()) return;
     const input = text;
-    const r = await createTaskFromText(input);
-    if (r.source === "stale") return;
+    // flujo fase 7: el texto se convierte en propuesta; el usuario la
+    // revisa y aprueba antes de tocar el calendario
+    const r = await planFromText(input);
     if (r.ok) {
-      flashText =
-        r.source === "ai"
-          ? "Tarea creada con la IA"
-          : "Tarea creada (interpretación local)";
       text = "";
       showPreview = false;
+      flashText = "Plan generado — revísalo antes de aceptar";
       flash = true;
-      setTimeout(() => (flash = false), 1600);
-    } else {
-      flashText = "No se pudo interpretar la tarea";
-      flash = true;
-      setTimeout(() => (flash = false), 1600);
+      setTimeout(() => (flash = false), 2000);
+      return;
     }
+    if (r.source === "stale") return;
+    if (r.source === "error") {
+      // sin Tauri o fallo del pipeline → creación directa (comportamiento anterior)
+      const direct = await createTaskFromText(input);
+      if (direct.source === "stale") return;
+      flashText = direct.ok ? "Tarea creada" : "No se pudo interpretar la tarea";
+      if (direct.ok) {
+        text = "";
+        showPreview = false;
+      }
+      flash = true;
+      setTimeout(() => (flash = false), 1600);
+      return;
+    }
+    flashText = "No se pudo interpretar la tarea";
+    flash = true;
+    setTimeout(() => (flash = false), 1600);
   }
 </script>
 
 <div class="qa-wrap">
+  <PlanProposal />
   <div class="qa {showPreview ? 'expanded' : ''}">
     <svg class="bolt" width="18" height="18" viewBox="0 0 24 24" fill="none">
       <path d="M13 2L4.5 13.5H11L9.5 22L19 9.5H12.5L13 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
@@ -107,8 +121,8 @@
           <span class="chip" style="--c: {d.color}">{d.label}</span>
         {/each}
       </div>
-      <button class="create" onclick={confirm}>
-        {nlBusy() ? "Procesando…" : "Crear tarea"}
+      <button class="create" onclick={confirm} disabled={planBusy() || nlBusy()}>
+        {planBusy() || nlBusy() ? "Procesando…" : "Planificar"}
       </button>
     </div>
   {/if}

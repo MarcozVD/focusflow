@@ -4,8 +4,7 @@ use chrono::TimeZone;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::ai::validation::ParsedEvent;
-use crate::ai::{self, AiError, AiResult};
+use crate::ai::{self, AiError};
 use crate::email::{self, EmailConfig, RawEmail, SyncCheckpoint};
 use crate::store::Db;
 
@@ -82,7 +81,9 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         }
     };
     let end = s.end_at.unwrap_or(start);
-    let all_day = s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at;
+    // Una ventana de disponibilidad se acepta como UNA tarea de todo el día
+    // que abarca el rango completo (nunca una tarea por día).
+    let all_day = s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at || s.kind == "availability";
     let task = db
         .create(&s.title, &s.category_id, &s.priority, start, end, all_day)
         .map_err(|e| e.to_string())?;
@@ -106,11 +107,15 @@ pub fn revert_suggestion(db: &Db, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// Procesa un correo con la IA: relevancia → eventos → sugerencias (o auto-aprobación).
+/// Procesa un correo con la IA: compromisos → sugerencias (o auto-aprobación).
+/// Fase 8: usa el pipeline de intenciones (event | deadline | availability |
+/// task), minimiza el cuerpo antes de mandarlo a la IA y deduplica entre
+/// correos (mismo compromiso en varios correos → una sola sugerencia).
 fn process_email(
     app: &AppHandle,
     db: &Db,
     provider: &dyn ai::AiProvider,
+    configured: bool,
     raw: &RawEmail,
 ) -> Result<usize, String> {
     let already = db
@@ -119,8 +124,7 @@ fn process_email(
     if already > 0 {
         return Ok(0);
     }
-    let res: AiResult<ai::validation::EmailParseResult> =
-        ai::email_parser::parse_email(&raw.subject, &raw.sender, &raw.date, &raw.body, provider);
+    let res = ai::email_intent::parse_email_intent(raw, provider, configured);
     match res {
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
             Err(format!("ia_fail {e}"))
@@ -129,59 +133,101 @@ fn process_email(
             crate::append_log(app, &format!("email_parse_invalid_json uid={} {e}", raw.uid));
             Ok(0)
         }
-        Ok(parsed) => {
-            if !parsed.is_relevant {
+        Ok(batch) => {
+            let actionable: Vec<_> = batch
+                .intents
+                .iter()
+                .filter(|i| {
+                    matches!(
+                        i.intent_type,
+                        crate::ai::intent::IntentType::Event
+                            | crate::ai::intent::IntentType::Task
+                            | crate::ai::intent::IntentType::Deadline
+                            | crate::ai::intent::IntentType::Availability
+                    )
+                })
+                .collect();
+            if actionable.is_empty() {
                 crate::append_log(
                     app,
-                    &format!("email_not_relevant uid={} reason={}", raw.uid, parsed.reason),
+                    &format!("email_no_intents uid={} n={}", raw.uid, batch.intents.len()),
                 );
                 return Ok(0);
             }
-            if parsed.events.is_empty() {
-                crate::append_log(app, &format!("email_no_events uid={} reason={}", raw.uid, parsed.reason));
-                return Ok(0);
-            }
             let mut count = 0;
-            for ev in &parsed.events {
-                count += insert_event_suggestion(app, db, raw, ev.clone(), parsed.confidence, &parsed.reason)?;
+            for it in actionable {
+                count += insert_intent_suggestion(app, db, raw, it)?;
             }
             Ok(count)
         }
     }
 }
 
-fn insert_event_suggestion(
+fn insert_intent_suggestion(
     app: &AppHandle,
     db: &Db,
     raw: &RawEmail,
-    ev: ParsedEvent,
-    confidence: f64,
-    reason: &str,
+    it: &crate::ai::intent::Intent,
 ) -> Result<usize, String> {
-    let (dedupe_id, dedupe_note) = match db.find_similar_task(&ev.title, ev.start_ms, &raw.sender) {
-        Ok(Some((id, t))) => (Some(id), format!("Posible duplicado de: {t}")),
-        _ => (None, String::new()),
+    use crate::ai::intent::IntentType;
+
+    let kind = ai::email_intent::suggestion_kind(&it.intent_type);
+    let (start_at, end_at, deadline_at) = match it.intent_type {
+        IntentType::Deadline => (it.deadline, it.deadline, it.deadline),
+        _ => (it.window.start, it.window.end, None),
+    };
+    // una sugerencia de disponibilidad SIEMPRE ocupa el rango completo
+    let start = start_at.or(deadline_at);
+    let end = if it.intent_type == IntentType::Availability {
+        end_at.or(start)
+    } else {
+        end_at.or(start)
+    };
+    let prep_min = it.preparation.as_ref().map(|p| p.minutes).unwrap_or(0);
+
+    // dedupe entre correos: mismo compromiso pendiente de otro correo
+    let (dedupe_id, dedupe_note) = match db.find_similar_suggestion(&it.title, start, end, Some(&raw.message_id)) {
+        Ok(Some((id, t))) => (Some(id), format!("Ya detectado en otro correo: {t}")),
+        _ => {
+            // y contra tareas ya existentes
+            match start {
+                Some(s) => match db.find_similar_task(&it.title, s, &raw.sender) {
+                    Ok(Some((id, t))) => (Some(id), format!("Posible duplicado de: {t}")),
+                    _ => (None, String::new()),
+                },
+                None => (None, String::new()),
+            }
+        }
     };
 
     let trusted = db.is_trusted(&email::sender_email(&raw.sender)).unwrap_or(false);
-    let status = if trusted && dedupe_id.is_none() { "auto_approved" } else { "pending" };
-    let tags = serde_json::to_string(&ev.tags).unwrap_or_else(|_| "[]".into());
+    // auto-aprobación solo con remitente de confianza, sin duplicados y
+    // con la fecha explícita (confianza alta)
+    let status = if trusted && dedupe_id.is_none() && it.confidence >= 0.6 {
+        "auto_approved"
+    } else {
+        "pending"
+    };
 
     let id = db
         .insert_suggestion(
             "email",
             Some(&raw.message_id),
             Some(&raw.sender),
-            &ev.title,
-            &ev.description,
-            &ev.category_id,
-            &ev.priority,
-            Some(ev.start_ms),
-            Some(ev.end_ms),
-            &ev.location,
-            &tags,
-            confidence,
-            reason,
+            &raw.subject,
+            kind,
+            &it.title,
+            &it.description,
+            &it.category_id,
+            &priority_str(it.priority),
+            start,
+            end,
+            deadline_at,
+            prep_min,
+            "",
+            "[]",
+            it.confidence,
+            &it.reason,
             dedupe_id,
             &dedupe_note,
             status,
@@ -192,12 +238,20 @@ fn insert_event_suggestion(
         match accept_suggestion(db, id) {
             Ok(_) => crate::append_log(
                 app,
-                &format!("email_auto_approved uid={} sender={}", raw.uid, raw.sender),
+                &format!("email_auto_approved uid={} sender={} kind={kind}", raw.uid, raw.sender),
             ),
             Err(e) => crate::append_log(app, &format!("email_auto_approve_fail: {e}")),
         }
     }
     Ok(1)
+}
+
+fn priority_str(p: crate::ai::intent::Priority) -> String {
+    match p {
+        crate::ai::intent::Priority::Alta => "alta".into(),
+        crate::ai::intent::Priority::Baja => "baja".into(),
+        crate::ai::intent::Priority::Media => "media".into(),
+    }
 }
 
 /// Ejecuta una sincronización completa. Comandos y scheduler la llaman.
@@ -238,6 +292,7 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
     if ai::get_email_credentials(&config.user).is_none() {
         return Err("falta la contraseña de aplicación del correo (Ajustes → Correo)".into());
     }
+    let ai_configured = !ai_cfg.endpoint.is_empty() && !ai_cfg.model.is_empty() && ai_cfg.provider_name() != "local";
 
     let mut session = match email::connect(&config) {
         Ok(s) => s,
@@ -284,7 +339,9 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                             total,
                         },
                     );
-                    let outcome = with_db(app, |db| process_email(app, db, provider.as_ref(), raw));
+                    let outcome = with_db(app, |db| {
+                        process_email(app, db, provider.as_ref(), ai_configured, raw)
+                    });
                     match outcome {
                         Ok(n) => {
                             mb.processed += n;

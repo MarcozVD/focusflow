@@ -14,6 +14,7 @@
 //!                                      IntentBatch + summary + confianza
 //! ```
 
+pub mod email_intent;
 pub mod email_parser;
 pub mod intent;
 pub mod intent_parser;

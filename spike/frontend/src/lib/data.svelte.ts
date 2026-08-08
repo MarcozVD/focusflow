@@ -84,6 +84,58 @@ export interface GeneralSettingsView {
   autostart_actual: boolean;
 }
 
+// ---------------- propuestas de planificación (fase 7) ----------------
+
+export interface PlanSessionView {
+  start_ms: number;
+  end_ms: number;
+  is_prep: boolean;
+}
+
+export interface PlanItemView {
+  title: string;
+  intent_type: string;
+  priority: string;
+  category_id: string;
+  deadline_bound_ms: number | null;
+  prep_min: number;
+  task_min: number;
+  required_min: number;
+  planned_min: number;
+  complete: boolean;
+  notes: string[];
+  sessions: PlanSessionView[];
+}
+
+export interface UnderstoodView {
+  title: string;
+  intent_type: string;
+  category_id: string;
+  priority: string;
+  when_label: string;
+  deadline: number | null;
+  window_start: number | null;
+  window_end: number | null;
+  all_day: boolean;
+  prep_min: number;
+  task_min: number;
+  reminders_min_before: number[];
+}
+
+export interface PlanProposalView {
+  id: number;
+  text: string;
+  status: string;
+  source: string;
+  understanding: UnderstoodView[];
+  items: PlanItemView[];
+  created_at: number;
+}
+
+export interface EditedPlan {
+  items: { start_ms: number; end_ms: number }[][];
+}
+
 const store = $state({
   tasks: [] as Task[],
   ready: false,
@@ -107,6 +159,9 @@ const store = $state({
   nextSyncAt: null as number | null,
   theme: "" as "" | "light" | "dark",
   accent: "#2563EB",
+  planProposal: null as PlanProposalView | null,
+  planBusy: false,
+  planError: "",
 });
 
 export const tasks = () => store.tasks;
@@ -131,6 +186,63 @@ export const lastSyncAt = () => store.lastSyncAt;
 export const nextSyncAt = () => store.nextSyncAt;
 export const uiTheme = () => store.theme;
 export const uiAccent = () => store.accent;
+export const planProposal = () => store.planProposal;
+export const planBusy = () => store.planBusy;
+export const planError = () => store.planError;
+
+export function closePlanProposal() {
+  store.planProposal = null;
+  store.planError = "";
+}
+
+/** Texto → propuesta de plan (no toca el calendario hasta aceptar). */
+export async function planFromText(text: string): Promise<{ ok: boolean; source: string; error?: string }> {
+  if (!inTauri()) {
+    store.planProposal = null;
+    return { ok: false, source: "stale", error: "sin Tauri" };
+  }
+  store.planBusy = true;
+  store.planError = "";
+  try {
+    const view = await invoke<PlanProposalView>("plan_from_text", { text });
+    store.planProposal = view;
+    return { ok: true, source: view.source };
+  } catch (e) {
+    store.planError = String(e);
+    return { ok: false, source: "error", error: String(e) };
+  } finally {
+    store.planBusy = false;
+  }
+}
+
+/** Acepta la propuesta; `edit` (opcional) reemplaza los bloques por ítem. */
+export async function planAccept(id: number, edit?: EditedPlan): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
+  store.planBusy = true;
+  store.planError = "";
+  try {
+    await invoke("plan_accept", { id, edit: edit ?? null });
+    store.planProposal = null;
+    return { ok: true };
+  } catch (e) {
+    store.planError = String(e);
+    return { ok: false, error: String(e) };
+  } finally {
+    store.planBusy = false;
+  }
+}
+
+/** Cancela la propuesta sin cambios en el calendario. */
+export async function planReject(id: number): Promise<void> {
+  if (!inTauri()) return;
+  try {
+    await invoke("plan_reject", { id });
+  } catch (e) {
+    console.error("planReject", e);
+  }
+  store.planProposal = null;
+  store.planError = "";
+}
 
 export function openTaskDetail(t: Task) {
   store.taskDetail = t;
@@ -437,12 +549,16 @@ export interface Suggestion {
   source: string;
   source_email_id: string | null;
   source_sender: string | null;
+  source_subject: string;
+  kind: string;
   title: string;
   description: string;
   category_id: string;
   priority: string;
   start_at: number | null;
   end_at: number | null;
+  deadline_at: number | null;
+  prep_min: number;
   location: string;
   tags: string;
   confidence: number;
@@ -454,6 +570,20 @@ export interface Suggestion {
   created_at: number;
   updated_at: number;
 }
+
+export const KIND_LABELS: Record<string, string> = {
+  event: "Evento",
+  deadline: "Vencimiento",
+  availability: "Disponibilidad",
+  task: "Tarea",
+};
+
+export const KIND_EMOJI: Record<string, string> = {
+  event: "📅",
+  deadline: "⏰",
+  availability: "🟢",
+  task: "☑️",
+};
 
 export interface AiConfigView {
   endpoint: string;
@@ -812,6 +942,17 @@ export async function suggestionRevert(id: number) {
     await loadSuggestions();
   } catch (e) {
     console.error("suggestionRevert", e);
+  }
+}
+
+export async function suggestionDelete(id: number) {
+  if (!inTauri()) return;
+  try {
+    await invoke("suggestion_delete", { id });
+    await refreshTasks();
+    await loadSuggestions();
+  } catch (e) {
+    console.error("suggestionDelete", e);
   }
 }
 
