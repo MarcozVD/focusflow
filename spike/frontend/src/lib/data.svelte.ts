@@ -369,6 +369,28 @@ export function openAgenda() {
   invoke("open_agenda").catch(() => {});
 }
 
+/** Abre la app principal (desde el widget). */
+export function openApp() {
+  if (!inTauri()) return;
+  invoke("open_app").catch(() => {});
+}
+
+/** Abre la app en el Asistente (desde el widget). */
+export function askAssistant() {
+  if (!inTauri()) return;
+  invoke("open_assistant").catch(() => {});
+}
+
+/** Acción rápida del widget: complete | postpone | start (vía servicios). */
+export async function widgetAction(id: number, action: "complete" | "postpone" | "start") {
+  if (!inTauri()) return;
+  try {
+    await invoke("widget_action", { id, action });
+  } catch (e) {
+    console.error("widgetAction", e);
+  }
+}
+
 /** Abre una tarea directamente en la app principal (desde el widget). */
 export function openTaskRemote(id: number) {
   if (!inTauri()) return;

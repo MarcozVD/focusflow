@@ -44,13 +44,20 @@
     const un2 = listen("nav:agenda", () => {
       view = "agenda";
     });
+    const un3 = listen("nav:assistant", () => {
+      view = "asistente";
+    });
     const un3 = listen("ui:prefs", (e) => {
       applyUiPrefs(e.payload as { theme?: string; accent?: string });
+    });
+    const un4 = listen("nav:assistant", () => {
+      view = "asistente";
     });
     return () => {
       un1.then((f) => f());
       un2.then((f) => f());
       un3.then((f) => f());
+      un4.then((f) => f());
     };
   });
 

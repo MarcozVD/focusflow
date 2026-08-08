@@ -435,6 +435,19 @@ impl Db {
         Ok(())
     }
 
+    /// Cambia el estado de una tarea a uno válido (pendiente | en-curso |
+    /// completada). Acciones rápidas del widget usan este servicio.
+    pub fn set_task_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        debug_assert!(matches!(status, "pendiente" | "en-curso" | "completada"));
+        let now = now_ms();
+        self.conn.execute(
+            "UPDATE tasks SET status = ?2, updated_at = ?3
+             WHERE id = ?1",
+            rusqlite::params![id, status, now],
+        )?;
+        Ok(())
+    }
+
     pub fn delete(&self, id: i64) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE tasks SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
@@ -1336,5 +1349,17 @@ mod tests {
         db.set_assistant_action_status(id, "accepted").unwrap();
         assert!(db.list_assistant_actions(true).unwrap().is_empty());
         assert_eq!(db.list_assistant_actions(false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn set_task_status_marks_en_curso() {
+        let db = db();
+        let now = now_ms();
+        let t = db.create("Estudiar", "uni", "media", now, now + 3_600_000, false).unwrap();
+        assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "pendiente");
+        db.set_task_status(t.id, "en-curso").unwrap();
+        assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "en-curso");
+        db.set_task_status(t.id, "completada").unwrap();
+        assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "completada");
     }
 }

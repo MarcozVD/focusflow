@@ -1068,6 +1068,58 @@ fn open_agenda(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// "Pregunta a FocusFlow": abre la app en la vista del Asistente (fase 9/10).
+#[tauri::command]
+fn open_assistant(app: AppHandle) -> Result<(), String> {
+    show_main(&app);
+    if let Some(w) = app.get_webview_window("widget") {
+        let _ = w.hide();
+    }
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        let _ = app2.emit("nav:assistant", ());
+    });
+    append_log(&app, "open_assistant_from_widget");
+    Ok(())
+}
+
+/// Acción rápida del widget, aplicada vía los servicios existentes del store:
+/// - complete  → set_completed
+/// - postpone  → move_to (+1 h)
+/// - start     → set_task_status('en-curso')
+#[tauri::command]
+fn widget_action(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    id: i64,
+    action: String,
+) -> Result<String, String> {
+    let db = state.lock().unwrap();
+    let t = db
+        .get_task(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "tarea no encontrada".to_string())?;
+    match action.as_str() {
+        "complete" => {
+            db.set_completed(id, true).map_err(|e| e.to_string())?;
+        }
+        "postpone" => {
+            let delta = 3_600_000;
+            db.move_to(id, t.start_at + delta, t.end_at + delta, Some(t.all_day))
+                .map_err(|e| e.to_string())?;
+        }
+        "start" => {
+            db.set_task_status(id, "en-curso").map_err(|e| e.to_string())?;
+        }
+        other => return Err(format!("acción desconocida: {other}")),
+    }
+    drop(db);
+    append_log(&app, &format!("widget_action id={id} action={action}"));
+    let _ = app.emit("tasks:changed", ());
+    Ok(action)
+}
+
 fn auto_start_behavior(app: &AppHandle, db: &Db) {
     if setting_bool(db, "general.start_minimized", false) {
         if let Some(w) = app.get_webview_window("main") {
@@ -1236,6 +1288,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             widget_info,
             open_task,
             open_agenda,
+            open_assistant,
+            widget_action,
             general_settings_get,
             general_settings_set,
             ui_prefs_get,
