@@ -21,6 +21,9 @@
     setUiPrefs,
     uiTheme,
     uiAccent,
+    notifPrefs,
+    loadNotifPrefs,
+    saveNotifPrefs,
   } from "./data.svelte";
 
   const ACCENTS = ["#2563EB", "#7C3AED", "#EC4899", "#F59E0B", "#10B981", "#0EA5E9"];
@@ -76,6 +79,40 @@
   let gCloseTray = $state(true);
   let gConflictStrict = $state(false);
   let gSaving = $state(false);
+
+  let nEnabled = $state(true);
+  let nQuietStart = $state("22:00");
+  let nQuietEnd = $state("08:00");
+  let nDailyCap = $state(5);
+  let nFreeMinutes = $state(120);
+  let nSaving = $state(false);
+  let nError = $state("");
+
+  $effect(() => {
+    const p = notifPrefs();
+    if (p) {
+      nEnabled = p.enabled;
+      nQuietStart = p.quiet_start;
+      nQuietEnd = p.quiet_end;
+      nDailyCap = p.daily_cap;
+      nFreeMinutes = p.free_minutes;
+    }
+  });
+
+  async function saveNotif() {
+    nSaving = true;
+    nError = "";
+    const r = await saveNotifPrefs({
+      enabled: nEnabled,
+      quiet_start: nQuietStart,
+      quiet_end: nQuietEnd,
+      daily_cap: nDailyCap,
+      free_minutes: nFreeMinutes,
+    });
+    if (!r.ok) nError = r.error ?? "error";
+    await loadNotifPrefs();
+    nSaving = false;
+  }
 
   $effect(() => {
     const g = generalSettings();
@@ -559,6 +596,46 @@
   </section>
 
   <section>
+    <h2>Notificaciones contextuales</h2>
+    <p class="hint">
+      FocusFlow te avisa solo cuando hay algo útil: vencimientos, tareas atrasadas, conflictos de
+      horario o tiempo libre para preparar. Sin spam: hay cadencia por tipo y tope diario.
+    </p>
+    <label class="check">
+      <input type="checkbox" bind:checked={nEnabled} />
+      Notificaciones contextuales activadas
+    </label>
+    <div class="row">
+      <label>
+        <span class="lbl">Horario de silencio (desde)</span>
+        <input class="t" type="time" bind:value={nQuietStart} disabled={!nEnabled} />
+      </label>
+      <label>
+        <span class="lbl">Hasta</span>
+        <input class="t" type="time" bind:value={nQuietEnd} disabled={!nEnabled} />
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        <span class="lbl">Tope diario</span>
+        <input class="t" type="number" min="1" max="20" bind:value={nDailyCap} disabled={!nEnabled} />
+      </label>
+      <label>
+        <span class="lbl">Tiempo libre mínimo para sugerir (min)</span>
+        <input class="t" type="number" min="30" max="600" step="15" bind:value={nFreeMinutes} disabled={!nEnabled} />
+      </label>
+    </div>
+    {#if nError}
+      <p class="warn">{nError}</p>
+    {/if}
+    <div class="row">
+      <button class="btn primary" onclick={saveNotif} disabled={nSaving}>
+        {nSaving ? "Guardando…" : "Guardar notificaciones"}
+      </button>
+    </div>
+  </section>
+
+  <section>
     <h2>Sincronización de Hoy</h2>
     <p class="hint">
       Resumen de la última sincronización del día de hoy. El historial completo queda aparte.
@@ -728,6 +805,12 @@
     gap: 8px;
     flex-wrap: wrap;
     align-items: center;
+  }
+  .lbl {
+    display: block;
+    font-size: 12px;
+    color: var(--text-2);
+    margin-bottom: 4px;
   }
   .accents {
     display: flex;

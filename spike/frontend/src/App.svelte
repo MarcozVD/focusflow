@@ -12,8 +12,9 @@
   import Suggestions from "./lib/Suggestions.svelte";
   import Assistant from "./lib/Assistant.svelte";
   import Settings from "./lib/Settings.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks } from "./lib/data.svelte.ts";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
+  import ContextualToast from "./lib/ContextualToast.svelte";
 
   let view = $state<"mes" | "semana" | "dia" | "agenda" | "sugerencias" | "asistente" | "ajustes">("semana");
   let date = $state(new Date());
@@ -29,6 +30,7 @@
     loadEmailConfig();
     loadSyncStatus();
     loadUiPrefs();
+    loadNotifPrefs();
     try {
       isWidget = getCurrentWindow().label === "widget";
       if (isWidget) document.documentElement.dataset.widget = "";
@@ -81,6 +83,16 @@
       loadEmailConfig();
       loadSyncStatus();
       loadGeneralSettings();
+    }
+  }
+
+  function planFromNotif(n: { task_id: number; task_title: string; kind: string }) {
+    if (aiConfig()?.configured) {
+      setAssistantDraft(`Crea un plan para: «${n.task_title}». Ten en cuenta el resto de mi agenda.`);
+      setView("asistente");
+    } else {
+      const t = tasks().find((x) => x.id === n.task_id);
+      if (t) openTaskDetail(t);
     }
   }
   function navigate(dir: -1 | 1) {
@@ -156,6 +168,9 @@
     </div>
     {#if taskDetail()}
       <TaskDrawer />
+    {/if}
+    {#if !isWidget}
+      <ContextualToast onplan={planFromNotif} />
     {/if}
   </div>
 {/if}

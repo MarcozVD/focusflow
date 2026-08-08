@@ -8,6 +8,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::Timelike;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 
@@ -30,6 +31,19 @@ fn now_ms() -> i64 {
 }
 
 fn tick(app: &AppHandle) {
+    // respeta preferencias de notificación (kill-switch y horario de silencio)
+    let quiet = crate::sync::with_db(app, |db| {
+        let p = crate::notify::prefs(db);
+        if !p.enabled {
+            return true;
+        }
+        let now = chrono::Local::now();
+        crate::notify::in_quiet_hours(now.hour() * 60 + now.minute(), &p)
+    });
+    if quiet {
+        return;
+    }
+    crate::notify::tick(app);
     let due = crate::sync::with_db(app, |db| db.due_reminders(now_ms()));
     let due = match due {
         Ok(v) => v,

@@ -19,6 +19,7 @@ pub mod ai;
 pub mod assistant;
 pub mod email;
 pub mod engine;
+pub mod notify;
 pub mod planning;
 pub mod reminders;
 pub mod store;
@@ -991,6 +992,55 @@ fn general_settings_set(
 
 // ---------------- preferencias de UI (tema + acento) ----------------
 
+// ---------------- notificaciones contextuales (fase 11) ----------------
+
+#[tauri::command]
+fn notif_prefs_get(state: State<'_, Mutex<Db>>) -> notify::NotifPrefsView {
+    let db = state.lock().unwrap();
+    notify::prefs_view(&db)
+}
+
+#[tauri::command]
+fn notif_prefs_set(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    enabled: bool,
+    quiet_start: String,
+    quiet_end: String,
+    daily_cap: i64,
+    free_minutes: i64,
+) -> Result<(), String> {
+    // valida formato HH:MM de la ventana de silencio
+    let check = |s: &str| -> Result<(), String> {
+        let (h, m) = s.split_once(':').ok_or_else(|| format!("formato inválido: {s} (espera HH:MM)"))?;
+        h.parse::<u32>().map_err(|_| format!("hora inválida: {h}"))?;
+        m.parse::<u32>().map_err(|_| format!("minuto inválido: {m}"))?;
+        Ok(())
+    };
+    check(&quiet_start)?;
+    check(&quiet_end)?;
+    let cap = daily_cap.clamp(1, 20);
+    let free = free_minutes.clamp(30, 600);
+    let db = state.lock().unwrap();
+    db.settings_set("notif.enabled", if enabled { "1" } else { "0" }).map_err(|e| e.to_string())?;
+    db.settings_set("notif.quiet_start", &quiet_start).map_err(|e| e.to_string())?;
+    db.settings_set("notif.quiet_end", &quiet_end).map_err(|e| e.to_string())?;
+    db.settings_set("notif.daily_cap", &cap.to_string()).map_err(|e| e.to_string())?;
+    db.settings_set("notif.free_minutes", &free.to_string()).map_err(|e| e.to_string())?;
+    append_log(
+        &app,
+        &format!("notif_prefs_set enabled={enabled} quiet={quiet_start}-{quiet_end} cap={cap} free_min={free}"),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn notif_respond(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64, status: String) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    db.set_notif_status(id, &status).map_err(|e| e.to_string())?;
+    append_log(&app, &format!("notif_respond id={id} status={status}"));
+    Ok(())
+}
 #[derive(Serialize, Clone)]
 struct UiPrefsView {
     theme: String,
@@ -1292,6 +1342,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             widget_action,
             general_settings_get,
             general_settings_set,
+            notif_prefs_get,
+            notif_prefs_set,
+            notif_respond,
             ui_prefs_get,
             ui_prefs_set,
             open_app
@@ -1310,6 +1363,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             db.settings_default("general.close_to_tray_widget", "1").ok();
             db.settings_default("ui.theme", "").ok();
             db.settings_default("ui.accent", "#2563EB").ok();
+            db.settings_default("notif.enabled", "1").ok();
+            db.settings_default("notif.quiet_start", "22:00").ok();
+            db.settings_default("notif.quiet_end", "08:00").ok();
+            db.settings_default("notif.daily_cap", "5").ok();
+            db.settings_default("notif.free_minutes", "120").ok();
+            db.settings_default("notif.cooldown_hours", "24").ok();
             app.manage(Mutex::new(db));
 
             let show = MenuItem::with_id(&handle, "show", "Abrir FocusFlow", true, None::<&str>)?;

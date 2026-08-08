@@ -11,6 +11,7 @@
     planProposal,
     planAccept,
     planReject,
+    takeAssistantDraft,
     cat,
     fmtDate,
     fmtMs,
@@ -26,6 +27,11 @@
   let input = $state("");
   let pendingAction = $state<number | null>(null);
   let applied: Record<number, string> = $state({});
+
+  $effect(() => {
+    const draft = takeAssistantDraft();
+    if (draft) send(draft);
+  });
 
   const QUICK = [
     "¿Qué debería hacer hoy?",

@@ -104,6 +104,16 @@ impl Db {
         Ok(db)
     }
 
+    /// Base efímera SIN datos de demostración (para tests deterministas).
+    #[doc(hidden)]
+    pub fn open_memory_clean_pub() -> rusqlite::Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.pragma_update(None, "busy_timeout", 2000)?;
+        let db = Db { conn };
+        db.migrate()?;
+        Ok(db)
+    }
+
     fn migrate(&self) -> rusqlite::Result<()> {
         self.migrate_0001()?;
         self.migrate_0002()?;
@@ -112,7 +122,29 @@ impl Db {
         self.migrate_0005()?;
         self.migrate_0006()?;
         self.migrate_0007()?;
-        self.migrate_0008()
+        self.migrate_0008()?;
+        self.migrate_0009()
+    }
+
+    /// Notificaciones contextuales (fase 11): registro de disparos para
+    /// deduplicar (sin spam), respetar cadencia diaria y recordar las
+    /// decisiones del usuario (dismiss/más tarde).
+    fn migrate_0009(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS notification_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                task_id INTEGER NOT NULL,
+                fired_at INTEGER NOT NULL,
+                payload TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'shown'
+            )",
+        )?;
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS idx_notif_log_lookup ON notification_log(kind, task_id)")?;
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS idx_notif_log_fired ON notification_log(fired_at)")?;
+        Ok(())
     }
 
     /// Inteligencia de correo (fase 8): tipo de compromiso por sugerencia
@@ -566,6 +598,59 @@ impl Db {
             rusqlite::params![id, metadata, now_ms()],
         )?;
         Ok(())
+    }
+
+    // ---------------- registro de notificaciones (fase 11) ----------------
+
+    /// Registra un disparo de notificación contextual y devuelve su id.
+    pub fn log_notification(&self, kind: &str, task_id: i64, payload: &str) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO notification_log (kind, task_id, fired_at, payload) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![kind, task_id, now_ms(), payload],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn set_notif_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE notification_log SET status = ?2 WHERE id = ?1",
+            rusqlite::params![id, status],
+        )?;
+        Ok(())
+    }
+
+    /// ¿El usuario descartó este (kind, tarea) alguna vez? → no volver a insistir.
+    pub fn notif_dismissed(&self, kind: &str, task_id: i64) -> rusqlite::Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM notification_log WHERE kind = ?1 AND task_id = ?2 AND status = 'dismissed' LIMIT 1",
+                rusqlite::params![kind, task_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|v| v.is_some())
+    }
+
+    /// ¿Disparado recientemente (ventana de cadencia) para (kind, tarea)?
+    pub fn notif_fired_recently(&self, kind: &str, task_id: i64, since_ms: i64) -> rusqlite::Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM notification_log
+                 WHERE kind = ?1 AND task_id = ?2 AND status != 'dismissed' AND fired_at >= ?3 LIMIT 1",
+                rusqlite::params![kind, task_id, since_ms],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|v| v.is_some())
+    }
+
+    /// Disparos de hoy (tope diario anti-spam).
+    pub fn notif_fired_today(&self, day_start_ms: i64) -> rusqlite::Result<i64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM notification_log WHERE fired_at >= ?1 AND status != 'dismissed'",
+            [day_start_ms],
+            |r| r.get(0),
+        )
     }
 
     // ---------------- propuestas de planificación (fase 7) ----------------

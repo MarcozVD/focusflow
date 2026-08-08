@@ -190,6 +190,9 @@ const store = $state({
   assistantBusy: false,
   assistantError: "",
   assistantActions: 0,
+  notifPrefs: null as NotifPrefsView | null,
+  contextualNotif: null as ContextualNotif | null,
+  assistantDraft: "",
 });
 
 export const tasks = () => store.tasks;
@@ -349,6 +352,78 @@ export async function refreshAssistantActions() {
   } catch {
     /* noop */
   }
+}
+
+// ---------------- notificaciones contextuales (fase 11) ----------------
+
+export interface NotifPrefsView {
+  enabled: boolean;
+  quiet_start: string;
+  quiet_end: string;
+  daily_cap: number;
+  free_minutes: number;
+}
+
+export interface ContextualNotif {
+  log_id: number;
+  kind: "deadline" | "missed" | "conflict" | "free_time" | "important" | "reschedule";
+  task_id: number;
+  title: string;
+  body: string;
+  task_title: string;
+}
+
+export const notifPrefs = () => store.notifPrefs;
+export const contextualNotif = () => store.contextualNotif;
+
+export async function loadNotifPrefs() {
+  if (!inTauri()) return;
+  try {
+    store.notifPrefs = await invoke<NotifPrefsView>("notif_prefs_get");
+  } catch (e) {
+    console.error("loadNotifPrefs", e);
+  }
+}
+
+export async function saveNotifPrefs(p: NotifPrefsView): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: false, error: "sin Tauri" };
+  try {
+    await invoke("notif_prefs_set", {
+      enabled: p.enabled,
+      quietStart: p.quiet_start,
+      quietEnd: p.quiet_end,
+      dailyCap: p.daily_cap,
+      freeMinutes: p.free_minutes,
+    });
+    store.notifPrefs = p;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Respuesta del usuario a una notificación contextual (para el registro anti-spam). */
+export async function notifRespond(id: number, status: "planned" | "later" | "dismissed") {
+  if (!inTauri()) return;
+  try {
+    await invoke("notif_respond", { id, status });
+  } catch {
+    /* noop */
+  }
+}
+
+export function closeContextualNotif() {
+  store.contextualNotif = null;
+}
+
+/** Prompt prefabricado para el asistente (desde notificaciones contextuales). */
+export function setAssistantDraft(text: string) {
+  store.assistantDraft = text;
+}
+export function takeAssistantDraft(): string {
+  const t = store.assistantDraft;
+  store.assistantDraft = "";
+  return t;
 }
 
 export function clearAssistantThread() {
@@ -652,6 +727,9 @@ export async function init() {
       }
     });
     await listen("quickadd", () => bumpQuickadd());
+    await listen("notif:contextual", (e) => {
+      store.contextualNotif = e.payload as ContextualNotif;
+    });
     await listen("email:new-suggestions", () => {
       loadSuggestions();
       refreshTasks();
