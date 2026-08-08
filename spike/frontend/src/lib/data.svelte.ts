@@ -136,6 +136,30 @@ export interface EditedPlan {
   items: { start_ms: number; end_ms: number }[][];
 }
 
+export interface HistoryMsg {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface AssistantActionView {
+  proposal_id: number;
+  kind: string;
+  task_title: string;
+  title: string;
+  category_id: string;
+  priority: string;
+  start_ms: number | null;
+  end_ms: number | null;
+  all_day: boolean;
+  summary: string;
+}
+
+export type AssistantTurn =
+  | { type: "Answer"; text: string }
+  | { type: "Plan"; proposal: PlanProposalView; note: string }
+  | { type: "Action"; action: AssistantActionView }
+  | { type: "Nothing"; text: string };
+
 const store = $state({
   tasks: [] as Task[],
   ready: false,
@@ -162,6 +186,10 @@ const store = $state({
   planProposal: null as PlanProposalView | null,
   planBusy: false,
   planError: "",
+  assistantThread: [] as { role: "user" | "assistant"; turn: AssistantTurn | null; text: string; at: number }[],
+  assistantBusy: false,
+  assistantError: "",
+  assistantActions: 0,
 });
 
 export const tasks = () => store.tasks;
@@ -189,6 +217,10 @@ export const uiAccent = () => store.accent;
 export const planProposal = () => store.planProposal;
 export const planBusy = () => store.planBusy;
 export const planError = () => store.planError;
+export const assistantThread = () => store.assistantThread;
+export const assistantBusy = () => store.assistantBusy;
+export const assistantError = () => store.assistantError;
+export const assistantActionsPending = () => store.assistantActions;
 
 export function closePlanProposal() {
   store.planProposal = null;
@@ -242,6 +274,86 @@ export async function planReject(id: number): Promise<void> {
   }
   store.planProposal = null;
   store.planError = "";
+}
+
+const MAX_HISTORY_TURNS = 6;
+
+function historyForTurn(): HistoryMsg[] {
+  return store.assistantThread
+    .filter((m) => m.role === "user" || (m.turn && m.turn.type !== "Action"))
+    .slice(-MAX_HISTORY_TURNS)
+    .map((m) => {
+      if (m.role === "user") return { role: "user", text: m.text };
+      const t = m.turn;
+      const text =
+        t?.type === "Answer"
+          ? t.text
+          : t?.type === "Nothing"
+            ? t.text
+            : t?.type === "Plan"
+              ? t.note
+              : t?.type === "Action"
+                ? `(acción propuesta: ${t.action.summary})`
+                : m.text;
+      return { role: "assistant", text };
+    });
+}
+
+/** Envía un turno al asistente. La respuesta se añade al hilo. */
+export async function assistantTurn(text: string): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: false, error: "sin Tauri" };
+  store.assistantBusy = true;
+  store.assistantError = "";
+  store.assistantThread.push({ role: "user", turn: null, text, at: Date.now() });
+  try {
+    const turn = await invoke<AssistantTurn>("assistant_turn", { text, history: historyForTurn() });
+    store.assistantThread.push({ role: "assistant", turn, text: "", at: Date.now() });
+    if (turn.type === "Plan") store.planProposal = turn.proposal;
+    if (turn.type === "Action") {
+      store.assistantActions++;
+      refreshAssistantActions();
+    }
+    await refreshTasks();
+    return { ok: true };
+  } catch (e) {
+    store.assistantError = String(e);
+    store.assistantThread.push({
+      role: "assistant",
+      turn: { type: "Nothing", text: `Error: ${String(e)}` },
+      text: "",
+      at: Date.now(),
+    });
+    return { ok: false, error: String(e) };
+  } finally {
+    store.assistantBusy = false;
+  }
+}
+
+export async function assistantActionAccept(id: number): Promise<string> {
+  const r = await invoke<string>("assistant_action_accept", { id });
+  store.assistantActions = Math.max(0, store.assistantActions - 1);
+  await refreshTasks();
+  await loadSuggestions();
+  return r;
+}
+
+export async function assistantActionReject(id: number): Promise<void> {
+  await invoke("assistant_action_reject", { id });
+  store.assistantActions = Math.max(0, store.assistantActions - 1);
+}
+
+export async function refreshAssistantActions() {
+  try {
+    const rows = await invoke<{ status: string }[]>("assistant_actions_list", { onlyPending: true });
+    store.assistantActions = rows.length;
+  } catch {
+    /* noop */
+  }
+}
+
+export function clearAssistantThread() {
+  store.assistantThread = [];
+  store.assistantError = "";
 }
 
 export function openTaskDetail(t: Task) {
@@ -507,6 +619,7 @@ export async function init() {
   if (listenersReady) return;
   listenersReady = true;
   try {
+    refreshAssistantActions();
     await listen("tasks:changed", () => {
       refreshTasks();
       if (store.taskDetail) {

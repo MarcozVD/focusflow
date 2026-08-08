@@ -29,6 +29,7 @@
       { id: "mes", label: "Mes", icon: "grid" },
       { id: "dia", label: "Día", icon: "sun" },
       { id: "agenda", label: "Agenda", icon: "list" },
+      { id: "asistente", label: "Asistente", icon: "sparkle" },
       { id: "sugerencias", label: "Sugerencias", icon: "inbox" },
       { id: "ajustes", label: "Ajustes", icon: "gear" },
     ] as item}
@@ -47,6 +48,8 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M8 6H21M8 12H21M8 18H21M3 6H3.01M3 12H3.01M3 18H3.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
           {:else if item.icon === "inbox"}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22 12H16L14 15H10L8 12H2M5 4H19L22 12V18A2 2 0 0 1 20 20H4A2 2 0 0 1 2 18V12L5 4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          {:else if item.icon === "sparkle"}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3L13.8 9.2L20 11L13.8 12.8L12 19L10.2 12.8L4 11L10.2 9.2L12 3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M19 16L19.9 18.9L22 19.8L19.9 20.7L19 23.6L18.1 20.7L16 19.8L18.1 18.9L19 16Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           {:else}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15A1.65 1.65 0 0 0 21 12.36V11.64A1.65 1.65 0 0 0 19.4 9 1.65 1.65 0 0 0 19.4 6.6 1.65 1.65 0 0 0 17 5.6 1.65 1.65 0 0 0 15 4 1.65 1.65 0 0 0 12.36 5.6H11.64A1.65 1.65 0 0 0 9 4a1.65 1.65 0 0 0-1.4 1.6A1.65 1.65 0 0 0 5.6 6.6 1.65 1.65 0 0 0 4 9a1.65 1.65 0 0 0 1.6 1.4v1.2A1.65 1.65 0 0 0 4 12.36v1.28A1.65 1.65 0 0 0 5.6 15 1.65 1.65 0 0 0 4.6 17.4 1.65 1.65 0 0 0 7 18.4 1.65 1.65 0 0 0 9 20a1.65 1.65 0 0 0 2.64-1.6h1.28A1.65 1.65 0 0 0 15 20a1.65 1.65 0 0 0 1.4-1.6A1.65 1.65 0 0 0 19 17.4a1.65 1.65 0 0 0 1-2Z" stroke="currentColor" stroke-width="2"/></svg>
           {/if}

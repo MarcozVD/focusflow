@@ -111,7 +111,8 @@ impl Db {
         self.migrate_0004()?;
         self.migrate_0005()?;
         self.migrate_0006()?;
-        self.migrate_0007()
+        self.migrate_0007()?;
+        self.migrate_0008()
     }
 
     /// Inteligencia de correo (fase 8): tipo de compromiso por sugerencia
@@ -135,6 +136,23 @@ impl Db {
         add("source_subject", "source_subject TEXT NOT NULL DEFAULT ''")?;
         self.conn
             .execute_batch("CREATE INDEX IF NOT EXISTS idx_suggestions_kind ON suggested_events(kind)")?;
+        Ok(())
+    }
+
+    /// Asistente (fase 9): propuestas de acción pendientes de aprobación.
+    /// El asistente jamás muta el calendario directamente: crea una propuesta
+    /// aquí y el usuario la aprueba (o la rechaza).
+    fn migrate_0008(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS assistant_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )?;
         Ok(())
     }
 
@@ -455,9 +473,10 @@ impl Db {
             .query_row(
                 "SELECT reminder_minutes FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
                 [id],
-                |r| r.get(0),
+                |r| r.get::<_, Option<i64>>(0),
             )
-            .optional()?;
+            .optional()?
+            .flatten();
         self.conn.execute(
             "UPDATE tasks SET title = ?2, category_id = ?3, priority = ?4,
                     start_at = ?5, end_at = ?6, description = ?7, tags = ?8, notes = ?9,
@@ -573,6 +592,48 @@ impl Db {
     pub fn set_plan_proposal_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE plan_proposals SET status = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, status, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    // ---------------- acciones del asistente (fase 9) ----------------
+
+    pub fn insert_assistant_action(&self, kind: &str, payload: &str) -> rusqlite::Result<i64> {
+        let now = now_ms();
+        self.conn.execute(
+            "INSERT INTO assistant_actions (kind, payload, status, created_at, updated_at)
+             VALUES (?1, ?2, 'pending', ?3, ?3)",
+            rusqlite::params![kind, payload, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_assistant_action(&self, id: i64) -> rusqlite::Result<Option<AssistantActionRow>> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, payload, status, created_at, updated_at FROM assistant_actions WHERE id = ?1",
+                [id],
+                assistant_action_from_row,
+            )
+            .optional()
+    }
+
+    pub fn list_assistant_actions(&self, only_pending: bool) -> rusqlite::Result<Vec<AssistantActionRow>> {
+        let mut stmt = self.conn.prepare(if only_pending {
+            "SELECT id, kind, payload, status, created_at, updated_at FROM assistant_actions
+             WHERE status = 'pending' ORDER BY created_at DESC"
+        } else {
+            "SELECT id, kind, payload, status, created_at, updated_at FROM assistant_actions
+             ORDER BY created_at DESC LIMIT 50"
+        })?;
+        let rows = stmt.query_map([], assistant_action_from_row)?;
+        rows.collect()
+    }
+
+    pub fn set_assistant_action_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE assistant_actions SET status = ?2, updated_at = ?3 WHERE id = ?1",
             rusqlite::params![id, status, now_ms()],
         )?;
         Ok(())
@@ -1010,6 +1071,27 @@ fn plan_proposal_from_row(r: &rusqlite::Row) -> rusqlite::Result<PlanProposalRow
     })
 }
 
+fn assistant_action_from_row(r: &rusqlite::Row) -> rusqlite::Result<AssistantActionRow> {
+    Ok(AssistantActionRow {
+        id: r.get(0)?,
+        kind: r.get(1)?,
+        payload: r.get(2)?,
+        status: r.get(3)?,
+        created_at: r.get(4)?,
+        updated_at: r.get(5)?,
+    })
+}
+
+#[derive(Serialize, Clone)]
+pub struct AssistantActionRow {
+    pub id: i64,
+    pub kind: String,
+    pub payload: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Serialize, Clone)]
 pub struct SyncStateRow {
     pub source: String,
@@ -1241,5 +1323,18 @@ mod tests {
         db.delete_suggestion(id).unwrap();
         assert!(db.get_suggestion(id).unwrap().is_none());
         assert!(db.get_task(t.id).unwrap().is_none(), "tarea creada también borrada");
+    }
+
+    #[test]
+    fn assistant_actions_roundtrip() {
+        let db = db();
+        let id = db.insert_assistant_action("complete", r#"{"kind":"complete"}"#).unwrap();
+        let row = db.get_assistant_action(id).unwrap().unwrap();
+        assert_eq!(row.kind, "complete");
+        assert_eq!(row.status, "pending");
+        assert_eq!(db.list_assistant_actions(true).unwrap().len(), 1);
+        db.set_assistant_action_status(id, "accepted").unwrap();
+        assert!(db.list_assistant_actions(true).unwrap().is_empty());
+        assert_eq!(db.list_assistant_actions(false).unwrap().len(), 1);
     }
 }

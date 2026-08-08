@@ -10,11 +10,12 @@
   import Agenda from "./lib/Agenda.svelte";
   import WidgetPage from "./lib/WidgetPage.svelte";
   import Suggestions from "./lib/Suggestions.svelte";
+  import Assistant from "./lib/Assistant.svelte";
   import Settings from "./lib/Settings.svelte";
   import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
 
-  let view = $state<"mes" | "semana" | "dia" | "agenda" | "sugerencias" | "ajustes">("semana");
+  let view = $state<"mes" | "semana" | "dia" | "agenda" | "sugerencias" | "asistente" | "ajustes">("semana");
   let date = $state(new Date());
   let hash = $state(window.location.hash);
   let isWidget = $state(false);
@@ -65,7 +66,7 @@
     if (e.key === "Escape" && taskDetail()) closeTaskDetail();
   });
 
-  function setView(v: "mes" | "semana" | "dia" | "agenda" | "sugerencias" | "ajustes") {
+  function setView(v: "mes" | "semana" | "dia" | "agenda" | "sugerencias" | "asistente" | "ajustes") {
     view = v;
     if (v === "sugerencias") loadSuggestions();
     if (v === "ajustes") {
@@ -91,7 +92,7 @@
   }
 
   $effect(() => {
-    if (view === "agenda" || view === "sugerencias" || view === "ajustes") return;
+    if (view === "agenda" || view === "sugerencias" || view === "asistente" || view === "ajustes") return;
     const d = new Date(date);
     const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     let from = start;
@@ -126,6 +127,10 @@
         {:else if view === "sugerencias"}
           <div class="page-wrap">
             <Suggestions />
+          </div>
+        {:else if view === "asistente"}
+          <div class="page-wrap assistant-wrap">
+            <Assistant />
           </div>
         {:else if view === "ajustes"}
           <div class="page-wrap">
@@ -185,6 +190,11 @@
     overflow-y: auto;
     padding: 0 var(--s-8) var(--s-8);
     min-height: 0;
+  }
+  .assistant-wrap {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
   }
   :global([data-widget] html) {
     background: transparent;

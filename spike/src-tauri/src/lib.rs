@@ -16,6 +16,7 @@ use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
 use winreg::RegKey;
 
 pub mod ai;
+pub mod assistant;
 pub mod email;
 pub mod engine;
 pub mod planning;
@@ -735,6 +736,103 @@ fn plan_reject(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(
     Ok(())
 }
 
+// ---------------- asistente (fase 9) ----------------
+
+/// Un turno del asistente: pregunta + historial → respuesta/propuesta.
+/// El asistente nunca muta el calendario en este paso.
+#[tauri::command]
+async fn assistant_turn(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    text: String,
+    history: Vec<assistant::HistoryMsg>,
+) -> Result<assistant::AssistantTurnView, String> {
+    let cfg = {
+        let db = state.lock().unwrap();
+        ai_config_from_db(&db)
+    };
+    let configured = !cfg.endpoint.is_empty() && !cfg.model.is_empty() && cfg.provider_name() != "local";
+    let log_app = app.clone();
+    let text_ai = text.clone();
+    // la IA es bloqueante: fuera del mutex
+    let turn = tauri::async_runtime::spawn_blocking(move || {
+        let provider = match ai::provider_from_config(&cfg) {
+            Ok(p) => Some(p),
+            Err(_) => None,
+        };
+        let app_ref: &AppHandle = &log_app;
+        let state = app_ref.state::<Mutex<Db>>();
+        let db = state.lock().unwrap();
+        assistant::assistant_turn(&db, &text_ai, &history, provider.as_deref(), configured)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    append_log(
+        &app,
+        &format!("assistant_turn mode={}", assistant_mode_name(&turn)),
+    );
+    let _ = app.emit("assistant:changed", ());
+    Ok(turn)
+}
+
+fn assistant_mode_name(t: &assistant::AssistantTurnView) -> &'static str {
+    match t {
+        assistant::AssistantTurnView::Answer { .. } => "answer",
+        assistant::AssistantTurnView::Plan { .. } => "plan",
+        assistant::AssistantTurnView::Action { .. } => "action",
+        assistant::AssistantTurnView::Nothing { .. } => "nothing",
+    }
+}
+
+#[tauri::command]
+fn assistant_actions_list(
+    state: State<'_, Mutex<Db>>,
+    only_pending: bool,
+) -> Result<Vec<store::AssistantActionRow>, String> {
+    state.lock().unwrap().list_assistant_actions(only_pending).map_err(|e| e.to_string())
+}
+
+/// Aprueba una acción propuesta: la aplica vía los servicios existentes del
+/// store (nunca SQL directo del asistente).
+#[tauri::command]
+fn assistant_action_accept(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    id: i64,
+) -> Result<String, String> {
+    let db = state.lock().unwrap();
+    let (_, action) = assistant::get_action(&db, id)?.ok_or_else(|| "acción no encontrada".to_string())?;
+    let row = db
+        .get_assistant_action(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "acción no encontrada".to_string())?;
+    if row.status != "pending" {
+        return Err(format!("acción ya procesada (estado: {})", row.status));
+    }
+    let summary = assistant::apply_action(&db, &action)?;
+    db.set_assistant_action_status(id, "accepted").map_err(|e| e.to_string())?;
+    drop(db);
+    append_log(&app, &format!("assistant_action_accepted id={id} kind={} -> {summary}", action.kind));
+    let _ = app.emit("tasks:changed", ());
+    let _ = app.emit("assistant:changed", ());
+    Ok(summary)
+}
+
+#[tauri::command]
+fn assistant_action_reject(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    id: i64,
+) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    db.set_assistant_action_status(id, "rejected").map_err(|e| e.to_string())?;
+    drop(db);
+    append_log(&app, &format!("assistant_action_rejected id={id}"));
+    let _ = app.emit("assistant:changed", ());
+    Ok(())
+}
+
 // ---------------- widget ----------------
 
 fn create_widget(app: &AppHandle) -> Result<(), String> {
@@ -1130,6 +1228,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             plan_proposals_list,
             plan_accept,
             plan_reject,
+            assistant_turn,
+            assistant_actions_list,
+            assistant_action_accept,
+            assistant_action_reject,
             toggle_widget,
             widget_info,
             open_task,
