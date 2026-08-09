@@ -1205,6 +1205,37 @@ export function fmtMs(ms: number | null): string {
     " " + d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 }
 
+/** Exporta los datos del usuario (JSON, sin secretos) y los descarga. */
+export async function exportData() {
+  if (!inTauri()) return;
+  try {
+    const json = await invoke<string>("data_export");
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `focusflow-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (e) {
+    console.error("exportData", e);
+    return false;
+  }
+}
+
+/** Borra todos los datos (DB, log y credenciales del sistema). Irreversible. */
+export async function wipeData() {
+  if (!inTauri()) return;
+  try {
+    await invoke("data_wipe");
+    window.location.reload();
+  } catch (e) {
+    console.error("wipeData", e);
+    throw e;
+  }
+}
+
 export function fmtDate(ms: number | null): string {
   if (!ms) return "—";
   return new Date(ms).toLocaleDateString("es-ES", {

@@ -24,7 +24,8 @@
     uiAccent,
     notifPrefs,
     loadNotifPrefs,
-    saveNotifPrefs,
+    exportData,
+    wipeData,
   } from "./data.svelte";
 
   const ACCENTS = ["#2563EB", "#7C3AED", "#EC4899", "#F59E0B", "#10B981", "#0EA5E9"];
@@ -56,6 +57,30 @@
   const todayFound = $derived(syncToday().reduce((n, h) => n + (h.items_found || 0), 0));
   const todayCreated = $derived(syncToday().reduce((n, h) => n + (h.items_processed || 0), 0));
   const todayErrors = $derived(syncToday().filter((h) => h.result === "error" || !!h.error).length);
+
+  let exporting = $state(false);
+  let exportMsg = $state("");
+  let wiping = $state(false);
+  let confirmWipe = $state(false);
+
+  async function doExport() {
+    exporting = true;
+    const ok = await exportData();
+    exportMsg = ok ? "Exportación descargada (sin claves ni contraseñas)." : "No se pudo exportar.";
+    exporting = false;
+  }
+  async function doWipe() {
+    confirmWipe = true;
+  }
+  async function wipeConfirmed() {
+    wiping = true;
+    try {
+      await wipeData();
+    } catch (e) {
+      wiping = false;
+      confirmWipe = false;
+    }
+  }
 
   let aiEndpoint = $state("");
   let aiModel = $state("");
@@ -700,6 +725,35 @@
         <p class="hint">Sin entradas.</p>
       {/if}
     </details>
+  </section>
+
+  <section>
+    <h2>Privacidad y datos</h2>
+    <p class="hint">
+      FocusFlow es local-first: tus datos viven en tu equipo. La clave de IA y la contraseña del
+      correo se guardan en el Administrador de credenciales de Windows, nunca en la base de datos.
+      Solo se envía a la IA la información mínima (contexto compacto de tareas y, para el correo,
+      el asunto con un fragmento del cuerpo).
+    </p>
+    <div class="row">
+      <button class="btn" onclick={doExport} disabled={exporting}>
+        {exporting ? "Exportando…" : "Exportar mis datos (JSON)"}
+      </button>
+      <button class="btn danger" onclick={doWipe} disabled={wiping}>
+        {wiping ? "Borrando…" : "Borrar todos mis datos"}
+      </button>
+    </div>
+    {#if exportMsg}
+      <p class="hint">{exportMsg}</p>
+    {/if}
+    {#if confirmWipe}
+      <div class="errbox">
+        <p>Esto borra tareas, sugerencias, ajustes, el log y las credenciales guardadas (clave de IA y
+        contraseña de correo). No se puede deshacer.</p>
+        <button class="btn danger" onclick={wipeConfirmed}>Sí, borrar todo</button>
+        <button class="btn" onclick={() => (confirmWipe = false)}>Cancelar</button>
+      </div>
+    {/if}
   </section>
 
   {#if saved}

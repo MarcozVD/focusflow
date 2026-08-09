@@ -20,6 +20,17 @@ const MAX_DURATION_MIN: u32 = 24 * 60;
 const MAX_REMINDER_DAYS: u32 = 30;
 const MAX_INTERVAL: u32 = 365;
 
+/// Topes de tamaño sobre texto que proviene del LLM (los LLM son no
+/// confiables: un correo inyectado podría pedir títulos enormes). Se trunca,
+/// no se rechaza, para no romper flujos legítimos.
+const MAX_TITLE_CHARS: usize = 200;
+const MAX_DESCRIPTION_CHARS: usize = 600;
+const MAX_REASON_CHARS: usize = 200;
+const MAX_NOTE_CHARS: usize = 200;
+fn cap(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
 /// Error de validación: lista de reglas incumplidas (todas las que apliquen).
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntentValidationError {
@@ -139,11 +150,16 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
     let title = obj
         .get("title")
         .and_then(|t| t.as_str())
+        .map(|t| cap(t, MAX_TITLE_CHARS))
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| AiError::InvalidJson("falta campo 'title'".into()))?;
 
-    let description = obj.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
+    let description = obj
+        .get("description")
+        .and_then(|d| d.as_str())
+        .map(|d| cap(d, MAX_DESCRIPTION_CHARS))
+        .unwrap_or_default();
     let category_id = obj
         .get("category")
         .and_then(|c| c.as_str())
@@ -170,7 +186,11 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
     let preparation = match (obj.get("preparation_minutes"), obj.get("preparation_note")) {
         (Some(m), _) if m.as_u64().map(|x| x > 0).unwrap_or(false) => Some(Preparation {
             minutes: m.as_u64().unwrap() as u32,
-            note: obj.get("preparation_note").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+            note: obj
+                .get("preparation_note")
+                .and_then(|n| n.as_str())
+                .map(|n| cap(n, MAX_NOTE_CHARS))
+                .unwrap_or_default(),
         }),
         _ => None,
     };
@@ -252,7 +272,11 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
         .and_then(|c| c.as_f64())
         .map(|c| c.clamp(0.0, 1.0))
         .unwrap_or(0.0);
-    let reason = obj.get("reason").and_then(|r| r.as_str()).unwrap_or("").to_string();
+    let reason = obj
+        .get("reason")
+        .and_then(|r| r.as_str())
+        .map(|r| cap(r, MAX_REASON_CHARS))
+        .unwrap_or_default();
 
     Ok(Intent {
         intent_type,

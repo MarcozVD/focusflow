@@ -47,8 +47,20 @@ pub(crate) fn append_log(_app: &AppHandle, line: &str) {
         .append(true)
         .open(log_dir().join("spike.log"))
     {
-        let _ = writeln!(f, "[{}] {}", now_ms(), line);
+        let _ = writeln!(f, "[{}] {}", now_ms(), sanitize_log_line(line));
     }
+}
+
+/// Sanea una línea de log: sin saltos de línea ni caracteres de control (un
+/// asunto/cuerpo de correo malicioso no puede forjar líneas), y con tope de
+/// longitud. Se aplica a TODA entrada, incluidas las del comando `log_line`.
+pub(crate) fn sanitize_log_line(line: &str) -> String {
+    const MAX: usize = 2000;
+    let out: String = line
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    out.chars().take(MAX).collect()
 }
 
 #[tauri::command]
@@ -1110,6 +1122,44 @@ fn open_app(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------- privacidad (fase 12) ----------------
+
+/// Exporta los datos del usuario en JSON (sin secretos: ni claves ni
+/// contraseñas, que viven solo en el Credential Manager del SO).
+#[tauri::command]
+fn data_export(state: State<'_, Mutex<Db>>) -> Result<String, String> {
+    let db = state.lock().unwrap();
+    let v = db.export_data().map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
+}
+
+/// Borra TODO: datos en DB, log local y secretos del Credential Manager
+/// (clave de IA y contraseña de correo). Destructivo e irreversible.
+#[tauri::command]
+fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    // el usuario de correo se lee ANTES de limpiar settings (se borraría)
+    let email_user = db
+        .settings_get("email.config")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<email::EmailConfig>(&s).ok())
+        .map(|c| c.user)
+        .unwrap_or_default();
+    db.wipe_data().map_err(|e| e.to_string())?;
+    let _ = ai::keyring_delete(ai::AI_KEY_USER);
+    if !email_user.is_empty() {
+        let _ = ai::keyring_delete(&format!("email:{email_user}"));
+    }
+    drop(db);
+    let _ = std::fs::write(log_dir().join("spike.log"), "");
+    let _ = app.emit("data:wipe", ());
+    let _ = app.emit("tasks:changed", ());
+    let _ = app.emit("suggestions:changed", ());
+    append_log(&app, "data_wipe done");
+    Ok(())
+}
+
 #[tauri::command]
 fn open_task(app: AppHandle, id: i64) -> Result<(), String> {
     show_main(&app);
@@ -1370,6 +1420,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             notif_respond,
             ui_prefs_get,
             ui_prefs_set,
+            data_export,
+            data_wipe,
             open_app
         ])
         .setup(|app| {
@@ -1518,4 +1570,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_strips_control_chars_and_caps_length() {
+        // asunto de correo malicioso con saltos de línea: no puede forjar
+        // entradas de log
+        let evil = "sync_ok\n[1786000000000] data_wipe done\x1b[31m";
+        let out = sanitize_log_line(evil);
+        assert!(!out.contains('\n'), "sin saltos de línea");
+        assert!(!out.contains('\u{1b}'), "sin escapes");
+        assert!(out.contains("data_wipe"), "el resto queda legible");
+        let long = "x".repeat(5000);
+        assert!(sanitize_log_line(&long).chars().count() <= 2000, "tope de longitud");
+    }
 }

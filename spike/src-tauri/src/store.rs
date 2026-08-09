@@ -3,7 +3,6 @@ use rusqlite::OptionalExtension;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -367,6 +366,80 @@ impl Db {
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)",
             rusqlite::params![key, value],
         )?;
+        Ok(())
+    }
+
+    /// Exporta los datos del usuario como JSON (privacy: "mis datos"). NUNCA
+    /// incluye secretos: no hay claves ni contraseñas (viven en el Credential
+    /// Manager del SO), y las settings sensibles (config de correo) se
+    /// exportan sin la contraseña (nunca estuvo en DB) y sin el rescan flag.
+    pub fn export_data(&self) -> rusqlite::Result<serde_json::Value> {
+        fn dump_all(conn: &Connection, table: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
+            use rusqlite::types::Value;
+            let mut stmt = conn.prepare(&format!("SELECT * FROM {table} ORDER BY id"))?;
+            let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+            let rows = stmt.query_map([], |r| {
+                let mut obj = serde_json::Map::new();
+                for (i, n) in names.iter().enumerate() {
+                    let v: Option<Value> = r.get(i).ok();
+                    let j = match v {
+                        Some(Value::Null) | None => serde_json::Value::Null,
+                        Some(Value::Integer(n)) => serde_json::json!(n),
+                        Some(Value::Real(f)) => serde_json::json!(f),
+                        Some(Value::Text(s)) => serde_json::json!(s),
+                        Some(Value::Blob(b)) => serde_json::json!(b),
+                    };
+                    obj.insert(n.clone(), j);
+                }
+                Ok(serde_json::Value::Object(obj))
+            })?;
+            rows.collect()
+        }
+        let tasks = dump_all(&self.conn, "tasks")?;
+        let suggestions = dump_all(&self.conn, "suggested_events")?;
+
+        let trusted: Vec<String> = self
+            .conn
+            .prepare("SELECT sender FROM trusted_senders ORDER BY sender")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let settings: Vec<(String, String)> = self
+            .conn
+            .prepare("SELECT key, value FROM settings WHERE key NOT LIKE '%rescan_pending%' ORDER BY key")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(serde_json::json!({
+            "app": "focusflow",
+            "exported_at": now_ms(),
+            "tasks": tasks,
+            "suggestions": suggestions,
+            "trusted_senders": trusted,
+            "settings": settings,
+        }))
+    }
+
+    /// Borra TODOS los datos del usuario: tareas, sugerencias, propuestas,
+    /// notificaciones, historial de sync, remitentes de confianza y ajustes
+    /// (los defaults se re-siembran en el próximo open). Los secretos del
+    /// Credential Manager NO tocan aquí: los gestiona el comando `data_wipe`.
+    pub fn wipe_data(&self) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for t in [
+            "notification_log",
+            "assistant_actions",
+            "plan_proposals",
+            "suggested_events",
+            "sync_state",
+            "sync_history",
+            "trusted_senders",
+        ] {
+            tx.execute_batch(&format!("DELETE FROM {t};"))?;
+        }
+        tx.execute("DELETE FROM tasks", [])?;
+        tx.execute("DELETE FROM settings", [])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1469,5 +1542,36 @@ mod tests {
         assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "en-curso");
         db.set_task_status(t.id, "completada").unwrap();
         assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "completada");
+    }
+
+    #[test]
+    fn export_contains_data_but_never_secrets() {
+        let db = db();
+        let now = now_ms();
+        db.create("Tarea A", "uni", "media", now, now + 3_600_000, false).unwrap();
+        db.insert_suggestion(
+            "email", Some("m1"), Some("x@y.com"), "Asunto", "task", "Compromiso X", "",
+            "uni", "media", None, None, None, 0, "", "[]", 0.9, "razón", None, "", "pending",
+        )
+        .unwrap();
+        db.settings_set("ai.endpoint", "http://x").unwrap();
+        db.settings_set("email.rescan_pending", "1").unwrap();
+        let v = db.export_data().unwrap();
+        let s = serde_json::to_string(&v).unwrap();
+        assert!(s.contains("Tarea A"), "tareas exportadas");
+        assert!(s.contains("Compromiso X"), "sugerencias exportadas");
+        assert!(!s.contains("rescan_pending"), "settings internos excluidos");
+    }
+
+    #[test]
+    fn wipe_clears_user_data_and_settings() {
+        let db = db();
+        let now = now_ms();
+        let t = db.create("Tarea A", "uni", "media", now, now + 3_600_000, false).unwrap();
+        db.settings_set("ui.theme", "dark").unwrap();
+        db.wipe_data().unwrap();
+        assert!(db.list().unwrap().is_empty(), "tareas borradas");
+        assert!(db.settings_get("ui.theme").unwrap().is_none(), "settings borradas");
+        let _ = t;
     }
 }

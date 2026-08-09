@@ -198,6 +198,12 @@ impl<T: Read + Write> IoStream for T {}
 pub type ImapSession = imap::Session<Box<dyn IoStream>>;
 
 pub fn connect(config: &EmailConfig) -> Result<ImapSession, String> {
+    // TLS implícito es obligatorio salvo servidor local (pruebas). Sin
+    // cifrado, la contraseña y el correo viajan en claro (riesgo MITM).
+    let is_local = config.host == "localhost" || config.host == "127.0.0.1" || config.host == "::1";
+    if !config.ssl && !is_local {
+        return Err("se requiere TLS (activar 'Usar conexión segura')".into());
+    }
     let tcp = std::net::TcpStream::connect((config.host.as_str(), config.port))
         .map_err(|e| format!("tcp connect {}:{}: {e}", config.host, config.port))?;
     let stream: Box<dyn IoStream> = if config.ssl || config.port == 993 {
@@ -400,5 +406,26 @@ mod tests {
         let f = EmailFilters { senders: vec!["jefe@corp.com".into()], ..EmailFilters::default() };
         assert!(matches_filters(&raw("Jefe <jefe@corp.com>", "reunión", ""), &f));
         assert!(!matches_filters(&raw("otro@corp.com", "reunión", ""), &f));
+    }
+
+    #[test]
+    fn plaintext_imap_rejected_outside_localhost() {
+        let mut cfg = EmailConfig {
+            host: "imap.proveedor.com".into(),
+            port: 143,
+            ssl: false,
+            ..EmailConfig::default()
+        };
+        let err = match connect(&cfg) {
+            Ok(_) => panic!("sin TLS en remoto no debe conectar"),
+            Err(e) => e,
+        };
+        assert!(err.contains("TLS"), "{err}");
+        // localhost no recibe el guard: falla por red, no por el guard
+        cfg.host = "localhost".into();
+        match connect(&cfg) {
+            Err(e) => assert!(!e.contains("se requiere TLS"), "el guard no debe aplicar a localhost"),
+            Ok(_) => {}
+        }
     }
 }

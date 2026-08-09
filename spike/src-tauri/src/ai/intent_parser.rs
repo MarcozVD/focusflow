@@ -97,6 +97,15 @@ pub fn parse_batch_json(v: &Value) -> AiResult<IntentBatch> {
             .ok_or_else(|| AiError::InvalidJson("falta el array 'intents'".into()))?,
         _ => return Err(AiError::InvalidJson("la respuesta debe ser un objeto o array".into())),
     };
+    // tope de tamaño: la IA (o un correo inyectado) no puede generar spam
+    // de sugerencias ilimitado
+    const MAX_INTENTS: usize = 12;
+    if arr.len() > MAX_INTENTS {
+        return Err(AiError::BadResponse(format!(
+            "demasiadas intenciones en el lote: {} (máx. {MAX_INTENTS})",
+            arr.len()
+        )));
+    }
     let mut intents: Vec<Intent> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for (idx, item) in arr.iter().enumerate() {
@@ -184,6 +193,33 @@ mod tests {
         let v = json!({"intents": []});
         let batch = parse_batch_json(&v).expect("vacío válido");
         assert!(batch.intents.is_empty());
+    }
+
+    #[test]
+    fn oversized_batch_rejected() {
+        let intents: Vec<_> = (0..13)
+            .map(|i| json!({"intent_type": "task", "title": format!("T{i}"), "confidence": 0.5}))
+            .collect();
+        let v = json!({"intents": intents});
+        let err = parse_batch_json(&v).expect_err("más de 12 intents se rechaza");
+        match err {
+            AiError::BadResponse(m) => assert!(m.contains("demasiadas"), "{m}"),
+            other => panic!("esperado BadResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn llm_text_fields_are_capped() {
+        let v = json!({"intents": [
+            {"intent_type": "task", "title": "A".repeat(500), "description": "B".repeat(700),
+             "reason": "C".repeat(300), "preparation_minutes": 30,
+             "preparation_note": "D".repeat(300), "confidence": 0.5}
+        ]});
+        let batch = parse_batch_json(&v).expect("válido con campos truncados");
+        assert_eq!(batch.intents[0].title.chars().count(), 200, "título ≤ 200");
+        assert_eq!(batch.intents[0].description.chars().count(), 600, "descripción ≤ 600");
+        assert_eq!(batch.intents[0].reason.chars().count(), 200, "reason ≤ 200");
+        assert_eq!(batch.intents[0].preparation.as_ref().unwrap().note.chars().count(), 200, "nota ≤ 200");
     }
 
     #[test]
