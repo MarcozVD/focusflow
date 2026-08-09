@@ -30,6 +30,8 @@
 
   const ACCENTS = ["#2563EB", "#7C3AED", "#EC4899", "#F59E0B", "#10B981", "#0EA5E9"];
 
+  let { onReopenOnboarding }: { onReopenOnboarding?: () => void } = $props();
+
   let curTheme = $state<"light" | "dark">("light");
   let curAccent = $state("#2563EB");
 
@@ -326,6 +328,18 @@
       {/each}
     </div>
   </section>
+
+  {#if onReopenOnboarding}
+    <section>
+      <h2>Servicios</h2>
+      <p class="hint">
+        Reabre el asistente de configuración para conectar, cambiar o comprobar tu correo y tu IA.
+      </p>
+      <div class="row">
+        <button class="btn" onclick={onReopenOnboarding}>Volver a configurar servicios</button>
+      </div>
+    </section>
+  {/if}
 
   <section>
     <h2>Verificación rápida</h2>

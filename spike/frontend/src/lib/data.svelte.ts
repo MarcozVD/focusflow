@@ -193,6 +193,8 @@ const store = $state({
   notifPrefs: null as NotifPrefsView | null,
   contextualNotif: null as ContextualNotif | null,
   assistantDraft: "",
+  onboarding: null as OnboardingStatus | null,
+  onboardingBusy: false,
 });
 
 export const tasks = () => store.tasks;
@@ -224,6 +226,8 @@ export const assistantThread = () => store.assistantThread;
 export const assistantBusy = () => store.assistantBusy;
 export const assistantError = () => store.assistantError;
 export const assistantActionsPending = () => store.assistantActions;
+export const onboarding = () => store.onboarding;
+export const onboardingBusy = () => store.onboardingBusy;
 
 export function closePlanProposal() {
   store.planProposal = null;
@@ -806,6 +810,20 @@ export interface AiConfigView {
   effective_model: string;
 }
 
+export interface OnboardingStatus {
+  completed: boolean;
+  ai: { endpoint: string; model: string; has_key: boolean };
+  email: {
+    host: string;
+    port: number;
+    user: string;
+    auth: string;
+    mailboxes: string[];
+    filters: { senders: string[]; domains: string[]; keywords: string[] };
+    ssl: boolean;
+  } | null;
+}
+
 export interface EmailConfigView {
   config: {
     host: string;
@@ -895,6 +913,29 @@ export async function loadEmailConfig() {
     store.emailConfig = await invoke<EmailConfigView>("email_config_get");
   } catch (e) {
     console.error("loadEmailConfig", e);
+  }
+}
+
+export async function loadOnboardingStatus() {
+  if (!inTauri()) return;
+  try {
+    store.onboarding = await invoke<OnboardingStatus>("onboarding_status");
+  } catch (e) {
+    console.error("loadOnboardingStatus", e);
+  }
+}
+
+export async function completeOnboarding(): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
+  store.onboardingBusy = true;
+  try {
+    await invoke("onboarding_complete");
+    if (store.onboarding) store.onboarding = { ...store.onboarding, completed: true };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  } finally {
+    store.onboardingBusy = false;
   }
 }
 

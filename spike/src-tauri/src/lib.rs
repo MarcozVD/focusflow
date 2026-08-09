@@ -1025,6 +1025,62 @@ fn general_settings_set(
     Ok(())
 }
 
+// ---------------- onboarding (primer arranque) ----------------
+
+const SETTINGS_ONBOARDING_COMPLETED: &str = "onboarding.completed";
+
+#[derive(Serialize)]
+struct OnboardingAiView {
+    endpoint: String,
+    model: String,
+    has_key: bool,
+}
+
+#[derive(Serialize)]
+struct OnboardingStatusView {
+    completed: bool,
+    ai: OnboardingAiView,
+    email: Option<email::EmailConfig>,
+}
+
+#[tauri::command]
+fn onboarding_status(state: State<'_, Mutex<Db>>) -> OnboardingStatusView {
+    let db = state.lock().unwrap();
+    let completed = setting_bool(&db, SETTINGS_ONBOARDING_COMPLETED, false);
+    let ai_cfg = ai_config_from_db(&db);
+    let email_cfg = sync::load_email_config(&db);
+    let email = if email_cfg.host.is_empty() || email_cfg.user.is_empty() {
+        None
+    } else {
+        Some(email_cfg)
+    };
+    OnboardingStatusView {
+        completed,
+        ai: OnboardingAiView {
+            endpoint: ai_cfg.endpoint,
+            model: ai_cfg.model,
+            has_key: ai::keyring_get(ai::AI_KEY_USER).is_some(),
+        },
+        email,
+    }
+}
+
+#[tauri::command]
+fn onboarding_complete(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "1")
+        .map_err(|e| e.to_string())?;
+    append_log(&app, "onboarding_completed");
+    Ok(())
+}
+
+#[tauri::command]
+fn onboarding_reset(state: State<'_, Mutex<Db>>) -> Result<(), String> {
+    let db = state.lock().unwrap();
+    db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "0")
+        .map_err(|e| e.to_string())
+}
+
 // ---------------- preferencias de UI (tema + acento) ----------------
 
 // ---------------- notificaciones contextuales (fase 11) ----------------
@@ -1422,6 +1478,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             ui_prefs_set,
             data_export,
             data_wipe,
+            onboarding_status,
+            onboarding_complete,
+            onboarding_reset,
             open_app
         ])
         .setup(|app| {
@@ -1437,6 +1496,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             db.settings_default("general.start_minimized", "0").ok();
             db.settings_default("general.close_to_tray_widget", "1").ok();
             db.settings_default("ui.theme", "").ok();
+            db.settings_default(SETTINGS_ONBOARDING_COMPLETED, "0").ok();
             db.settings_default("ui.accent", "#2563EB").ok();
             db.settings_default("notif.enabled", "1").ok();
             db.settings_default("notif.quiet_start", "22:00").ok();
@@ -1587,5 +1647,42 @@ mod tests {
         assert!(out.contains("data_wipe"), "el resto queda legible");
         let long = "x".repeat(5000);
         assert!(sanitize_log_line(&long).chars().count() <= 2000, "tope de longitud");
+    }
+
+    #[test]
+    fn onboarding_flag_defaults_to_incomplete() {
+        let db = Db::open_memory_clean_pub().unwrap();
+        assert!(
+            db.settings_get(SETTINGS_ONBOARDING_COMPLETED).unwrap().is_none(),
+            "primer arranque: sin marcar"
+        );
+    }
+
+    #[test]
+    fn onboarding_complete_persists_and_reset_reopens() {
+        let db = Db::open_memory_clean_pub().unwrap();
+        db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "1").unwrap();
+        assert_eq!(
+            db.settings_get(SETTINGS_ONBOARDING_COMPLETED).unwrap().as_deref(),
+            Some("1"),
+            "completado persiste"
+        );
+        db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "0").unwrap();
+        assert_eq!(
+            db.settings_get(SETTINGS_ONBOARDING_COMPLETED).unwrap().as_deref(),
+            Some("0"),
+            "reset devuelve onboarding"
+        );
+    }
+
+    #[test]
+    fn onboarding_flag_cleared_by_wipe() {
+        let db = Db::open_memory_clean_pub().unwrap();
+        db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "1").unwrap();
+        db.wipe_data().unwrap();
+        assert!(
+            db.settings_get(SETTINGS_ONBOARDING_COMPLETED).unwrap().is_none(),
+            "wipe = primer arranque de nuevo"
+        );
     }
 }

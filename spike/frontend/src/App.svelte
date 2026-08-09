@@ -12,7 +12,8 @@
   import Suggestions from "./lib/Suggestions.svelte";
   import Assistant from "./lib/Assistant.svelte";
   import Settings from "./lib/Settings.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft } from "./lib/data.svelte.ts";
+  import Onboarding from "./lib/Onboarding.svelte";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
   import ContextualToast from "./lib/ContextualToast.svelte";
 
@@ -20,6 +21,14 @@
   let date = $state(new Date());
   let hash = $state(window.location.hash);
   let isWidget = $state(false);
+  let bootReady = $state(false);
+  let showOnboarding = $state(false);
+
+  const onboardingPending = $derived(showOnboarding || onboarding()?.completed === false);
+
+  $effect(() => {
+    if (onboarding()?.completed) showOnboarding = false;
+  });
 
   applySavedTheme();
 
@@ -31,6 +40,7 @@
     loadSyncStatus();
     loadUiPrefs();
     loadNotifPrefs();
+    loadOnboardingStatus().then(() => (bootReady = true));
     try {
       isWidget = getCurrentWindow().label === "widget";
       if (isWidget) document.documentElement.dataset.widget = "";
@@ -45,9 +55,6 @@
     });
     const un2 = listen("nav:agenda", () => {
       view = "agenda";
-    });
-    const un3 = listen("nav:assistant", () => {
-      view = "asistente";
     });
     const un3 = listen("ui:prefs", (e) => {
       applyUiPrefs(e.payload as { theme?: string; accent?: string });
@@ -134,6 +141,15 @@
 
 {#if isWidget || hash === "#/widget"}
   <WidgetPage />
+{:else if !bootReady}
+  <div class="app">
+    <TitleBar />
+  </div>
+{:else if onboardingPending}
+  <div class="app">
+    <TitleBar />
+    <Onboarding />
+  </div>
 {:else}
   <div class="app">
     <TitleBar />
@@ -153,7 +169,7 @@
           </div>
         {:else if view === "ajustes"}
           <div class="page-wrap">
-            <Settings />
+            <Settings onReopenOnboarding={() => (showOnboarding = true)} />
           </div>
         {:else}
           <div class="cal-wrap">

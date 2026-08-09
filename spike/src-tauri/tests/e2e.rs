@@ -199,3 +199,50 @@ fn s4_conflict_blocked_then_alternative_lands() {
     }
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ---------------------------------------------------------------------------
+// Escenario 5: onboarding — primer arranque incompleto, completar persiste,
+// wipe devuelve al primer arranque
+// ---------------------------------------------------------------------------
+
+#[test]
+fn s5_onboarding_flag_lifecycle() {
+    let dir = temp_data_dir();
+
+    // primer arranque: sin flag (onboarding pendiente)
+    {
+        let d = open(&dir);
+        assert!(
+            d.settings_get("onboarding.completed").unwrap().is_none(),
+            "primer arranque muestra onboarding"
+        );
+    }
+
+    // el usuario completa el onboarding
+    {
+        let d = open(&dir);
+        d.settings_set("onboarding.completed", "1").unwrap();
+    }
+
+    // relanzar: no vuelve a aparecer
+    {
+        let d = open(&dir);
+        assert_eq!(
+            d.settings_get("onboarding.completed").unwrap().as_deref(),
+            Some("1"),
+            "completado nunca reaparece"
+        );
+    }
+
+    // wipe = primer arranque de nuevo
+    {
+        let d = open(&dir);
+        d.wipe_data().unwrap();
+        assert!(
+            d.settings_get("onboarding.completed").unwrap().is_none(),
+            "wipe reinicia el onboarding"
+        );
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
