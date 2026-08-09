@@ -153,12 +153,18 @@ pub fn context_snapshot(db: &Db) -> String {
                     .earliest()
                     .map(|d| d.format("%Y-%m-%d").to_string())
                     .unwrap_or_default();
+                let end_day = chrono::Local
+                    .timestamp_millis_opt(t.end_at)
+                    .earliest()
+                    .map(|d| d.format("%Y-%m-%d").to_string())
+                    .unwrap_or_default();
                 serde_json::json!({
                     "id": t.id,
                     "title": t.title,
                     "cat": t.category_id,
                     "priority": t.priority,
                     "start_day": start_day,
+                    "end_day": end_day,
                     "all_day": t.all_day,
                     "done": t.status == "completada",
                 })

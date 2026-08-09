@@ -208,17 +208,36 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
     let horizon = now + 24 * 3_600_000;
     let day = day_start(now);
 
-    // deadline: pendiente con fin en < 24h
-    for t in tasks.iter().filter(|t| t.status == "pendiente" && !t.all_day && t.end_at > now && t.end_at <= horizon)
-    {
-        let remaining = minutes_left(t.end_at, now, t.start_at);
+    // deadline: pendiente con fin en < 24h. Para "todo el día" de varios
+    // días la fecha límite es la del día final: la hora de cierre si trae,
+    // si no, las 22:00 del día de fin (rango sin hora = fecha límite
+    // nocturna).
+    for t in tasks.iter().filter(|t| t.status == "pendiente") {
+        let deadline = if t.all_day {
+            let start_day = crate::engine::local_midnight(t.start_at);
+            let end_day = crate::engine::local_midnight(t.end_at);
+            if end_day - start_day <= crate::engine::DAY_MS {
+                continue; // "todo el día" simple: sin fecha límite
+            }
+            if t.end_at == end_day {
+                end_day + 22 * crate::engine::HOUR_MS
+            } else {
+                t.end_at
+            }
+        } else {
+            t.end_at
+        };
+        if deadline <= now || deadline > horizon {
+            continue;
+        }
+        let remaining = minutes_left(deadline, now, t.start_at);
         // si ya empezó es la más urgente; si aún no, ceden ante free_time/reschedule
         let score = if t.start_at < now { 100 } else { 60 };
         let mut body = format!(
             "«{}» termina {} a las {}.",
             t.title,
-            day_label(t.end_at, now),
-            fmt_hhmm(t.end_at)
+            day_label(deadline, now),
+            fmt_hhmm(deadline)
         );
         if remaining > 0 {
             body.push_str(&format!(" Quedan {} de preparación.", fmt_duration(remaining)));
@@ -569,6 +588,40 @@ mod tests {
         assert_eq!(c[0].kind, "deadline");
         assert!(c[0].body.contains("Quedan 4h"));
         assert!(c[0].body.contains("mañana") || c[0].body.contains("hoy"));
+    }
+
+    #[test]
+    fn multiday_allday_notifies_deadline() {
+        let db = db();
+        let now = day_start(now_ms()) + 23 * 3_600_000; // 23:00 de hoy
+        // rango sin hora de cierre: empieza hace 4 días, fin mañana 00:00
+        db.create("Entrega informe", "trab", "alta", now - 4 * 86_400_000, now + 3_600_000, true).unwrap();
+        let c = collect(&db, now, &prefs_off_quiet());
+        let dl = c.iter().find(|x| x.kind == "deadline");
+        assert!(dl.is_some(), "candidates: {c:?}");
+        assert!(dl.unwrap().body.contains("22:00"), "fecha límite al final del día: {}", dl.unwrap().body);
+        assert!(dl.unwrap().body.contains("Entrega informe"));
+    }
+
+    #[test]
+    fn multiday_allday_with_close_time_notifies_deadline() {
+        let db = db();
+        let now = day_start(now_ms()) + 23 * 3_600_000;
+        // cierra mañana a las 21:00 → fecha límite = hora de cierre
+        db.create("Cierre", "trab", "media", now - 4 * 86_400_000, now + 22 * 3_600_000, true).unwrap();
+        let c = collect(&db, now, &prefs_off_quiet());
+        let dl = c.iter().find(|x| x.kind == "deadline");
+        assert!(dl.is_some(), "candidates: {c:?}");
+        assert!(dl.unwrap().body.contains("21:00"));
+    }
+
+    #[test]
+    fn single_day_allday_has_no_deadline_notif() {
+        let db = db();
+        let now = day_start(now_ms()) + 23 * 3_600_000;
+        db.create("Mañana entera", "uni", "alta", now + 3_600_000, now + 27 * 3_600_000, true).unwrap();
+        let c = collect(&db, now, &prefs_off_quiet());
+        assert!(c.iter().all(|x| x.kind != "deadline"), "candidates: {c:?}");
     }
 
     #[test]

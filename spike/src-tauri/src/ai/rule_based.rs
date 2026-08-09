@@ -243,6 +243,46 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
             return Some((s, e));
         }
     }
+    // rangos por día de la semana: "del lunes al viernes", "lunes a viernes",
+    // "monday to friday" (próximas ocurrencias, como parse_day)
+    let wd_pat = "(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)";
+    let wd_ms = |caps: &regex::Captures| -> Option<(i64, i64)> {
+        let w1 = nl::weekday_from_name(caps.get(1)?.as_str())?;
+        let w2 = nl::weekday_from_name(caps.get(2)?.as_str())?;
+        let today = chrono::Local::now().date_naive();
+        let start = today + chrono::Duration::days(nl::weekday_delta(w1));
+        let mut delta = (w2.number_from_monday() as i64 - w1.number_from_monday() as i64 + 7) % 7;
+        if delta == 0 {
+            delta = 7; // "del lunes al lunes" = semana completa
+        }
+        let end = start + chrono::Duration::days(delta);
+        if in_future(nl::local_ms(end.and_hms_opt(0, 0, 0).unwrap())) {
+            Some((
+                nl::local_ms(start.and_hms_opt(0, 0, 0).unwrap()),
+                nl::local_ms(end.and_hms_opt(0, 0, 0).unwrap()),
+            ))
+        } else {
+            None
+        }
+    };
+    let re_wd1 = regex::Regex::new(&format!(r"del\s+{wd_pat}\s+(?:al|a|hasta)\s+(?:el\s+|d[íi]a\s+)?{wd_pat}")).ok()?;
+    if let Some(caps) = re_wd1.captures(lower) {
+        if let Some(pair) = wd_ms(&caps) {
+            return Some(pair);
+        }
+    }
+    let re_wd2 = regex::Regex::new(&format!(r"\b{wd_pat}\s+(?:al|a|hasta)\s+(?:el\s+|d[íi]a\s+)?{wd_pat}")).ok()?;
+    if let Some(caps) = re_wd2.captures(lower) {
+        if let Some(pair) = wd_ms(&caps) {
+            return Some(pair);
+        }
+    }
+    let re_wd3 = regex::Regex::new(&format!(r"(?:from\s+)?{wd_pat}\s+(?:to|through|until)\s+(?:next\s+|this\s+)?{wd_pat}")).ok()?;
+    if let Some(caps) = re_wd3.captures(lower) {
+        if let Some(pair) = wd_ms(&caps) {
+            return Some(pair);
+        }
+    }
     None
 }
 
@@ -292,6 +332,7 @@ fn clean_title(text: &str) -> String {
         r"(?i)\b[a-záéíóúñ]+\s+\d{1,2}(?:st|nd|rd|th)?\b",
         r"(?i)\b(?:from|de)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|a|hasta)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
         r"(?i)\b(is|es|the)\b",
+        r"(?i)\b(?:del\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:al|a|hasta|to|through|until)\s+(?:el\s+|next\s+|this\s+|d[íi]a\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     ] {
         if let Ok(re) = regex::Regex::new(p) {
             t = re.replace_all(&t, " ").to_string();
@@ -350,12 +391,19 @@ fn analyze_clause(clause: &str) -> RuleIntent {
         || lower.contains("ventana")
         || lower.contains("window");
 
-    // 2. rango de fechas → disponibilidad
+    // 2. rango de fechas → evento multi-día, o disponibilidad si el texto
+    // declara disponibilidad explícita ("disponible del 5 al 23").
     let date_range = detect_date_range(&lower);
     if let Some((s, e)) = date_range {
+        let intent_type = if is_availability { "availability" } else { "event" };
+        let reason = if is_availability {
+            "ventana de disponibilidad con ambos extremos"
+        } else {
+            "evento multi-día con rango de fechas"
+        };
         return RuleIntent {
-            intent_type: "availability",
-            title: title_or("availability", clean_title(clause)),
+            intent_type,
+            title: title_or(intent_type, clean_title(clause)),
             category_id: nl::detect_category(&lower).into(),
             priority: if lower.contains("urgente") || lower.contains("urgent") { "alta" } else { "media" },
             start_ms: Some(s),
@@ -370,7 +418,7 @@ fn analyze_clause(clause: &str) -> RuleIntent {
             reminders_min: None,
             constraints: Vec::new(),
             confidence: 0.85,
-            reason: "ventana de disponibilidad con ambos extremos".into(),
+            reason: reason.into(),
         };
     }
 
@@ -810,6 +858,34 @@ mod tests {
         let wd = crate::ai::nl::weekday_num(sd.date_naive());
         assert!((1..=5).contains(&wd), "cae en día hábil, fue {}", wd);
         assert_eq!(sd.hour(), 18);
+    }
+
+    #[test]
+    fn weekday_range_is_multiday_event() {
+        // "proyecto del lunes al viernes" → evento multi-día, no disponibilidad
+        let i = intent_of("proyecto del lunes al viernes", 0);
+        assert_eq!(i.intent_type, IntentType::Event);
+        assert!(i.window.all_day);
+        let s = i.window.start.unwrap();
+        let e = i.window.end.unwrap();
+        let s_date = chrono::Local.timestamp_millis_opt(s).earliest().unwrap().date_naive();
+        assert_eq!(crate::ai::nl::weekday_num(s_date), 1, "empieza lunes, fue {s_date}");
+        assert_eq!((e - s) / 86_400_000, 4, "lunes a viernes = 4 días");
+        assert_eq!(i.title, "Proyecto");
+
+        // rango de dígitos con actividad también es evento multi-día
+        let i = intent_of("proyecto del 10 al 15 de agosto", 0);
+        assert_eq!(i.intent_type, IntentType::Event);
+        assert!(i.window.start.unwrap() < i.window.end.unwrap());
+
+        // disponibilidad explícita sigue siendo availability
+        let i = intent_of("Disponible del lunes al viernes", 0);
+        assert_eq!(i.intent_type, IntentType::Availability);
+
+        // inglés
+        let i = intent_of("work on the report monday to friday", 0);
+        assert_eq!(i.intent_type, IntentType::Event);
+        assert!(i.title.to_lowercase().contains("report"), "título: {}", i.title);
     }
 
     #[test]

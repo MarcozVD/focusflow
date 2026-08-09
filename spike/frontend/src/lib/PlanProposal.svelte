@@ -173,10 +173,17 @@
         <h4>Plan propuesto</h4>
 
         {#if proposal.items.length === 0}
-          <div class="empty">
-            <p>No hay nada que planificar en este texto.</p>
-            <p class="sub">Añade una duración (“2 horas”) o un vencimiento (“el viernes”).</p>
-          </div>
+          {#if proposal.understanding.some((u) => u.intent_type === "Event")}
+            <div class="empty">
+              <p>Sin duración: no hay sesiones que planificar.</p>
+              <p class="sub">El evento se registrará en el calendario al aceptar. Si quieres sesiones, añade una duración (“2 horas”) o un vencimiento (“el viernes”).</p>
+            </div>
+          {:else}
+            <div class="empty">
+              <p>No hay nada que planificar en este texto.</p>
+              <p class="sub">Añade una duración (“2 horas”) o un vencimiento (“el viernes”).</p>
+            </div>
+          {/if}
         {/if}
 
         {#each proposal.items as it, itemIdx (itemIdx)}

@@ -60,7 +60,7 @@ REGLAS:
    - availability: VENTANA de disponibilidad con inicio Y fin (RANGOS: "disponible desde el 5 hasta el 23", "del 10 al 20", "de 9 a 12"). Solo para rangos con ambos extremos.
    - reminder: solo aviso ("recuérdame el sábado", "avísame 1 hora antes").
    - constraint: restricción entre elementos ("no puedo el martes por la mañana porque trabajo", "no se superponga con X").
-3. Desambiguación: si el input menciona UNA actividad con fecha, es event. Si menciona DOS fechas como rango, es availability.
+3. Desambiguación: si el input menciona UNA actividad con fecha, es event. Un RANGO de fechas que describe una ACTIVIDAD ("proyecto del lunes al viernes", "reunión del 10 al 15 de agosto", "informe de septiembre a octubre") es event multi-día: pon start_date Y end_date (fecha del último día mencionado), end_time: null (todo el día). availability SOLO cuando el texto declara disponibilidad explícita ("disponible/available/estaré libre del 5 al 23").
 4. COMPUESTOS: un input puede producir varios intents. "Examen el viernes y necesito 4 horas para preparar" → 1 intent event con preparation_minutes=240. "Estudiar el viernes y programación el sábado" → 2 intents event.
 5. PREPARACIÓN ADJUNTA: cuando el usuario dice "necesito N horas para prepararme/estudiar para X" o "necesito al menos N horas", pon N*60 en preparation_minutes DENTRO del intent del evento/deadline. El planner reserva ese tiempo antes.
 6. DESCONOCIDO = null. Jamás inventes fechas, horas ni duraciones. Si no se sabe la hora, start_time: null y all_day implícito. Si no se sabe el día, start_date: null.
@@ -68,7 +68,7 @@ REGLAS:
 8. Hora: formato 24h "HH:MM" o null. Duración en minutos enteros.
 9. confidence: 0.0 (sin datos) a 1.0 (explícito). reason: breve justificación en español, o null.
 10. category: una de Universidad|Trabajo|Personal|Finanzas|Salud|Otro; si no se puede inferir, null.
-11. NO conviertas una disponibilidad en un evento: "disponible desde el 5 hasta el 23" es availability, no event.
+11. NO conviertas una disponibilidad en un evento: "disponible desde el 5 hasta el 23" es availability, no event. Y a la inversa: un rango con actividad ("proyecto del lunes al viernes") es event multi-día, no availability.
 12. Títulos en español, específicos, sin "Tarea:" ni prefijos.
 13. Si el texto no contiene ninguna intención accionable, devuelve {"intents": []}.
 
@@ -84,6 +84,9 @@ Usuario: "The project is due Monday but I need at least six hours to finish it."
 
 Usuario: "Diagnostic Test is available from August 5 until August 23."
 → {"intents":[{"intent_type":"availability","title":"Diagnostic Test","category":"Universidad","priority":"alta","start_date":"2026-08-05","start_time":null,"end_date":"2026-08-23","end_time":null,"confidence":0.9,"reason":"ventana de disponibilidad"}]}
+
+Usuario: "Tengo un proyecto del lunes al viernes de la primera semana de septiembre."
+→ {"intents":[{"intent_type":"event","title":"Proyecto","category":"Trabajo","priority":"media","start_date":"2026-09-07","start_time":null,"end_date":"2026-09-11","end_time":null,"duration_minutes":null,"confidence":0.85,"reason":"evento multi-día con rango de fechas"}]}
 "#;
 
 /// Parsea el JSON del proveedor en un lote validado de intents.

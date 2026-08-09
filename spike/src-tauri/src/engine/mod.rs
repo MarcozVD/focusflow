@@ -44,6 +44,15 @@ pub fn local_ms(dt: NaiveDateTime) -> i64 {
         .unwrap_or(0)
 }
 
+/// Medianoche local (ms) del día que contiene `ms`.
+pub fn local_midnight(ms: i64) -> i64 {
+    Local
+        .timestamp_millis_opt(ms)
+        .earliest()
+        .map(|d| local_ms(d.date_naive().and_hms_opt(0, 0, 0).unwrap()))
+        .unwrap_or(ms)
+}
+
 /// Intervalo semiabierto `[start, end)` en ms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interval {
@@ -238,6 +247,60 @@ impl ConstraintEngine {
     // Construcción desde intents (puente con la fase 3)
     // ------------------------------------------------------------------
 
+    /// Compromiso duro para un bloque `[start, end)` con `label`.
+    ///
+    /// Un "todo el día" de varios días ("proyecto del lunes al viernes") NO
+    /// ocupa las 24 h de cada día cubierto: solo bloquean los días externos.
+    /// - Día inicial: completo.
+    /// - Días intermedios: libres.
+    /// - Día final: si trae hora de cierre (`end` no es medianoche), bloquea
+    ///   las 2 h previas; si no, el día queda libre pero la fecha límite cae
+    ///   al final del día (22:00) y se registra como vencimiento.
+    pub fn push_commitment(&mut self, start: i64, end: i64, all_day: bool, label: String) {
+        if !all_day {
+            self.commitments.push(Block {
+                interval: Interval { start, end },
+                label,
+                severity: Severity::Hard,
+            });
+            return;
+        }
+        let start_day = local_midnight(start);
+        let end_day = local_midnight(end);
+        if end_day - start_day <= DAY_MS {
+            self.commitments.push(Block {
+                interval: Interval { start, end },
+                label,
+                severity: Severity::Hard,
+            });
+            return;
+        }
+        let first_end = (start_day + DAY_MS).min(end);
+        if first_end > start {
+            self.commitments.push(Block {
+                interval: Interval { start, end: first_end },
+                label: label.clone(),
+                severity: Severity::Hard,
+            });
+        }
+        let deadline = if end == end_day {
+            end_day + 22 * HOUR_MS
+        } else {
+            end
+        };
+        self.deadlines.push(Deadline { at_ms: deadline, label: label.clone() });
+        if end != end_day {
+            let s = (end - 2 * HOUR_MS).max(end_day);
+            if s < end {
+                self.commitments.push(Block {
+                    interval: Interval { start: s, end },
+                    label,
+                    severity: Severity::Hard,
+                });
+            }
+        }
+    }
+
     /// Mapea un batch de `Intent` al estado del motor:
     /// - `event` con ventana → compromiso (hard).
     /// - `availability` → ventana de disponibilidad (hard).
@@ -250,18 +313,10 @@ impl ConstraintEngine {
             match i.intent_type {
                 IntentType::Event => match (i.window.start, i.window.end) {
                     (Some(s), Some(en)) if en > s => {
-                        e.commitments.push(Block {
-                            interval: Interval { start: s, end: en },
-                            label: i.title.clone(),
-                            severity: Severity::Hard,
-                        });
+                        e.push_commitment(s, en, i.window.all_day, i.title.clone());
                     }
                     (Some(s), _) => {
-                        e.commitments.push(Block {
-                            interval: Interval { start: s, end: s + DAY_MS },
-                            label: i.title.clone(),
-                            severity: Severity::Hard,
-                        });
+                        e.push_commitment(s, s + DAY_MS, i.window.all_day, i.title.clone());
                     }
                     _ => {}
                 },
@@ -663,7 +718,7 @@ impl ConstraintEngine {
 
     /// Región permitida de un día: región base menos sueño, compromisos y
     /// bloques.
-    fn allowed_on(&self, day: NaiveDate) -> Vec<Interval> {
+    pub fn allowed_on(&self, day: NaiveDate) -> Vec<Interval> {
         let base = self.base_region_on(day);
         let (d0, d1) = day_bounds(day);
         let mut hard: Vec<Interval> = self
@@ -1242,6 +1297,30 @@ mod tests {
             reason: "test".into(),
             source: "local".into(),
         }
+    }
+
+    #[test]
+    fn from_intents_multiday_allday_event_blocks_external_days() {
+        let start = dt(day(1), 0, 0);
+        let end = dt(day(4), 0, 0); // "lunes al jueves" (sin hora de cierre)
+        let mut i = intent_event("Proyecto", start, end);
+        i.window.all_day = true;
+        let e = ConstraintEngine::from_intents(&[i]);
+        let hour = HOUR_MS;
+        // día inicial: bloqueado; días medios: libres
+        assert_eq!(e.available_minutes(start + 9 * hour, start + 10 * hour), 0);
+        assert_eq!(e.available_minutes(dt(day(2), 9, 0), dt(day(2), 10, 0)), 60);
+        // día de fin: libre con fecha límite 22:00
+        assert_eq!(e.available_minutes(dt(day(4), 9, 0), dt(day(4), 10, 0)), 60);
+        let dl = e.deadlines.iter().find(|d| d.label == "Proyecto").expect("deadline");
+        assert_eq!(dl.at_ms, dt(day(4), 22, 0));
+
+        // con hora de cierre: bloquea las 2 h previas
+        let mut i = intent_event("Proyecto", start, dt(day(4), 22, 0));
+        i.window.all_day = true;
+        let e = ConstraintEngine::from_intents(&[i]);
+        assert_eq!(e.available_minutes(dt(day(4), 20, 0), dt(day(4), 22, 0)), 0);
+        assert_eq!(e.available_minutes(dt(day(4), 14, 0), dt(day(4), 15, 0)), 60);
     }
 
     #[test]

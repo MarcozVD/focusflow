@@ -43,7 +43,7 @@
 
   async function send(text?: string) {
     const t = (text ?? input).trim();
-    if (!t || busy()) return;
+    if (!t || busy) return;
     input = "";
     await assistantTurn(t);
   }
@@ -112,7 +112,7 @@
 
   <div class="chips">
     {#each QUICK as q}
-      <button class="chip" onclick={() => send(q)} disabled={busy()}>{q}</button>
+      <button class="chip" onclick={() => send(q)} disabled={busy}>{q}</button>
     {/each}
   </div>
 
@@ -181,7 +181,7 @@
       {/if}
     {/each}
 
-    {#if busy()}
+    {#if busy}
       <div class="msg ai typing">Analizando tu calendario<span class="dots">…</span></div>
     {/if}
 
@@ -196,9 +196,9 @@
       bind:value={input}
       placeholder="Pregunta o pide algo: ¿tengo tiempo hoy? · organiza mi semana · marca la tarea X como hecha"
       onkeydown={(e) => e.key === "Enter" && send()}
-      disabled={busy()}
+      disabled={busy}
     />
-    <button class="btn primary" onclick={() => send()} disabled={busy() || !input.trim()}>Enviar</button>
+    <button class="btn primary" onclick={() => send()} disabled={busy || !input.trim()}>Enviar</button>
   </div>
   <p class="foot">
     El asistente solo propone: ninguna tarea se crea, mueve ni completa sin tu confirmación.

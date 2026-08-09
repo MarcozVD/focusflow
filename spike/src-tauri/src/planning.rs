@@ -13,8 +13,8 @@ use chrono::{Datelike, Local, TimeZone, Timelike, Weekday};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::intent::{Intent, IntentType, Priority};
-use crate::engine::planner::Planner;
-use crate::engine::{ConstraintEngine, Severity};
+use crate::engine::planner::{PlannedItem, Planner};
+use crate::engine::{ConstraintEngine, Severity, DAY_MS, HOUR_MS, local_midnight};
 use crate::store::{Db, TaskRow};
 
 /// Sesión propuesta, tal como llega al frontend.
@@ -109,7 +109,14 @@ fn fmt_when(start: i64, end: i64) -> String {
     let s = Local.timestamp_millis_opt(start).earliest().unwrap_or_else(|| Local::now());
     let e = Local.timestamp_millis_opt(end).earliest().unwrap_or_else(|| Local::now());
     if s.hour() == 0 && s.minute() == 0 && e.hour() == 0 && e.minute() == 0 {
-        format!("{} {}", day_name(&s), s.format("%d/%m"))
+        let days = (e.date_naive() - s.date_naive()).num_days();
+        if days >= 2 {
+            // multi-día: "lunes 07/09 – viernes 11/09" (el fin es el día de
+            // cierre, fecha límite al final de ese día)
+            format!("{} {} – {} {}", day_name(&s), s.format("%d/%m"), day_name(&e), e.format("%d/%m"))
+        } else {
+            format!("{} {}", day_name(&s), s.format("%d/%m"))
+        }
     } else {
         format!("{} {}–{}", day_name(&s), s.format("%H:%M"), e.format("%H:%M"))
     }
@@ -159,15 +166,58 @@ pub fn engine_with_calendar(db: &Db) -> ConstraintEngine {
     if let Ok(tasks) = db.list() {
         for t in tasks {
             if t.status != "completada" && t.end_at > t.start_at {
-                e.commitments.push(crate::engine::Block {
-                    interval: crate::engine::Interval { start: t.start_at, end: t.end_at },
-                    label: t.title.clone(),
-                    severity: Severity::Hard,
-                });
+                e.push_commitment(t.start_at, t.end_at, t.all_day, t.title.clone());
             }
         }
     }
     e
+}
+
+/// Ítem sintetizado para un evento all-day multi-día sin duración: una
+/// sesión por cada ventana libre de cada día del rango (el día de inicio lo
+/// bloquea el propio evento, el día de fin se incluye hasta el cierre).
+fn fill_range_item(engine: &ConstraintEngine, i: &Intent, start: i64, end: i64) -> Option<PlannedItem> {
+    let start_day = local_midnight(start);
+    let end_day = local_midnight(end);
+    let d0 = Local.timestamp_millis_opt(start_day).earliest()?.date_naive();
+    let d1 = Local.timestamp_millis_opt(end_day).earliest()?.date_naive();
+    // fin del día en ms (medianoche del día siguiente)
+    let f_end = |d: chrono::NaiveDate| crate::engine::local_ms((d + chrono::Duration::days(1)).into());
+    let mut sessions: Vec<crate::engine::planner::PlanSession> = Vec::new();
+    let mut total = 0u32;
+    let mut d = d0;
+    while d <= d1 {
+        // `end` es medianoche del día de fin → el día completo entra (hasta el
+        // cierre del horario laboral). Con hora de cierre se recorta.
+        let is_last = d == d1;
+        let day_clip_end = if is_last && end == end_day { f_end(d) } else { end };
+        for f in engine.allowed_on(d) {
+            let s = f.start.max(start);
+            let e = f.end.min(day_clip_end);
+            if e - s < 30 * 60_000 {
+                continue;
+            }
+            sessions.push(crate::engine::planner::PlanSession { start_ms: s, end_ms: e, is_prep: false });
+            total += ((e - s) / 60_000) as u32;
+        }
+        d += chrono::Duration::days(1);
+    }
+    if sessions.is_empty() {
+        return None;
+    }
+    Some(PlannedItem {
+        title: i.title.clone(),
+        intent_type: i.intent_type,
+        priority: i.priority,
+        deadline_bound_ms: Some(end),
+        prep_min: 0,
+        task_min: total,
+        required_min: total,
+        planned_min: total,
+        sessions,
+        complete: true,
+        notes: Vec::new(),
+    })
 }
 
 fn apply_intents(base: &mut ConstraintEngine, intents: &[Intent]) {
@@ -195,8 +245,27 @@ pub fn plan_from_text(
 ) -> Result<PlanProposalView, String> {
     let mut engine = engine_with_calendar(db);
     apply_intents(&mut engine, intents);
-    let planner = Planner { engine, ..Planner::default() };
-    let report = planner.plan(intents);
+    let planner = Planner { engine: engine.clone(), ..Planner::default() };
+    let mut report = planner.plan(intents);
+    // Eventos all-day multi-día sin duración: no hay sesiones dimensionables,
+    // pero el usuario espera cubrir el rango. Sintetizar sesiones por día
+    // (todo el horario libre de cada día, día inicio bloqueado por el propio
+    // evento, día fin incluido).
+    for i in intents {
+        if i.intent_type != IntentType::Event || i.duration.is_some() || i.preparation.is_some() {
+            continue;
+        }
+        let (Some(s), Some(en)) = (i.window.start, i.window.end) else { continue };
+        if !i.window.all_day || en - s <= DAY_MS {
+            continue;
+        }
+        if report.items.iter().any(|it| it.title == i.title) {
+            continue;
+        }
+        if let Some(item) = fill_range_item(&engine, i, s, en) {
+            report.items.push(item);
+        }
+    }
 
     let items: Vec<PlanItemView> = report
         .items
@@ -383,6 +452,12 @@ mod tests {
         Db::open_memory_pub().unwrap()
     }
 
+    /// DB sin datos de demostración (el seed cruza medianoche según la hora
+    /// real y ensucia los días de prueba).
+    fn clean_db() -> Db {
+        Db::open_memory_clean_pub().unwrap()
+    }
+
     fn intent(title: &str, kind: IntentType, minutes: u32) -> Intent {
         Intent {
             intent_type: kind,
@@ -445,6 +520,86 @@ mod tests {
         for s in &item.sessions {
             assert!(s.end_ms <= start || s.start_ms >= start + 9 * 3_600_000, "nunca choca con la reunión");
         }
+    }
+
+    #[test]
+    fn multiday_allday_blocks_only_external_days() {
+        let d = clean_db();
+        // "proyecto del lunes al jueves": cubre lunes, martes y miércoles;
+        // el jueves es el día de fin (sin hora de cierre).
+        d.create("Proyecto", "trab", "alta", day(1), day(4), true).unwrap();
+        let e = engine_with_calendar(&d);
+        let hour = crate::engine::HOUR_MS;
+        // día inicial: bloqueado completo
+        assert_eq!(e.available_minutes(day(1) + 9 * hour, day(1) + 10 * hour), 0);
+        assert_eq!(e.available_minutes(day(1), day(1) + 24 * hour), 0);
+        // días intermedios: libres (09:00–18:00 = 9h)
+        assert_eq!(e.available_minutes(day(2), day(2) + 24 * hour), 9 * 60);
+        assert_eq!(e.available_minutes(day(3) + 9 * hour, day(3) + 10 * hour), 60);
+        // día de fin sin hora de cierre: libre, con fecha límite 22:00
+        assert_eq!(e.available_minutes(day(4), day(4) + 24 * hour), 9 * 60);
+        let dl = e
+            .deadlines
+            .iter()
+            .find(|x| x.label == "Proyecto")
+            .expect("deadline del día de fin");
+        assert_eq!(dl.at_ms, day(4) + 22 * hour, "fecha límite al final del día (22:00)");
+    }
+
+    #[test]
+    fn multiday_allday_without_duration_fills_range() {
+        let d = clean_db();
+        let mut i = intent("Proyecto", IntentType::Event, 0);
+        i.window = TimeWindow { start: Some(day(1)), end: Some(day(4)), all_day: true };
+        let view = plan_from_text(&d, "proyecto del lunes al jueves", &[i], "local").unwrap();
+        assert_eq!(view.items.len(), 1, "se sintetiza el ítem del rango");
+        let it = &view.items[0];
+        assert_eq!(it.title, "Proyecto");
+        assert_eq!(it.sessions.len(), 3, "día inicio bloqueado por el evento, 3 días libres");
+        for s in &it.sessions {
+            let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
+            let et = Local.timestamp_millis_opt(s.end_ms).earliest().unwrap();
+            assert_eq!(st.hour(), 9, "empiezan a las 09:00");
+            assert_eq!(et.hour(), 18, "terminan a las 18:00");
+        }
+        assert_eq!(it.required_min, 3 * 9 * 60, "3 días x 9 h");
+        assert!(it.complete);
+        // aceptar crea el evento + las sesiones
+        let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
+        assert_eq!(created.len(), 4, "evento + 3 sesiones");
+    }
+
+    #[test]
+    fn single_day_allday_without_duration_no_sessions() {
+        let d = clean_db();
+        let mut i = intent("Clase", IntentType::Event, 0);
+        i.window = TimeWindow { start: Some(day(1)), end: Some(day(2)), all_day: true };
+        let view = plan_from_text(&d, "clase el lunes", &[i], "local").unwrap();
+        assert!(view.items.is_empty(), "un solo día no se llena con sesiones");
+    }
+
+    #[test]
+    fn multiday_allday_with_close_time_blocks_two_hours_before() {
+        let d = clean_db();
+        // cierra el jueves a las 22:00 → ocupa 20:00–22:00 de ese día
+        d.create("Proyecto", "trab", "alta", day(1), day(4) + 22 * 3_600_000, true).unwrap();
+        let e = engine_with_calendar(&d);
+        let hour = crate::engine::HOUR_MS;
+        assert_eq!(e.available_minutes(day(4) + 20 * hour, day(4) + 22 * hour), 0, "2 h antes del cierre ocupadas");
+        assert_eq!(e.available_minutes(day(4) + 14 * hour, day(4) + 15 * hour), 60, "resto del día libre");
+        let dl = e.deadlines.iter().find(|x| x.label == "Proyecto").expect("deadline = hora de cierre");
+        assert_eq!(dl.at_ms, day(4) + 22 * hour);
+    }
+
+    #[test]
+    fn single_day_allday_blocks_full_day() {
+        let d = clean_db();
+        d.create("Examen", "uni", "alta", day(2), day(3), true).unwrap();
+        let engine = engine_with_calendar(&d);
+        let hour = crate::engine::HOUR_MS;
+        assert_eq!(engine.available_minutes(day(2), day(2) + 24 * hour), 0, "todo el día sigue ocupado");
+        assert_eq!(engine.available_minutes(day(1) + 12 * hour, day(2)), 6 * 60, "día anterior libre (12:00–18:00)");
+        assert!(engine.deadlines.is_empty(), "todo el día simple no crea fecha límite");
     }
 
     #[test]
