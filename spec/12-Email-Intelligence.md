@@ -131,3 +131,11 @@ Es el control del usuario sobre datos derivados de su correo.
 - `prep_min` se persiste pero aún no se usa en el planner de sugerencias.
 - `source_subject` se guarda para debugging; no se muestra en UI.
 - E2E real (tools/run-e2e-email.ps1) pendiente de ejecutar con cuenta real.
+
+
+## Erratas corregidas (2026-08-08)
+
+1. Filtros con semantica AND -> UNION. Antes un correo debia coincidir con TODOS los grupos (remitentes Y dominios Y palabras clave); con remitentes y dominios configurados, solo pasaba quien coincidia con ambos. Ahora pasa con CUALQUIER grupo (remitente O dominio O palabra clave), como los filtros de Gmail. Tests: union_semantics_sender_or_domain_or_keyword, no_filters_means_everything_passes, single_group_still_filters.
+2. Checkpoint ya no avanza sobre correos excluidos por filtros. Se registra email_filtered en el log y el checkpoint retrocede al ultimo correo procesado: al ajustar los filtros, el correo se reintenta solo.
+3. Boton "Reescanear correo (7 dias)" en Ajustes -> Correo: email_rescan reinicia los checkpoints (email.rescan_pending) y repasa la ventana reciente. La deduplicacion por message_id evita duplicados.
+4. Panic por overflow en find_similar_suggestion con intents "task" sin fecha (i64::MIN - 48h). Ahora saturating_sub/add; ventana sin fecha = rango completo y decide title_similar. El panic era non-unwinding y tiraba la app entera. Test: find_similar_suggestion_without_date_does_not_overflow.

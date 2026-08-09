@@ -833,6 +833,7 @@ impl Db {
     /// ¿Ya existe una sugerencia pendiente (o auto-aprobada) equivalente de
     /// OTRO correo? Mismo compromiso en varios correos → una sola sugerencia
     /// (fase 8). `exclude_email_id` evita chocar con la del propio correo.
+    /// Sin fecha (intent "task"): ventana completa, decide `title_similar`.
     pub fn find_similar_suggestion(
         &self,
         title: &str,
@@ -840,8 +841,8 @@ impl Db {
         end_at: Option<i64>,
         exclude_email_id: Option<&str>,
     ) -> rusqlite::Result<Option<(i64, String)>> {
-        let window_start = start_at.unwrap_or(i64::MIN) - 48 * 3_600_000;
-        let window_end = end_at.unwrap_or(i64::MIN) + 48 * 3_600_000;
+        let window_start = start_at.unwrap_or(i64::MIN).saturating_sub(48 * 3_600_000);
+        let window_end = end_at.unwrap_or(i64::MAX).saturating_add(48 * 3_600_000);
         let mut stmt = self.conn.prepare(
             "SELECT id, title FROM suggested_events
              WHERE status IN ('pending','auto_approved')
@@ -997,6 +998,12 @@ impl Db {
                 |r| r.get(0),
             )
             .optional()
+    }
+
+    /// Resetea todos los checkpoints (rescan de la ventana reciente).
+    pub fn sync_state_clear_all(&self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM sync_state", [])?;
+        Ok(())
     }
 
     pub fn sync_state_set(&self, source: &str, checkpoint: &str, result: &str, error: &str) -> rusqlite::Result<()> {
@@ -1405,6 +1412,22 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn find_similar_suggestion_without_date_does_not_overflow() {
+        let db = db();
+        let start = now_ms() + 86_400_000;
+        ins_suggestion(&db, "email-1", "Re: Tareas", "task", "Enviar informe semanal", start);
+        // intents "task" sin fecha (None) → antes paniqueaba con overflow (i64::MIN - 48h)
+        let r = db
+            .find_similar_suggestion("Enviar informe semanal", None, None, Some("email-2"))
+            .unwrap();
+        assert!(r.is_some(), "dedupe por título sin fecha");
+        let none = db
+            .find_similar_suggestion("Otra cosa distinta", None, None, Some("email-2"))
+            .unwrap();
+        assert!(none.is_none());
     }
 
     #[test]

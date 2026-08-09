@@ -438,6 +438,29 @@ fn email_sync_now(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Reescanear la ventana reciente: reinicia checkpoints y sincroniza.
+/// Recupera correos que quedaron fuera por filtros o errores previos
+/// (la deduplicación por message_id evita duplicados).
+#[tauri::command]
+fn email_rescan(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
+    {
+        let db = state.lock().unwrap();
+        db.settings_set("email.rescan_pending", "1").map_err(|e| e.to_string())?;
+    }
+    append_log(&app, "email_rescan_requested");
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        match sync::run_sync(&handle) {
+            Ok(s) => append_log(&handle, &format!("rescan_ok found={} suggestions={}", s.total_found, s.total_suggestions)),
+            Err(e) => {
+                append_log(&handle, &format!("rescan_error: {e}"));
+                let _ = handle.emit("email:sync-error", e);
+            }
+        }
+    });
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct ConnectionCheck {
     ok: bool,
@@ -993,7 +1016,6 @@ fn general_settings_set(
 // ---------------- preferencias de UI (tema + acento) ----------------
 
 // ---------------- notificaciones contextuales (fase 11) ----------------
-
 #[tauri::command]
 fn notif_prefs_get(state: State<'_, Mutex<Db>>) -> notify::NotifPrefsView {
     let db = state.lock().unwrap();
@@ -1314,6 +1336,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             email_config_get,
             email_config_set,
             email_sync_now,
+            email_rescan,
             sync_status,
             suggestions_list,
             suggestion_accept,

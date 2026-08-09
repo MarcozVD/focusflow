@@ -1183,6 +1183,21 @@ export async function syncNow() {
   }
 }
 
+/** Reescanear la ventana reciente: recupera correos excluidos por filtros. */
+export async function rescanEmail() {
+  if (!inTauri()) return;
+  try {
+    store.syncRunning = true;
+    store.syncProgress = null;
+    store.syncSummary = null;
+    await invoke("email_rescan");
+    setNlToast("Reescanenado el correo…", "sync");
+  } catch (e) {
+    store.syncRunning = false;
+    console.error("rescanEmail", e);
+  }
+}
+
 export function fmtMs(ms: number | null): string {
   if (!ms) return "—";
   const d = new Date(ms);

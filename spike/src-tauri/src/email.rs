@@ -112,6 +112,16 @@ pub struct RawEmail {
 }
 
 /// Filtros: si la lista está vacía → pasa todo. Si no, debe cumplir algún criterio.
+/// ¿Hay algún filtro configurado? (false → todo pasa)
+pub fn has_filters(f: &EmailFilters) -> bool {
+    !f.senders.is_empty() || !f.domains.is_empty() || !f.keywords.is_empty()
+}
+
+/// Unión de filtros: el correo pasa si coincide con CUALQUIER grupo
+/// configurado (remitente O dominio O palabra clave). Con ningún filtro
+/// configurado, todo pasa. Si se configuraron grupos y ninguno coincide,
+/// el correo se descarta (y se registra en el log + rollback de checkpoint
+/// para poder recuperarlo al ajustar los filtros).
 pub fn matches_filters(e: &RawEmail, f: &EmailFilters) -> bool {
     let sender_lower = e.sender.to_lowercase();
     let domain = sender_lower
@@ -122,32 +132,23 @@ pub fn matches_filters(e: &RawEmail, f: &EmailFilters) -> bool {
         .to_string();
     let body_lower = format!("{} {}", e.subject.to_lowercase(), e.body.to_lowercase());
 
-    if !f.senders.is_empty() {
-        let hit = f
-            .senders
+    if !f.senders.is_empty() || !f.domains.is_empty() || !f.keywords.is_empty() {
+        if f.senders
             .iter()
-            .any(|s| sender_lower.contains(&s.to_lowercase()));
-        if !hit {
-            return false;
+            .any(|s| sender_lower.contains(&s.to_lowercase()))
+        {
+            return true;
         }
-    }
-    if !f.domains.is_empty() {
-        let hit = f
-            .domains
+        if f.domains
             .iter()
-            .any(|d| domain.contains(&d.to_lowercase()) || sender_lower.contains(&d.to_lowercase()));
-        if !hit {
-            return false;
+            .any(|d| domain.contains(&d.to_lowercase()) || sender_lower.contains(&d.to_lowercase()))
+        {
+            return true;
         }
-    }
-    if !f.keywords.is_empty() {
-        let hit = f
-            .keywords
-            .iter()
-            .any(|k| body_lower.contains(&k.to_lowercase()));
-        if !hit {
-            return false;
+        if f.keywords.iter().any(|k| body_lower.contains(&k.to_lowercase())) {
+            return true;
         }
+        return false;
     }
     true
 }
@@ -347,4 +348,57 @@ pub fn fetch_mailbox(
     }
     new_checkpoint.last_reviewed_date = now_ms();
     Ok((emails, new_checkpoint))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw(sender: &str, subject: &str, body: &str) -> RawEmail {
+        RawEmail {
+            mailbox: "INBOX".into(),
+            uid: 1,
+            message_id: "m1".into(),
+            subject: subject.into(),
+            sender: sender.into(),
+            date: "2026-08-08".into(),
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn union_semantics_sender_or_domain_or_keyword() {
+        let f = EmailFilters {
+            senders: vec!["notifications@instructure.com".into(), "gosma@unab.edu.co".into()],
+            domains: vec!["unab.edu.co".into()],
+            keywords: vec!["examen".into()],
+        };
+        // remitente en la lista, dominio fuera → pasa (antes: AND lo rechazaba)
+        let canvas = raw("UNAB Canvas <notifications@instructure.com>", "Tarea calificada", "hola");
+        assert!(matches_filters(&canvas, &f));
+        // dominio universitario, remitente fuera de la lista → pasa
+        let uni = raw("jpinzon408@unab.edu.co", "Clase de IoT", "hola");
+        assert!(matches_filters(&uni, &f));
+        // palabra clave en el asunto, sin remitente/dominio → pasa
+        let kw = raw("alguien@outlook.com", "Examen de cálculo", "hola");
+        assert!(matches_filters(&kw, &f));
+        // sin coincidencia en ningún grupo → descartado
+        let spam = raw("publicidad@outlook.com", "Oferta", "compra");
+        assert!(!matches_filters(&spam, &f));
+    }
+
+    #[test]
+    fn no_filters_means_everything_passes() {
+        let f = EmailFilters::default();
+        let e = raw("cualquiera@x.com", "asunto", "cuerpo");
+        assert!(matches_filters(&e, &f));
+        assert!(!has_filters(&f));
+    }
+
+    #[test]
+    fn single_group_still_filters() {
+        let f = EmailFilters { senders: vec!["jefe@corp.com".into()], ..EmailFilters::default() };
+        assert!(matches_filters(&raw("Jefe <jefe@corp.com>", "reunión", ""), &f));
+        assert!(!matches_filters(&raw("otro@corp.com", "reunión", ""), &f));
+    }
 }

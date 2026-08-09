@@ -14,6 +14,7 @@
     loadEmailConfig,
     loadSyncStatus,
     syncNow,
+    rescanEmail,
     fmtMs,
     generalSettings,
     loadGeneralSettings,
@@ -498,7 +499,14 @@
       <button class="btn primary-solid" onclick={syncNow} disabled={syncRunning()}>
         {syncRunning() ? "Comprobando…" : "Comprobar ahora"}
       </button>
+      <button class="btn" onclick={rescanEmail} disabled={syncRunning()}>
+        Reescanear correo (7 días)
+      </button>
     </div>
+    <p class="hint">
+      "Reescanear" revisa de nuevo los correos recientes: útil tras cambiar los filtros
+      (remitentes, dominios, palabras clave) para recuperar correos que quedaron fuera.
+    </p>
 
     {#if syncRunning()}
       <div class="sync-run">

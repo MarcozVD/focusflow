@@ -294,6 +294,23 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
     }
     let ai_configured = !ai_cfg.endpoint.is_empty() && !ai_cfg.model.is_empty() && ai_cfg.provider_name() != "local";
 
+    // rescan pendiente → reiniciar checkpoints: se vuelve a repasar la
+    // ventana reciente (dedup por message_id evita duplicados)
+    let rescan = with_db(app, |db| {
+        db.settings_get("email.rescan_pending")
+            .ok()
+            .flatten()
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    });
+    if rescan {
+        with_db(app, |db| {
+            let _ = db.sync_state_clear_all();
+            let _ = db.settings_set("email.rescan_pending", "0");
+        });
+        crate::append_log(app, "rescan_pending → checkpoints reiniciados");
+    }
+
     let mut session = match email::connect(&config) {
         Ok(s) => s,
         Err(e) => {
@@ -312,41 +329,52 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
             (cp_json, checkpoint, uid)
         });
 
-        match email::fetch_mailbox(&mut session, mailbox, &checkpoint, since_days) {
-            Ok((emails, new_cp)) => {
-                let mut mb = crate::sync::MailboxSummary {
-                    mailbox: mailbox.clone(),
-                    found: 0,
-                    processed: 0,
-                    result: "ok".into(),
-                    error: String::new(),
-                };
-                let filtered: Vec<RawEmail> = emails
-                    .into_iter()
-                    .filter(|e| email::matches_filters(e, &config.filters))
-                    .collect();
-                mb.found = filtered.len();
-                summary.total_found += filtered.len();
+            match email::fetch_mailbox(&mut session, mailbox, &checkpoint, since_days) {
+                Ok((emails, mut new_cp)) => {
+                    let mut mb = crate::sync::MailboxSummary {
+                        mailbox: mailbox.clone(),
+                        found: 0,
+                        processed: 0,
+                        result: "ok".into(),
+                        error: String::new(),
+                    };
+                    // sin filtros → todos; con filtros → los que coinciden
+                    let (kept, excluded): (Vec<RawEmail>, Vec<RawEmail>) = if email::has_filters(&config.filters) {
+                        emails.into_iter().partition(|e| email::matches_filters(e, &config.filters))
+                    } else {
+                        (emails, Vec::new())
+                    };
+                    for e in &excluded {
+                        crate::append_log(
+                            app,
+                            &format!("email_filtered uid={} sender={} asunto={}", e.uid, e.sender, e.subject),
+                        );
+                    }
+                    let filtered: Vec<RawEmail> = kept;
+                    mb.found = filtered.len();
+                    summary.total_found += filtered.len();
 
-                let total = filtered.len();
-                for (i, raw) in filtered.iter().enumerate() {
-                    let _ = app.emit(
-                        "email:sync-progress",
-                        crate::sync::SyncProgress {
-                            phase: "email".into(),
-                            mailbox: mailbox.clone(),
-                            processed: i + 1,
-                            total,
-                        },
-                    );
-                    let outcome = with_db(app, |db| {
-                        process_email(app, db, provider.as_ref(), ai_configured, raw)
-                    });
-                    match outcome {
-                        Ok(n) => {
-                            mb.processed += n;
-                            summary.total_suggestions += n;
-                        }
+                    let total = filtered.len();
+                    let mut last_decided_uid: u32 = 0;
+                    for (i, raw) in filtered.iter().enumerate() {
+                        let _ = app.emit(
+                            "email:sync-progress",
+                            crate::sync::SyncProgress {
+                                phase: "email".into(),
+                                mailbox: mailbox.clone(),
+                                processed: i + 1,
+                                total,
+                            },
+                        );
+                        let outcome = with_db(app, |db| {
+                            process_email(app, db, provider.as_ref(), ai_configured, raw)
+                        });
+                        match outcome {
+                            Ok(n) => {
+                                last_decided_uid = last_decided_uid.max(raw.uid);
+                                mb.processed += n;
+                                summary.total_suggestions += n;
+                            }
                         Err(e) => {
                             // fallo de red/IA → no avanzar checkpoint
                             let cp = serde_json::to_string(&checkpoint).unwrap_or_default();
@@ -362,6 +390,28 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                             crate::append_log(app, &format!("sync_abort {source}: {e}"));
                             return Err(e);
                         }
+                    }
+                }
+
+                // si algún correo quedó fuera por filtros, el checkpoint NO
+                // avanza más allá del último correo realmente procesado:
+                // se reintenta en la siguiente pasada (recuperable al
+                // ajustar los filtros en Ajustes).
+                let mut rolled_back = false;
+                if !excluded.is_empty() {
+                    let new_uid = last_decided_uid.max(checkpoint.uid);
+                    if new_uid < new_cp.uid {
+                        crate::append_log(
+                            app,
+                            &format!(
+                                "checkpoint_rollback {source} uid {} → {} ({n} excluidos por filtros)",
+                                new_cp.uid,
+                                new_uid,
+                                n = excluded.len()
+                            ),
+                        );
+                        new_cp.uid = new_uid;
+                        rolled_back = true;
                     }
                 }
 
