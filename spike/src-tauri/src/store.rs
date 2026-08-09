@@ -1545,6 +1545,30 @@ mod tests {
     }
 
     #[test]
+    fn find_similar_task_dedupes_against_existing_tasks() {
+        let db = db();
+        let start = now_ms() + 86_400_000;
+        let t = db.create("Informe del proyecto", "uni", "alta", start, start + 3_600_000, false).unwrap();
+        // mismo título cerca de la fecha → detectado (dedupe de sugerencias)
+        let (id, title) = db
+            .find_similar_task("Informe del proyecto", start + 3_600_000, "remitente@x.com")
+            .unwrap()
+            .expect("duplicado de tarea detectado");
+        assert_eq!(id, t.id);
+        assert_eq!(title, "Informe del proyecto");
+        // mismo remitente con título idéntico pero lejos en el tiempo → no
+        assert!(
+            db.find_similar_task("Informe del proyecto", start + 40 * 86_400_000, "remitente@x.com")
+                .unwrap()
+                .is_none()
+        );
+        // título distinto → no
+        assert!(
+            db.find_similar_task("Cena familiar", start, "remitente@x.com").unwrap().is_none()
+        );
+    }
+
+    #[test]
     fn export_contains_data_but_never_secrets() {
         let db = db();
         let now = now_ms();

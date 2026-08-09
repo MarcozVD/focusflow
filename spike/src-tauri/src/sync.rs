@@ -61,6 +61,27 @@ pub fn with_db<T>(app: &AppHandle, f: impl FnOnce(&Db) -> T) -> T {
     f(&db)
 }
 
+/// Rollback del checkpoint cuando hubo correos excluidos por filtros: el
+/// checkpoint no puede avanzar más allá del último correo procesado, o esos
+/// correos nunca se reintentarían. Función pura, testeable.
+///
+/// - `new_cp_uid`: uid propuesto por el fetch de IMAP (el último de la bandeja).
+/// - `last_decided_uid`: uid del último correo realmente procesado (0 si ninguno).
+/// - `checkpoint_uid`: uid previo persistido.
+/// - `excluded_count`: correos descartados por filtros.
+pub fn rollback_uid(
+    new_cp_uid: u32,
+    last_decided_uid: u32,
+    checkpoint_uid: u32,
+    excluded_count: usize,
+) -> u32 {
+    if excluded_count == 0 {
+        return new_cp_uid;
+    }
+    let candidate = last_decided_uid.max(checkpoint_uid);
+    candidate.min(new_cp_uid)
+}
+
 /// Acepta una sugerencia: crea la tarea real y marca la sugerencia.
 pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, String> {
     let s = db
@@ -397,22 +418,18 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                 // avanza más allá del último correo realmente procesado:
                 // se reintenta en la siguiente pasada (recuperable al
                 // ajustar los filtros en Ajustes).
-                let mut rolled_back = false;
-                if !excluded.is_empty() {
-                    let new_uid = last_decided_uid.max(checkpoint.uid);
-                    if new_uid < new_cp.uid {
-                        crate::append_log(
-                            app,
-                            &format!(
-                                "checkpoint_rollback {source} uid {} → {} ({n} excluidos por filtros)",
-                                new_cp.uid,
-                                new_uid,
-                                n = excluded.len()
-                            ),
-                        );
-                        new_cp.uid = new_uid;
-                        rolled_back = true;
-                    }
+                let new_uid = rollback_uid(new_cp.uid, last_decided_uid, checkpoint.uid, excluded.len());
+                if new_uid < new_cp.uid {
+                    crate::append_log(
+                        app,
+                        &format!(
+                            "checkpoint_rollback {source} uid {} → {} ({} excluidos por filtros)",
+                            new_cp.uid,
+                            new_uid,
+                            excluded.len()
+                        ),
+                    );
+                    new_cp.uid = new_uid;
                 }
 
                 let ok_cp = serde_json::to_string(&new_cp).unwrap_or_default();
@@ -540,4 +557,26 @@ pub fn scheduler_loop(app: AppHandle) {
             .await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_excluded_emails_keeps_forward_progress() {
+        // sin filtros → el checkpoint avanza al último uid del fetch
+        assert_eq!(rollback_uid(50, 0, 10, 0), 50);
+        assert_eq!(rollback_uid(50, 30, 10, 0), 50);
+    }
+
+    #[test]
+    fn excluded_emails_roll_back_uid() {
+        // 20 excluidos al final: nunca pasar del último procesado (30)
+        assert_eq!(rollback_uid(50, 30, 10, 20), 30);
+        // sin procesados (todos excluidos): se mantiene el previo
+        assert_eq!(rollback_uid(50, 0, 10, 5), 10);
+        // procesados hasta el final → igual que sin rollback
+        assert_eq!(rollback_uid(50, 50, 10, 3), 50);
+    }
 }

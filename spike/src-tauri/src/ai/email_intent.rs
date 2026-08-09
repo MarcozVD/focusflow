@@ -9,7 +9,6 @@ use super::intent::{IntentBatch, IntentType};
 use super::intent_parser::{parse_batch_json, INTENT_SCHEMA};
 use super::{AiError, AiProvider, AiResult};
 use crate::email::RawEmail;
-use std::sync::{Arc, Mutex};
 
 /// Limites de la minimización: solo se manda a la IA una ventana del cuerpo.
 const MAX_BODY_CHARS: usize = 900;
@@ -114,6 +113,7 @@ pub fn suggestion_kind(it: &IntentType) -> &'static str {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::{Arc, Mutex};
 
     fn raw(body: &str) -> RawEmail {
         RawEmail {
