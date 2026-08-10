@@ -47,7 +47,8 @@
 **Puntos fuertes:**
 - Separación limpia backend: `store.rs` (datos) / `lib.rs` (commands + setup) / `sync.rs` (email+scheduler) / `reminders.rs` (motor) / `ai/*` (parser multicapa).
 - Parser multicapa conforme a FR-13: `parse_task_text(texto, provider, configured)` → LLM si está configurado, si no heurística ES (`nl.rs`). Nunca confía en JSON del LLM sin validar (`validation.rs`).
-- `with_db` (sync.rs:59) evita repetición de `state.lock().unwrap()`.
+- `with_db` (sync.rs) evita repetición de `state.lock().unwrap()` en commands simples; el sync de correo usa fases prepare → analyze → commit y nunca retiene el lock de DB durante llamadas de red/IA (issue C3-sync resuelto).
+- Comandos de IA con rate limit (`ai_cooldown`, mínimo 800 ms entre peticiones) para evitar ráfagas accidentales desde la UI.
 - Checkpoint de sync por UID con abort sin avanzar ante fallo de red/IA; `sync_history` auditable.
 - Frontend: store reactivo único (`data.svelte.ts`), caché de semanas con eviction (64 máx), última-solicitud-vence en NL, listeners idempotentes (doble ventana widget/main).
 
@@ -109,7 +110,7 @@ Estado: ✅ COMPLETE · 🟡 PARTIAL · 🔴 BROKEN · ❌ MISSING · 📄 DOCUM
 | Tema heredado (FR-40) | Sigue tema de la app | `ui:prefs` difunde a todas las ventanas; localStorage fast-path | ✅ COMPLETE | — | P1 |
 | Acciones widget (FR-41) | Completar desde widget; clic abre la app | Checkbox completa ✓; clic abre main + `task:open` ✓ | ✅ COMPLETE | — | P2 |
 | Multi-monitor (FR-42) | Recordar posición por monitor | Solo monitor primario (work_area bottom-right) | ❌ MISSING | — | P1 |
-| Categorías por defecto (FR-43) | 6 con color e icono | 6 hardcodeadas con color+icono (uni/trab/per/fin/sal/otr) | ✅ COMPLETE | 3 fuentes de verdad (UI, seed, prompts) | P0 |
+| Categorías por defecto (FR-43) | 6 con color e icono | 6 hardcodeadas con color+icono (uni/trab/per/fin/sal/otr) | ✅ COMPLETE | 3 fuentes de verdad (UI, seed, prompts) mitigadas: backend rechaza categorías fuera de `VALID_CATEGORIES` en `create/update_task_full` | P0 |
 | CRUD de categorías (FR-44) | Crear/editar/eliminar con reasignación | **No existe** (ni tabla ni commands) | ❌ MISSING | Bloqueado por duplicación de fuentes de verdad | P1 |
 | Prioridades (FR-45) | Alta/Media/Baja con color | ✓ con colores semánticos | ✅ COMPLETE | — | P0 |
 | Filtros combinables (FR-46) | Categoría, prioridad, estado, etiquetas, rango, vencidas | **No existen** | ❌ MISSING | — | P1 |

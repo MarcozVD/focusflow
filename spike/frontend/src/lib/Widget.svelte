@@ -184,7 +184,7 @@
     {/if}
 
     {#if !current && !next && !important && !relevant}
-      <div class="empty" transition:fade={{ duration: 140 }}>Todo claro por ahora ✨</div>
+      <div class="empty" transition:fade={{ duration: 140 }}>Todo claro por ahora</div>
     {/if}
   </div>
 
@@ -193,7 +193,7 @@
       ⤢ <span>Abrir</span>
     </button>
     <button class="foot-btn" onclick={() => askAssistant()} title="Preguntar a FocusFlow">
-      ✦ <span>Preguntar</span>
+      <span>Preguntar</span>
     </button>
   </footer>
 </div>

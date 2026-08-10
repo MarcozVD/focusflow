@@ -20,6 +20,7 @@
 use chrono::{NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 
+use crate::ai::intent::Intent;
 use crate::ai::intent_parser::parse_intent;
 use crate::ai::validation::category_id_from_name;
 use crate::ai::{AiError, AiProvider, AiResult};
@@ -408,8 +409,124 @@ fn build_action(
     }
 }
 
+/// Construye el prompt del usuario a partir del contexto ya obtenido.
+/// No toca la base de datos (contexto se pasa como string).
+pub fn build_user_prompt(ctx: &str, text: &str, history: &[HistoryMsg]) -> String {
+    format!(
+        "Hoy es {}.\n\nHistorial reciente:\n{}\n\nContexto del calendario:\n{}\n\nPetición del usuario:\n{}",
+        chrono::Local::now().format("%Y-%m-%d %A"),
+        fmt_history(history),
+        ctx,
+        text
+    )
+}
+
+/// Primera decisión del asistente: clasifica la petición (solo red).
+pub fn request_decision(
+    provider: &dyn AiProvider,
+    user: &str,
+) -> Result<serde_json::Value, String> {
+    let decision: AiResult<serde_json::Value> =
+        provider.chat_json(DECISION_SYSTEM_PROMPT, user, ASSISTANT_DECISION_SCHEMA);
+    match decision {
+        Ok(v) => Ok(v),
+        Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
+            Err(format!("ia_fail {e}"))
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn note_from_decision(decision: &serde_json::Value) -> String {
+    decision.get("note").and_then(|n| n.as_str()).unwrap_or("").to_string()
+}
+
+/// Modo "answer": respuesta conversacional con contexto (solo red).
+/// El usuario envía el MISMO prompt que la decisión (tiene el contexto).
+pub fn answer_text(provider: &dyn AiProvider, user: &str) -> Result<AssistantTurnView, String> {
+    let a: AiResult<serde_json::Value> =
+        provider.chat_json(ANSWER_SYSTEM_PROMPT, user, r#"{"text":"string"}"#);
+    match a {
+        Ok(v) => {
+            let t = v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            if t.trim().is_empty() {
+                Ok(AssistantTurnView::Nothing {
+                    text: "No pude formular una respuesta. Intenta reformular la pregunta.".into(),
+                })
+            } else {
+                Ok(AssistantTurnView::Answer { text: t })
+            }
+        }
+        Err(e) => Err(format!("ia_fail {e}")),
+    }
+}
+
+/// Modo "plan": parsea la intención (red) y genera la propuesta (db).
+/// Combinado — para tests. El comando de Tauri separa las fases.
+pub fn plan_mode(
+    db: &Db,
+    text: &str,
+    provider: &dyn AiProvider,
+    note: String,
+) -> Result<AssistantTurnView, String> {
+    let batch = parse_intent(text, Some(provider), true).map_err(|e| e.to_string())?;
+    plan_from_intents(db, text, &batch.intents, note)
+}
+
+/// Genera la propuesta de plan desde intents ya parseados (solo db).
+pub fn plan_from_intents(
+    db: &Db,
+    text: &str,
+    intents: &[Intent],
+    note: String,
+) -> Result<AssistantTurnView, String> {
+    let proposal = planning::plan_from_text(db, text, intents, "assistant")?;
+    Ok(AssistantTurnView::Plan {
+        proposal,
+        note: if note.is_empty() {
+            "Propuesta de planificación: nada cambia hasta que la aceptes.".into()
+        } else {
+            note
+        },
+    })
+}
+
+/// Modo "action": resuelve la acción contra la db y la guarda como propuesta.
+pub fn action_mode(
+    db: &Db,
+    decision: &serde_json::Value,
+    note: &str,
+) -> Result<AssistantTurnView, String> {
+    let action_obj = decision.get("action").cloned().unwrap_or(serde_json::json!({}));
+    // no se pudo resolver (tarea desconocida/ambigua, datos incompletos)
+    // → responder de forma conversacional, sin crear propuestas basura
+    let action = match build_action(db, &action_obj, note) {
+        Ok(a) => a,
+        Err(clarify) => return Ok(AssistantTurnView::Answer { text: clarify }),
+    };
+    let payload = serde_json::to_string(&action).map_err(|e| e.to_string())?;
+    let proposal_id = db.insert_assistant_action(&action.kind, &payload).map_err(|e| e.to_string())?;
+    Ok(AssistantTurnView::Action {
+        action: AssistantActionView {
+            proposal_id,
+            kind: action.kind,
+            task_title: action.task_title,
+            title: action.title,
+            category_id: action.category_id,
+            priority: action.priority,
+            start_ms: action.start_ms,
+            end_ms: action.end_ms,
+            all_day: action.all_day,
+            summary: action.summary,
+        },
+    })
+}
+
 /// Un turno del asistente. `configured` = IA real configurada (no local).
 /// Sin IA: responde con un mensaje informativo (no crea propuestas basura).
+///
+/// Nota: combina red + db (el comando de Tauri usa las fases por separado
+/// para no retener el lock durante la red; esta función existe para tests).
 pub fn assistant_turn(
     db: &Db,
     text: &str,
@@ -424,83 +541,15 @@ pub fn assistant_turn(
     }
     let provider = provider.ok_or_else(|| "sin proveedor de IA".to_string())?;
     let ctx = context_snapshot(db);
-    let user = format!(
-        "Hoy es {}.\n\nHistorial reciente:\n{}\n\nContexto del calendario:\n{}\n\nPetición del usuario:\n{}",
-        chrono::Local::now().format("%Y-%m-%d %A"),
-        fmt_history(history),
-        ctx,
-        text
-    );
-
-    let decision: AiResult<serde_json::Value> =
-        provider.chat_json(DECISION_SYSTEM_PROMPT, &user, ASSISTANT_DECISION_SCHEMA);
-    let decision = match decision {
-        Ok(v) => v,
-        Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
-            return Err(format!("ia_fail {e}"))
-        }
-        Err(e) => return Err(e.to_string()),
-    };
+    let user = build_user_prompt(&ctx, text, history);
+    let decision = request_decision(provider, &user)?;
+    let note = note_from_decision(&decision);
 
     let mode = decision.get("mode").and_then(|m| m.as_str()).unwrap_or("answer");
-    let note = decision.get("note").and_then(|n| n.as_str()).unwrap_or("");
-
     match mode {
-        "plan" => {
-            let (provider, configured) = (provider, true);
-            let batch = parse_intent(text, Some(provider), configured).map_err(|e| e.to_string())?;
-            let proposal = planning::plan_from_text(db, text, &batch.intents, "assistant")?;
-            Ok(AssistantTurnView::Plan {
-                proposal,
-                note: if note.is_empty() {
-                    "Propuesta de planificación: nada cambia hasta que la aceptes.".into()
-                } else {
-                    note.to_string()
-                },
-            })
-        }
-        "action" => {
-            let action_obj = decision.get("action").cloned().unwrap_or(serde_json::json!({}));
-            // no se pudo resolver (tarea desconocida/ambigua, datos incompletos)
-            // → responder de forma conversacional, sin crear propuestas basura
-            let action = match build_action(db, &action_obj, note) {
-                Ok(a) => a,
-                Err(clarify) => return Ok(AssistantTurnView::Answer { text: clarify }),
-            };
-            let payload = serde_json::to_string(&action).map_err(|e| e.to_string())?;
-            let proposal_id = db.insert_assistant_action(&action.kind, &payload).map_err(|e| e.to_string())?;
-            Ok(AssistantTurnView::Action {
-                action: AssistantActionView {
-                    proposal_id,
-                    kind: action.kind,
-                    task_title: action.task_title,
-                    title: action.title,
-                    category_id: action.category_id,
-                    priority: action.priority,
-                    start_ms: action.start_ms,
-                    end_ms: action.end_ms,
-                    all_day: action.all_day,
-                    summary: action.summary,
-                },
-            })
-        }
-        _ => {
-            let a: AiResult<serde_json::Value> =
-                provider.chat_json(ANSWER_SYSTEM_PROMPT, &user, r#"{"text":"string"}"#);
-            match a {
-                Ok(v) => {
-                    let t = v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
-                    if t.trim().is_empty() {
-                        Ok(AssistantTurnView::Nothing {
-                            text: "No pude formular una respuesta. Intenta reformular la pregunta.".into(),
-                        })
-                    } else {
-                        Ok(AssistantTurnView::Answer { text: t })
-                    }
-                }
-                Err(e) => Err(format!("ia_fail {e}")),
-            }
-        }
+        "plan" => plan_mode(db, text, provider, note),
+        "action" => action_mode(db, &decision, &note),
+        _ => answer_text(provider, &user),
     }
 }
 

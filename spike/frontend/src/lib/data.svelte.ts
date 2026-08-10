@@ -795,13 +795,6 @@ export const KIND_LABELS: Record<string, string> = {
   task: "Tarea",
 };
 
-export const KIND_EMOJI: Record<string, string> = {
-  event: "📅",
-  deadline: "⏰",
-  availability: "🟢",
-  task: "☑️",
-};
-
 export interface AiConfigView {
   endpoint: string;
   model: string;
@@ -1269,7 +1262,7 @@ export async function exportData() {
 export async function wipeData() {
   if (!inTauri()) return;
   try {
-    await invoke("data_wipe");
+    await invoke("data_wipe", { confirmation: "WIPE" });
     window.location.reload();
   } catch (e) {
     console.error("wipeData", e);

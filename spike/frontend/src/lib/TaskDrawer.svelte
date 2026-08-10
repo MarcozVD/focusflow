@@ -229,7 +229,14 @@
     <div class="dlg-overlay" onclick={() => (confirmOpen = false)} transition:fade={{ duration: 120 }}>
       <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title"
         onclick={(e) => e.stopPropagation()}>
-        <div class="dlg-icon">🗑</div>
+        <div class="dlg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18" />
+            <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6M14 11v6" />
+          </svg>
+        </div>
         <h3 id="dlg-title">Eliminar tarea</h3>
         <p>¿Deseas eliminar esta tarea?</p>
         <p class="dlg-title-name">"{detail.title}"</p>

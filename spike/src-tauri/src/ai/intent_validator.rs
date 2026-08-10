@@ -488,14 +488,15 @@ mod tests {
     #[test]
     fn phase_example_event_with_preparation() {
         // "I have a calculus exam Friday and need four hours to prepare."
+        let friday = (chrono::Local::now().date_naive() + chrono::Duration::days(4)).format("%Y-%m-%d").to_string();
         let v = json!({
             "intent_type": "event",
             "title": "Examen de cálculo",
             "category": "Universidad",
             "priority": "alta",
-            "start_date": "2026-08-14",
+            "start_date": friday,
             "start_time": null,
-            "end_date": "2026-08-14",
+            "end_date": friday,
             "end_time": null,
             "duration_minutes": 120,
             "preparation_minutes": 240,
@@ -539,12 +540,13 @@ mod tests {
     #[test]
     fn phase_example_deadline_with_preparation() {
         // "The project is due Monday but I need at least six hours to finish it."
+        let monday = (chrono::Local::now().date_naive() + chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
         let v = json!({
             "intent_type": "deadline",
             "title": "Proyecto",
             "category": "Universidad",
             "priority": "alta",
-            "deadline_date": "2026-08-10",
+            "deadline_date": monday,
             "deadline_time": null,
             "preparation_minutes": 360,
             "preparation_note": "necesito al menos 6 horas",
@@ -560,14 +562,16 @@ mod tests {
     #[test]
     fn phase_example_availability_window() {
         // "Diagnostic Test is available from August 5 until August 23."
+        let from = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let to = (chrono::Local::now().date_naive() + chrono::Duration::days(19)).format("%Y-%m-%d").to_string();
         let v = json!({
             "intent_type": "availability",
             "title": "Diagnostic Test",
             "category": "Universidad",
             "priority": "alta",
-            "start_date": "2026-08-05",
+            "start_date": from,
             "start_time": null,
-            "end_date": "2026-08-23",
+            "end_date": to,
             "end_time": null,
             "confidence": 0.9,
             "reason": "ventana de disponibilidad"

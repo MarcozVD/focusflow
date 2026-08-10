@@ -15,7 +15,6 @@
     syncRunning,
     type Suggestion,
     KIND_LABELS,
-    KIND_EMOJI,
   } from "./data.svelte";
 
   const suggestions = $derived(suggestionsStore());
@@ -176,7 +175,7 @@
     {:else}
       <div class="card">
         <div class="top">
-          <span class="kind">{KIND_EMOJI[s.kind] ?? "📌"} {KIND_LABELS[s.kind] ?? "Evento"}</span>
+          <span class="kind"><span class="kdot" aria-hidden="true"></span>{KIND_LABELS[s.kind] ?? "Evento"}</span>
           <span class="status {s.status}">{statusLabel[s.status] ?? s.status}</span>
           {#if s.source_sender}
             <span class="sender">{s.source_sender}</span>
@@ -195,9 +194,9 @@
             {cat(s.category_id).name}
           </span>
           {#if s.kind === "deadline" && s.deadline_at}
-            <span class="deadline">⏰ Vence {fmtDate(s.deadline_at)} {fmtMs(s.deadline_at)}</span>
+            <span class="deadline">Vence {fmtDate(s.deadline_at)} {fmtMs(s.deadline_at)}</span>
           {:else if s.kind === "availability" && s.start_at && s.end_at}
-            <span class="range">🟢 {fmtDate(s.start_at)} → {fmtDate(s.end_at)}</span>
+            <span class="range">{fmtDate(s.start_at)} → {fmtDate(s.end_at)}</span>
           {:else if s.start_at}
             <span>{fmtDate(s.start_at)} · {fmtMs(s.start_at)}</span>
           {/if}
@@ -209,7 +208,7 @@
           {/if}
         </div>
         {#if s.dedupe_note}
-          <p class="dupe">⚠ {s.dedupe_note}</p>
+          <p class="dupe">Aviso: {s.dedupe_note}</p>
         {/if}
         {#if s.status === "pending"}
           <div class="row">
@@ -307,12 +306,22 @@
     color: var(--text-2);
   }
   .kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-weight: 700;
     font-size: 11px;
     padding: 3px 10px;
     border-radius: var(--r-full);
     background: var(--primary-soft);
     color: var(--primary);
+  }
+  .kind .kdot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
   }
   .status.pending {
     background: var(--primary-soft);

@@ -87,6 +87,7 @@
   let aiEndpoint = $state("");
   let aiModel = $state("");
   let aiKey = $state("");
+  const aiHttp = $derived(/^https:\/\//i.test(aiEndpoint.trim()));
   let emailHost = $state("");
   let emailPort = $state(993);
   let emailUser = $state("");
@@ -419,6 +420,12 @@
         <input type="password" bind:value={aiKey} placeholder="••••••••" />
       </label>
     </div>
+    {#if aiEndpoint.trim() && !aiHttp}
+      <p class="warn">
+        El endpoint no usa HTTPS. La clave de API viajaría sin cifrar; usa una URL que empiece
+        por <code>https://</code>.
+      </p>
+    {/if}
     <div class="row">
       <button class="btn primary" onclick={saveAi} disabled={saving}>Guardar IA</button>
       <button class="btn" onclick={testAi} disabled={testing || !aiConfig()?.has_key}>
@@ -702,7 +709,7 @@
       </div>
       <div class="stat">
         <span class="k">Errores hoy</span>
-        <span class="v">{todayErrors} {todayErrors > 0 ? "⚠" : ""}</span>
+        <span class="v {todayErrors > 0 ? "warn" : ""}">{todayErrors}</span>
       </div>
       <div class="stat">
         <span class="k">Próxima sincronización</span>
@@ -1082,9 +1089,6 @@
   .when {
     color: var(--text-3);
   }
-  .errtext {
-    color: var(--danger);
-  }
   .stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1109,6 +1113,9 @@
     font-size: 15px;
     font-weight: 700;
     color: var(--text-1);
+  }
+  .stat .v.warn {
+    color: var(--danger);
   }
   .errbox {
     background: var(--danger-bg);

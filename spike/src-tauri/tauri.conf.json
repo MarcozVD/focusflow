@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.focusflow.spike",
   "build": {
-    "frontendDist": "../frontend/dist"
+    "frontendDist": "../frontend/dist",
+    "beforeDevCommand": "npm run dev --prefix ../frontend",
+    "beforeBuildCommand": "npm run build --prefix ../frontend",
+    "devUrl": "http://localhost:5173"
   },
   "app": {
     "withGlobalTauri": false,

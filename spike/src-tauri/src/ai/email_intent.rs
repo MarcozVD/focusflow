@@ -64,7 +64,9 @@ pub fn minimize_email(raw: &RawEmail) -> String {
         }
     }
     if clean.chars().count() > MAX_BODY_CHARS {
-        clean.truncate(MAX_BODY_CHARS);
+        // truncate() corta por bytes y puede partir un carácter multibyte
+        // (á, ñ, emoji) → panic. Cortar por frontera de carácter.
+        clean = clean.chars().take(MAX_BODY_CHARS).collect();
         clean.push_str("\n[…]");
     }
     let snippet = clean.trim();
@@ -148,6 +150,19 @@ mod tests {
         assert!(!m.contains("wrote:"), "citas eliminadas");
         assert!(m.contains("reunión"), "cuerpo limpio conservado");
         assert!(m.len() < body.len() + 200, "truncado: {} vs {}", m.len(), body.len());
+    }
+
+    #[test]
+    fn minimize_truncates_on_char_boundary_not_bytes() {
+        // línea única de caracteres multibyte: "á" = 2 bytes; un truncate()
+        // por bytes en el byte 900 partiría un carácter → panic
+        let body = "á".repeat(MAX_BODY_CHARS + 50);
+        let r = raw(&body);
+        let m = minimize_email(&r);
+        let section = m.split("Cuerpo:\n").nth(1).unwrap();
+        // 900 'á' + "\n[…]" (salto + 3 caracteres) → 904 caracteres
+        assert_eq!(section.chars().count(), MAX_BODY_CHARS + 4, "truncado por frontera de carácter");
+        assert!(section.ends_with("[…]"), "marcador de truncado");
     }
 
     #[test]

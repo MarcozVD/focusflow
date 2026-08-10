@@ -49,6 +49,7 @@ FocusFlow concentra en una sola app todo lo que normalmente vives repartido entr
 - Inicio con Windows opcional, empezar en segundo plano con solo el widget
 - Tema claro/oscuro Soft UI con persistencia entre reinicios
 - Persistencia en SQLite con WAL, sin dependencia de red
+- **Privacidad**: claves de IA y contraseña de correo cifradas en el Credential Manager de Windows (nunca en la DB); exportación de datos con lista blanca (sin secretos); borrado total con confirmación
 
 ---
 
@@ -89,14 +90,23 @@ FocusFlow concentra en una sola app todo lo que normalmente vives repartido entr
 ```
 focusflow/
 ├── README.md              ← este archivo
-├── spec/                  Especificación completa del producto (7 documentos)
+├── spec/                  Especificación completa del producto
 │   ├── 01-PRD.md          Visión, requisitos, casos de uso, AC del MVP
 │   ├── 02-Arquitectura.md Stack, capas, decisiones justificadas
 │   ├── 03-Modelo-Datos.md Modelo de datos (ER + tablas + índices)
 │   ├── 04-Design-System.md Tokens Soft UI 2.0 (claro/oscuro, sombras, motion)
 │   ├── 05-Roadmap.md      Fases MVP → V5 con esfuerzos y exit criteria
 │   ├── 06-Auditoria.md    Crítica competitiva + propuestas
-│   └── 07-Spike-Tecnico.md Resultados de la validación técnica
+│   ├── 07-Spike-Tecnico.md Resultados de la validación técnica
+│   ├── 08-Implementation-Audit.md Auditoría de implementación y deuda técnica
+│   ├── 09-AI-Intent-System.md     Sistema de intenciones con IA
+│   ├── 10-Constraint-Engine.md    Motor de restricciones y planificación
+│   ├── 12-Email-Intelligence.md   Inteligencia sobre el correo (IMAP)
+│   ├── 13-AI-Assistant.md         Asistente conversacional de planes
+│   ├── 14-Security-and-Privacy.md Seguridad y privacidad
+│   ├── 14-Widget-Companion.md     Widget de escritorio
+│   ├── 15-Contextual-Notifications.md Notificaciones contextuales
+│   └── 15-Testing.md      Estrategia y suite de pruebas
 ├── spike/                 App real (Tauri 2 + Svelte 5 + Rust)
 │   ├── frontend/          UI (Svelte 5 + Vite + TypeScript)
 │   ├── src-tauri/         Shell y dominio Rust (store, ai, sync, comandos)

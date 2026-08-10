@@ -41,6 +41,25 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
+/// Cooldown por comando para las llamadas a la IA (rate limit IPC): evita
+/// ráfagas de peticiones costosas de hasta 90 s cada una desde el frontend
+/// (debounce no basta; un IPC repetido puede lanzarlas igualmente).
+fn ai_cooldown(cmd: &str) -> Result<(), String> {
+    static LAST: std::sync::OnceLock<Mutex<std::collections::HashMap<String, std::time::Instant>>> =
+        std::sync::OnceLock::new();
+    const MIN_GAP_MS: u128 = 800;
+    let map = LAST.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let mut m = map.lock().unwrap();
+    let now = std::time::Instant::now();
+    if let Some(prev) = m.get(cmd) {
+        if now.duration_since(*prev).as_millis() < MIN_GAP_MS {
+            return Err("demasiadas peticiones seguidas: espera un momento.".into());
+        }
+    }
+    m.insert(cmd.to_string(), now);
+    Ok(())
+}
+
 pub(crate) fn append_log(_app: &AppHandle, line: &str) {
     if let Ok(mut f) = OpenOptions::new()
         .create(true)
@@ -231,6 +250,7 @@ async fn task_from_text(
     state: State<'_, Mutex<Db>>,
     text: String,
 ) -> Result<TaskFromTextResult, String> {
+    ai_cooldown("task_from_text")?;
     // La configuración se lee bajo un lock corto. La llamada a la IA es
     // bloqueante (hasta 90 s) y se ejecuta en otro hilo, fuera del mutex,
     // para que la app siga respondiendo mientras se interpreta el texto.
@@ -290,6 +310,7 @@ struct AiConfigView {
     has_key: bool,
     effective_endpoint: String,
     effective_model: String,
+    configured: bool,
 }
 
 #[tauri::command]
@@ -310,6 +331,7 @@ fn ai_config_get(state: State<'_, Mutex<Db>>) -> AiConfigView {
         } else {
             cfg.model.clone()
         },
+        configured: !cfg.endpoint.is_empty() && !cfg.model.is_empty() && cfg.provider_name() != "local",
     }
 }
 
@@ -341,6 +363,7 @@ struct AiTestResult {
 
 #[tauri::command]
 fn ai_test(state: State<'_, Mutex<Db>>, app: AppHandle) -> AiTestResult {
+    ai_cooldown("ai_test").ok(); // prueba manual: cooldown suave, no bloquea
     let db = state.lock().unwrap();
     let cfg = ai_config_from_db(&db);
     let t0 = std::time::Instant::now();
@@ -488,6 +511,7 @@ struct VerifyResult {
 /// Prueba ambas conexiones: API de IA (OpenCode Zen) y correo (IMAP).
 #[tauri::command]
 fn verify_connections(state: State<'_, Mutex<Db>>, app: AppHandle) -> VerifyResult {
+    ai_cooldown("verify_connections").ok(); // onboarding: cooldown suave
     let db = state.lock().unwrap();
     let ai_cfg = ai_config_from_db(&db);
     let email_cfg = sync::load_email_config(&db);
@@ -642,8 +666,16 @@ fn suggestion_edit(
     db.update_suggestion_data(id, &title, &category_id, &priority, start_at, end_at, &description)
         .map_err(|e| e.to_string())?;
     // si la sugerencia ya fue aceptada, la tarea creada se mantiene en sincronía
+    // (solo los campos del formulario; description/tags/notas/links y el
+    // recordatorio de la tarea se preservan leyendo la tarea actual)
     if let Some(task_id) = db.get_suggestion(id).ok().flatten().and_then(|s| s.result_task_id) {
-        let _ = db.update_task_full(task_id, &title, &category_id, &priority, start_at, end_at, "", "[]", "", "", None, Some(all_day));
+        if let Some(t) = db.get_task(task_id).ok().flatten() {
+            db.update_task_full(
+                task_id, &title, &category_id, &priority, start_at, end_at,
+                &description, &t.tags, &t.notes, &t.links, t.reminder_minutes, Some(all_day),
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
     drop(db);
     let _ = app.emit("tasks:changed", ());
@@ -671,8 +703,15 @@ fn suggestion_merge(
     let start = s.start_at.unwrap_or(existing.start_at);
     let end = s.end_at.unwrap_or(existing.end_at);
     let priority = if s.priority == "media" { existing.priority.clone() } else { s.priority.clone() };
-    db.update_task_full(task_id, &title, &s.category_id, &priority, start, end, "", "[]", "", "", None, None)
-        .map_err(|e| e.to_string())?;
+    // fusionar conserva los campos enriquecidos de la tarea existente
+    // (description/tags/notas/links/recordatorio); la sugerencia solo aporta
+    // título/fechas/prioridad/categoría
+    db.update_task_full(
+        task_id, &title, &s.category_id, &priority, start, end,
+        &existing.description, &existing.tags, &existing.notes, &existing.links,
+        existing.reminder_minutes, None,
+    )
+    .map_err(|e| e.to_string())?;
     db.set_suggestion_status(id, "merged").map_err(|e| e.to_string())?;
     drop(db);
     let _ = app.emit("tasks:changed", ());
@@ -703,6 +742,7 @@ async fn plan_from_text(
     state: State<'_, Mutex<Db>>,
     text: String,
 ) -> Result<planning::PlanProposalView, String> {
+    ai_cooldown("plan_from_text")?;
     let cfg = {
         let db = state.lock().unwrap();
         ai_config_from_db(&db)
@@ -776,6 +816,9 @@ fn plan_reject(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(
 
 /// Un turno del asistente: pregunta + historial → respuesta/propuesta.
 /// El asistente nunca muta el calendario en este paso.
+///
+/// La base de datos NO se mantiene bloqueada durante las llamadas de red:
+/// solo se toca para leer el contexto (breve) y para persistir propuestas.
 #[tauri::command]
 async fn assistant_turn(
     app: AppHandle,
@@ -783,23 +826,49 @@ async fn assistant_turn(
     text: String,
     history: Vec<assistant::HistoryMsg>,
 ) -> Result<assistant::AssistantTurnView, String> {
-    let cfg = {
+    ai_cooldown("assistant_turn")?;
+    // fase 1: config + snapshot de contexto (lock breve, sin red)
+    let (cfg, ctx) = {
         let db = state.lock().unwrap();
-        ai_config_from_db(&db)
+        (ai_config_from_db(&db), assistant::context_snapshot(&db))
     };
     let configured = !cfg.endpoint.is_empty() && !cfg.model.is_empty() && cfg.provider_name() != "local";
+    if !configured {
+        append_log(&app, "assistant_turn mode=nothing");
+        return Ok(assistant::AssistantTurnView::Nothing {
+            text: "Sin IA configurada no puedo analizar tu calendario ni responder preguntas. Configura la IA en Ajustes → IA, o usa la barra rápida para añadir tareas.".into(),
+        });
+    }
     let log_app = app.clone();
     let text_ai = text.clone();
     // la IA es bloqueante: fuera del mutex
     let turn = tauri::async_runtime::spawn_blocking(move || {
         let provider = match ai::provider_from_config(&cfg) {
-            Ok(p) => Some(p),
-            Err(_) => None,
+            Ok(p) => p,
+            Err(e) => return Err(format!("ia_fail {e}")),
         };
+        // fase 2: red sin lock — decisión (y, en plan, el parseo de intención)
+        let user = assistant::build_user_prompt(&ctx, &text_ai, &history);
+        let decision = assistant::request_decision(provider.as_ref(), &user)?;
+        let note = assistant::note_from_decision(&decision);
+        let mode = decision.get("mode").and_then(|m| m.as_str()).unwrap_or("answer");
         let app_ref: &AppHandle = &log_app;
         let state = app_ref.state::<Mutex<Db>>();
-        let db = state.lock().unwrap();
-        assistant::assistant_turn(&db, &text_ai, &history, provider.as_deref(), configured)
+        match mode {
+            "plan" => {
+                let batch = crate::ai::intent_parser::parse_intent(&text_ai, Some(provider.as_ref()), true)
+                    .map_err(|e| e.to_string())?;
+                // fase 3: persistir/leer con lock breve
+                let db = state.lock().unwrap();
+                assistant::plan_from_intents(&db, &text_ai, &batch.intents, note)
+            }
+            "action" => {
+                // fase 3: persistir/leer con lock breve
+                let db = state.lock().unwrap();
+                assistant::action_mode(&db, &decision, &note)
+            }
+            _ => assistant::answer_text(provider.as_ref(), &user),
+        }
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1192,7 +1261,14 @@ fn data_export(state: State<'_, Mutex<Db>>) -> Result<String, String> {
 /// Borra TODO: datos en DB, log local y secretos del Credential Manager
 /// (clave de IA y contraseña de correo). Destructivo e irreversible.
 #[tauri::command]
-fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
+fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>, confirmation: String) -> Result<(), String> {
+    // borrado irreversible: exige token explícito del frontend para que una
+    // llamada accidental (o un webview comprometido) no pueda borrar sin
+    // confirmación del usuario
+    if confirmation != "WIPE" {
+        append_log(&app, "data_wipe canceled (sin confirmación)");
+        return Err("borrado cancelado: falta confirmación".into());
+    }
     let db = state.lock().unwrap();
     // el usuario de correo se lee ANTES de limpiar settings (se borraría)
     let email_user = db
@@ -1313,6 +1389,9 @@ fn auto_start_behavior(app: &AppHandle, db: &Db) {
     }
 }
 
+/// Hooks de desarrollo/e2e. SOLO en builds debug: en release no deben existir
+/// (inyección de config/secretos por variables de entorno).
+#[cfg(debug_assertions)]
 fn test_hooks(handle: AppHandle) {
     if let Ok(text) = std::env::var("FF_NL_TEST") {
         if !text.is_empty() {
@@ -1560,19 +1639,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 append_log(&handle, "shortcut_register_failed_all");
             }
 
-            if std::env::var("FF_WIDGET").as_deref() == Ok("1") {
-                create_widget(&handle)?;
-            }
+            #[cfg(debug_assertions)]
+            {
+                if std::env::var("FF_WIDGET").as_deref() == Ok("1") {
+                    create_widget(&handle)?;
+                }
 
-            if std::env::var("FF_NOTIFY").as_deref() == Ok("1") {
-                use tauri_plugin_notification::NotificationExt;
-                let _ = handle
-                    .notification()
-                    .builder()
-                    .title("FocusFlow")
-                    .body("Toast nativo de Windows — funciona con la app minimizada o en bandeja.")
-                    .show();
-                append_log(&handle, "notification_shown");
+                if std::env::var("FF_NOTIFY").as_deref() == Ok("1") {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = handle
+                        .notification()
+                        .builder()
+                        .title("FocusFlow")
+                        .body("Toast nativo de Windows — funciona con la app minimizada o en bandeja.")
+                        .show();
+                    append_log(&handle, "notification_shown");
+                }
             }
 
             sync::scheduler_loop(handle.clone());
@@ -1593,6 +1675,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            #[cfg(debug_assertions)]
             test_hooks(handle.clone());
 
             {

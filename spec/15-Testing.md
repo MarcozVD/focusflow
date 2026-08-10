@@ -30,7 +30,7 @@ script de perf. Tiempo de ejecución completo: ~6 s.**
 | Constraints | `ai/rule_based.rs`, `ai/nl.rs` | detección de restricciones (bloqueos, daily_cap), horarios de estudio |
 | Scheduling | `engine/planner.rs` (16), `engine/mod.rs` (33) | planificación de preparación, fragmentación 2–6 sesiones, respeto de ventanas, tiempo insuficiente → parcial + explicación |
 | Detección de conflictos | `engine/mod.rs`, `planning.rs` | solapamientos rechazados al aceptar, edición conflictiva, bloques editados solapados |
-| Operaciones de DB | `store.rs` (15) | migraciones 0005/0007, recordatorios, dedupe (sugerencias y tareas), borrado de sugerencias, export sin secretos, wipe, overflow |
+| Operaciones de DB | `store.rs` (15) | migraciones 0005/0007, recordatorios, dedupe (sugerencias y tareas), borrado de sugerencias, export con lista blanca (excluye `email.config` y `ai.*`), wipe con token de confirmación, overflow |
 | Notificaciones | `notify.rs` (10) | cadencia, tope diario, horario de silencio, dedupe por tarea |
 | Seguridad (fase 12) | `lib.rs`, `email.rs`, `email_intent.rs`, `intent_parser.rs` | logs saneados, TLS obligatorio, delimitación de datos del correo, tope de intents, caps de longitud |
 
@@ -158,8 +158,8 @@ verde. Sí quedan pendientes **de producto** antes de un release real:
    valida manual.
 3. **MSI firmado** — el bundle actual no tiene firma de código; Windows
    SmartScreen bloquea instalaciones sin firmar.
-4. **App de producción sin datos demo**: hoy el primer arranque siembra
-   5 tareas de ejemplo (intencional para desarrollo, inaceptable para
-   producción real) — decidir si se eliminan o se marcan como ejemplo.
+4. **App de producción sin datos demo**: resuelto — la siembra de tareas de
+   ejemplo solo ocurre en builds `debug` (`cfg_attr(debug_assertions, ...)`);
+   un build de release arranca con la base vacía.
 5. **Migración del `identifier` de com.focusflow.spike** a un id final antes
    de empaquetar (afecta rutas de datos).

@@ -13,6 +13,12 @@ fn db() -> Db {
     Db::open_memory_pub().unwrap()
 }
 
+/// DB sin seed: las pruebas con horarios fijos (ediciones) se rompen cuando
+/// el seed demo (que cruza medianoche según la hora real) ocupa esos slots.
+fn clean_db() -> Db {
+    Db::open_memory_clean_pub().unwrap()
+}
+
 const EXAMPLE: &str = "Examen de cálculo el viernes y necesito 4 horas para preparar";
 
 /// Input → Intent (proveedor local determinista, sin envoltorio de prompt).
@@ -97,7 +103,7 @@ fn rejected_plan_makes_no_changes() {
 
 #[test]
 fn edited_plan_reschedules_blocks() {
-    let d = db();
+    let d = clean_db(); // slot fijo 20:00–22:00: el seed demo puede ocuparlo
     let (intents, source) = interpret("Estudiar biología 2 horas");
     let view = plan_from_text(&d, "Estudiar biología 2 horas", &intents, &source).unwrap();
     let item = &view.items[0];

@@ -91,12 +91,15 @@ la clave jamás cruza al renderer.
 ## 5. Controles del usuario
 
 - **Exportar mis datos** (`data_export`, Ajustes → Privacidad): JSON con
-  tareas, sugerencias, remitentes de confianza y ajustes. **Nunca** incluye
-  claves ni contraseñas (no viven en DB).
-- **Borrar todos mis datos** (`data_wipe`, doble confirmación): vacía la DB
-  (tareas, sugerencias, propuestas, notificaciones, sync, ajustes), trunca el
-  log y elimina del Credential Manager la clave de IA y la contraseña de
-  correo.
+  tareas, sugerencias, remitentes de confianza y ajustes de **lista blanca**
+  (`EXPORTABLE_SETTINGS`): nunca incluye `email.config` (host/usuario,
+  aunque no hay secretos en DB) ni `ai.*`; claves y contraseñas no viven en
+  la DB.
+- **Borrar todos mis datos** (`data_wipe`, Ajustes → Privacidad): requiere
+  escribir el token de confirmación `WIPE` — el botón borra solo si el
+  usuario teclea el texto exacto; vacía la DB (tareas, sugerencias,
+  propuestas, notificaciones, sync, ajustes), trunca el log y elimina del
+  Credential Manager la clave de IA y la contraseña de correo.
 - **Eliminar clave IA** y contraseña de correo individuales (Ajustes).
 - Lista de **remitentes de confianza** gestionable (quién puede auto-aprobar).
 - Sincronización de correo **opcional** (`email.enabled`) y con intervalos

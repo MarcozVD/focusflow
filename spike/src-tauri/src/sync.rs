@@ -128,23 +128,21 @@ pub fn revert_suggestion(db: &Db, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// Procesa un correo con la IA: compromisos → sugerencias (o auto-aprobación).
-/// Fase 8: usa el pipeline de intenciones (event | deadline | availability |
-/// task), minimiza el cuerpo antes de mandarlo a la IA y deduplica entre
-/// correos (mismo compromiso en varios correos → una sola sugerencia).
-fn process_email(
+/// Fase 1 (DB, lock breve): ¿hay que procesar este correo? Devuelve false si
+/// ya se deduplicó (mismo message_id ya procesado).
+fn prepare_email(db: &Db, raw: &RawEmail) -> Result<bool, String> {
+    let already = db.suggestion_count_for_email(&raw.message_id).unwrap_or(0);
+    Ok(already == 0)
+}
+
+/// Fase 2 (SOLO red, sin lock de DB): analiza el correo con la IA y devuelve
+/// los compromisos accionables. `parse_email_intent` hace HTTP (hasta 90 s).
+fn analyze_email(
     app: &AppHandle,
-    db: &Db,
     provider: &dyn ai::AiProvider,
     configured: bool,
     raw: &RawEmail,
-) -> Result<usize, String> {
-    let already = db
-        .suggestion_count_for_email(&raw.message_id)
-        .unwrap_or(0);
-    if already > 0 {
-        return Ok(0);
-    }
+) -> Result<Vec<crate::ai::intent::Intent>, String> {
     let res = ai::email_intent::parse_email_intent(raw, provider, configured);
     match res {
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
@@ -152,12 +150,13 @@ fn process_email(
         }
         Err(AiError::InvalidJson(e)) => {
             crate::append_log(app, &format!("email_parse_invalid_json uid={} {e}", raw.uid));
-            Ok(0)
+            Ok(Vec::new())
         }
         Ok(batch) => {
+            let total = batch.intents.len();
             let actionable: Vec<_> = batch
                 .intents
-                .iter()
+                .into_iter()
                 .filter(|i| {
                     matches!(
                         i.intent_type,
@@ -171,17 +170,47 @@ fn process_email(
             if actionable.is_empty() {
                 crate::append_log(
                     app,
-                    &format!("email_no_intents uid={} n={}", raw.uid, batch.intents.len()),
+                    &format!("email_no_intents uid={} n={}", raw.uid, total),
                 );
-                return Ok(0);
             }
-            let mut count = 0;
-            for it in actionable {
-                count += insert_intent_suggestion(app, db, raw, it)?;
-            }
-            Ok(count)
+            Ok(actionable)
         }
     }
+}
+
+/// Fase 3 (DB, lock breve): deduplica e inserta las sugerencias.
+fn commit_email(
+    app: &AppHandle,
+    db: &Db,
+    raw: &RawEmail,
+    intents: &[crate::ai::intent::Intent],
+) -> Result<usize, String> {
+    let mut count = 0;
+    for it in intents {
+        count += insert_intent_suggestion(app, db, raw, it)?;
+    }
+    Ok(count)
+}
+
+/// Procesa un correo con la IA: compromisos → sugerencias (o auto-aprobación).
+/// Fase 8: usa el pipeline de intenciones (event | deadline | availability |
+/// task), minimiza el cuerpo antes de mandarlo a la IA y deduplica entre
+/// correos (mismo compromiso en varios correos → una sola sugerencia).
+///
+/// Combina las tres fases; `run_sync` las ejecuta por separado para no
+/// mantener el `Mutex<Db>` durante la llamada HTTP de la IA.
+fn process_email(
+    app: &AppHandle,
+    db: &Db,
+    provider: &dyn ai::AiProvider,
+    configured: bool,
+    raw: &RawEmail,
+) -> Result<usize, String> {
+    if !prepare_email(db, raw)? {
+        return Ok(0);
+    }
+    let intents = analyze_email(app, provider, configured, raw)?;
+    commit_email(app, db, raw, &intents)
 }
 
 fn insert_intent_suggestion(
@@ -387,9 +416,19 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                                 total,
                             },
                         );
-                        let outcome = with_db(app, |db| {
-                            process_email(app, db, provider.as_ref(), ai_configured, raw)
-                        });
+                        let outcome = (|| -> Result<usize, String> {
+                            // fase 1: dedupe previo (lock breve)
+                            if !with_db(app, |db| prepare_email(db, raw))? {
+                                return Ok(0);
+                            }
+                            // fase 2: IA sin lock (HTTP hasta 90 s)
+                            let intents = analyze_email(app, provider.as_ref(), ai_configured, raw)?;
+                            if intents.is_empty() {
+                                return Ok(0);
+                            }
+                            // fase 3: insertar sugerencias (lock breve)
+                            with_db(app, |db| commit_email(app, db, raw, &intents))
+                        })();
                         match outcome {
                             Ok(n) => {
                                 last_decided_uid = last_decided_uid.max(raw.uid);

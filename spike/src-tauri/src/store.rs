@@ -55,6 +55,33 @@ fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<TaskRow> {
     })
 }
 
+/// Prefijos de settings que SÍ se exportan con "mis datos". Todo lo demás
+/// (config de correo, endpoint/modelo/clave de IA, flags internos) queda
+/// fuera: es configuración sensible aunque no contenga secretos.
+const EXPORTABLE_SETTINGS: &[&str] = &[
+    "email.enabled",
+    "email.interval",
+    "email.max_age",
+    "email.suggestion",
+    "general.",
+    "ui.",
+    "notif.",
+    "onboarding.",
+];
+
+/// Categorías válidas de la app. Cualquier otro id se normaliza a "otr":
+/// evita que datos inválidos (IPC arbitrario, import sucio) rompan el
+/// frontend o los filtros por categoría.
+const VALID_CATEGORIES: &[&str] = &["uni", "trab", "per", "fin", "sal", "otr"];
+
+fn sanitize_category(id: &str) -> &str {
+    if VALID_CATEGORIES.contains(&id) {
+        id
+    } else {
+        "otr"
+    }
+}
+
 pub struct Db {
     conn: Connection,
 }
@@ -78,6 +105,9 @@ impl Db {
         conn.pragma_update(None, "busy_timeout", 2000)?;
         let db = Db { conn };
         db.migrate()?;
+        // datos de demostración SOLO en builds de desarrollo: una app real
+        // nunca mezcla datos falsos con los del usuario
+        #[cfg(debug_assertions)]
         db.seed_if_empty()?;
         Ok(db)
     }
@@ -373,8 +403,7 @@ impl Db {
     /// incluye secretos: no hay claves ni contraseñas (viven en el Credential
     /// Manager del SO), y las settings sensibles (config de correo) se
     /// exportan sin la contraseña (nunca estuvo en DB) y sin el rescan flag.
-    pub fn export_data(&self) -> rusqlite::Result<serde_json::Value> {
-        fn dump_all(conn: &Connection, table: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
+    pub fn export_data(&self) -> rusqlite::Result<serde_json::Value> {        fn dump_all(conn: &Connection, table: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
             use rusqlite::types::Value;
             let mut stmt = conn.prepare(&format!("SELECT * FROM {table} ORDER BY id"))?;
             let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
@@ -406,9 +435,14 @@ impl Db {
 
         let settings: Vec<(String, String)> = self
             .conn
-            .prepare("SELECT key, value FROM settings WHERE key NOT LIKE '%rescan_pending%' ORDER BY key")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<Result<Vec<_>, _>>()?;
+            .prepare("SELECT key, value FROM settings ORDER BY key")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?
+            // lista blanca: NUNCA se exporta configuración sensible (config de
+            // correo, endpoint/modelo/clave de IA) ni flags internos
+            .into_iter()
+            .filter(|(k, _)| EXPORTABLE_SETTINGS.iter().any(|p| k.starts_with(p)))
+            .collect();
 
         Ok(serde_json::json!({
             "app": "focusflow",
@@ -443,6 +477,8 @@ impl Db {
         Ok(())
     }
 
+    // en release solo la usan los tests; en debug también la app (seed demo)
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     fn seed_if_empty(&self) -> rusqlite::Result<()> {
         let count: i64 = self
             .conn
@@ -504,6 +540,21 @@ impl Db {
             .optional()
     }
 
+    /// Igual que `find_overlap` pero excluyendo varias tareas (p. ej. los
+    /// eventos recién creados por la propia propuesta al aceptar un plan).
+    pub fn find_overlap_excluding(&self, exclude_ids: &[i64], start: i64, end: i64) -> rusqlite::Result<Option<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title FROM tasks
+             WHERE deleted_at IS NULL AND status != 'completada'
+               AND start_at < ?2 AND end_at > ?1
+             ORDER BY start_at LIMIT 16",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![start, end], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows.into_iter().find(|(id, _)| !exclude_ids.contains(id)))
+    }
+
     pub fn create(
         &self,
         title: &str,
@@ -517,7 +568,7 @@ impl Db {
         self.conn.execute(
             "INSERT INTO tasks (title, category_id, priority, status, start_at, end_at, all_day, created_at, updated_at)
              VALUES (?1, ?2, ?3, 'pendiente', ?4, ?5, ?6, ?7, ?7)",
-            rusqlite::params![title, category_id, priority, start_at, end_at, all_day as i64, now],
+            rusqlite::params![title, sanitize_category(category_id), priority, start_at, end_at, all_day as i64, now],
         )?;
         let id = self.conn.last_insert_rowid();
         self.conn.query_row(
@@ -603,7 +654,7 @@ impl Db {
                     updated_at = ?12
              WHERE id = ?1 AND deleted_at IS NULL",
             rusqlite::params![
-                id, title, category_id, priority, start_at, end_at,
+                id, title, sanitize_category(category_id), priority, start_at, end_at,
                 description, tags, notes, links, reminder_minutes, now_ms(), all_day
             ],
         )?;
@@ -1579,12 +1630,19 @@ mod tests {
         )
         .unwrap();
         db.settings_set("ai.endpoint", "http://x").unwrap();
+        db.settings_set("ai.model", "m").unwrap();
+        db.settings_set("ai.provider", "openai").unwrap();
+        db.settings_set("email.config", r#"{"host":"imap.gmail.com","user":"x@y.com"}"#).unwrap();
         db.settings_set("email.rescan_pending", "1").unwrap();
         let v = db.export_data().unwrap();
         let s = serde_json::to_string(&v).unwrap();
         assert!(s.contains("Tarea A"), "tareas exportadas");
         assert!(s.contains("Compromiso X"), "sugerencias exportadas");
         assert!(!s.contains("rescan_pending"), "settings internos excluidos");
+        assert!(!s.contains("ai.endpoint"), "config IA excluida");
+        assert!(!s.contains("ai.model"), "config IA excluida");
+        assert!(!s.contains("ai.provider"), "config IA excluida");
+        assert!(!s.contains("imap.gmail.com"), "config correo excluida");
     }
 
     #[test]

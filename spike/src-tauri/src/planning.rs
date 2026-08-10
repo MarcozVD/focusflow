@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::intent::{Intent, IntentType, Priority};
 use crate::engine::planner::{PlannedItem, Planner};
-use crate::engine::{ConstraintEngine, Severity, DAY_MS, HOUR_MS, local_midnight};
+use crate::engine::{ConstraintEngine, DAY_MS, local_midnight};
 use crate::store::{Db, TaskRow};
 
 /// Sesión propuesta, tal como llega al frontend.
@@ -364,6 +364,8 @@ fn effective_sessions(plan: &PlanProposalView, edit: &EditedPlan) -> Result<Vec<
 
 /// Acepta una propuesta pendiente: valida el calendario actual, crea las
 /// tareas reales (una por sesión + eventos del texto) y marca `accepted`.
+/// Si algo falla a mitad de camino, las tareas ya creadas se eliminan para
+/// no dejar el calendario parcialmente mutado.
 pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, String> {
     let Some(plan) = get_plan(db, id)? else {
         return Err("propuesta no encontrada".into());
@@ -373,53 +375,90 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     }
     let sessions = effective_sessions(&plan, edit)?;
 
-    // validación contra el calendario actual (puede haber cambiado desde la
-    // propuesta: nuevas tareas, reubicaciones, borrados)
     let mut created: Vec<TaskRow> = Vec::new();
-    for (item_idx, s) in &sessions {
-        let item = &plan.items[*item_idx];
-        if let Some((_, other)) = db.find_overlap(-1, s.start_ms, s.end_ms).map_err(|e| e.to_string())? {
+
+    // 1. validar los eventos del texto contra el calendario y entre sí
+    let mut event_spans: Vec<(i64, i64, String)> = plan
+        .understanding
+        .iter()
+        .filter(|u| u.intent_type == IntentType::Event)
+        .filter_map(|u| u.window_start.map(|s| (s, u.window_end.unwrap_or(s + 3_600_000), u.title.clone())))
+        .filter(|(s, e, _)| e > s)
+        .collect();
+    event_spans.sort_by_key(|(s, _, _)| *s);
+    for w in event_spans.windows(2) {
+        if w[1].0 < w[0].1 {
             return Err(format!(
-                "'{}' ({}) se solapa con '{}'. Edita los bloques o cancela.",
-                item.title,
-                fmt_when(s.start_ms, s.end_ms),
+                "los eventos '{}' y '{}' del texto se solapan",
+                w[0].2, w[1].2
+            ));
+        }
+    }
+    for (s, e, title) in &event_spans {
+        if let Some((_, other)) = db.find_overlap(-1, *s, *e).map_err(|e2| e2.to_string())? {
+            return Err(format!(
+                "'{}' ({}) se solapa con '{}'. Edita o cancela.",
+                title,
+                fmt_when(*s, *e),
                 other
             ));
         }
     }
 
-    // 1. eventos fijos del texto (examen, reunión, cita…)
-    for u in &plan.understanding {
-        if u.intent_type == IntentType::Event {
-            if let Some(start) = u.window_start {
-                let end = u.window_end.unwrap_or(start + 3_600_000);
-                if end > start {
-                    let t = db
-                        .create(&u.title, &u.category_id, priority_str(u.priority), start, end, u.all_day)
-                        .map_err(|e| e.to_string())?;
-                    db.set_task_metadata(t.id, &plan_link_meta(id, "event")).map_err(|e| e.to_string())?;
-                    let t = db.get_task(t.id).map_err(|e| e.to_string())?.ok_or("tarea no creada")?;
-                    created.push(t);
-                }
-            }
-        }
+    // 2. crear eventos fijos — primero, para que la validación de sesiones
+    // los conozca (los excluimos: las sesiones del plan ya los rodean)
+    let mut event_ids: Vec<i64> = Vec::new();
+    for (start, end, title) in &event_spans {
+        let u = plan.understanding.iter().find(|u| u.title == *title).expect("evento");
+        let t = db
+            .create(title, &u.category_id, priority_str(u.priority), *start, *end, u.all_day)
+            .map_err(|e| e.to_string())?;
+        db.set_task_metadata(t.id, &plan_link_meta(id, "event")).map_err(|e| e.to_string())?;
+        let t = db.get_task(t.id).map_err(|e| e.to_string())?.ok_or("tarea no creada")?;
+        event_ids.push(t.id);
+        created.push(t);
     }
 
-    // 2. sesiones de trabajo/preparación
-    for (item_idx, s) in &sessions {
-        let item = &plan.items[*item_idx];
-        let t = db
-            .create(&item.title, &item.category_id, priority_str(item.priority), s.start_ms, s.end_ms, false)
-            .map_err(|e| e.to_string())?;
-        db.set_task_metadata(t.id, &plan_link_meta(id, "session")).map_err(|e| e.to_string())?;
-        let u = plan.understanding.iter().find(|u| u.title == item.title);
-        if s.is_prep {
-            if let Some(min) = u.and_then(|u| u.reminders_min_before.first()).map(|m| *m as i64) {
-                db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
+    // validación de sesiones contra el calendario actual CON los eventos del
+    // plan ya insertados (excluidos de la comprobación de solape)
+    let result = (|| -> Result<(), String> {
+        for (item_idx, s) in &sessions {
+            let item = &plan.items[*item_idx];
+            if let Some((_, other)) = db.find_overlap_excluding(&event_ids, s.start_ms, s.end_ms).map_err(|e| e.to_string())? {
+                return Err(format!(
+                    "'{}' ({}) se solapa con '{}'. Edita los bloques o cancela.",
+                    item.title,
+                    fmt_when(s.start_ms, s.end_ms),
+                    other
+                ));
             }
         }
-        let t = db.get_task(t.id).map_err(|e| e.to_string())?.ok_or("tarea no creada")?;
-        created.push(t);
+
+        // 2. sesiones de trabajo/preparación
+        for (item_idx, s) in &sessions {
+            let item = &plan.items[*item_idx];
+            let t = db
+                .create(&item.title, &item.category_id, priority_str(item.priority), s.start_ms, s.end_ms, false)
+                .map_err(|e| e.to_string())?;
+            db.set_task_metadata(t.id, &plan_link_meta(id, "session")).map_err(|e| e.to_string())?;
+            let u = plan.understanding.iter().find(|u| u.title == item.title);
+            if s.is_prep {
+                if let Some(min) = u.and_then(|u| u.reminders_min_before.first()).map(|m| *m as i64) {
+                    db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
+                }
+            }
+            let t = db.get_task(t.id).map_err(|e| e.to_string())?.ok_or("tarea no creada")?;
+            created.push(t);
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        // rollback compensatorio: no dejar el calendario a medias
+        for t in &created {
+            let _ = db.delete(t.id);
+        }
+        return Err(e);
     }
 
     db.set_plan_proposal_status(id, "accepted").map_err(|e| e.to_string())?;
@@ -650,7 +689,7 @@ mod tests {
 
     #[test]
     fn edited_sessions_replace_proposal() {
-        let d = db();
+        let d = clean_db(); // seed demo solapa el slot fijo de edición (20:00 día 2)
         let intents = vec![intent("Estudiar", IntentType::Task, 120)];
         let view = plan_from_text(&d, "estudiar 2 horas", &intents, "local").unwrap();
         let slot = day(2) + 20 * 3_600_000; // 20:00 del día 2

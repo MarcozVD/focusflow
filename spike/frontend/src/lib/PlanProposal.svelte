@@ -128,7 +128,7 @@
 </script>
 
 {#if proposal}
-  <div class="overlay" onclick={cancel} transition:fade={{ duration: 140 }}></div>
+  <button class="overlay" onclick={cancel} aria-label="Cerrar" transition:fade={{ duration: 140 }}></button>
   <div class="modal" transition:fade={{ duration: 160 }}>
     <header class="head">
       <div class="head-info">
@@ -202,7 +202,7 @@
             </div>
 
             {#if warn(it)}
-              <p class="warn-note">⚠ {warn(it)}</p>
+              <p class="warn-note">Aviso: {warn(it)}</p>
             {/if}
 
             {#if editing}
@@ -234,7 +234,7 @@
     </div>
 
     {#if planError() || localError}
-      <p class="err">⚠ {localError || planError()}</p>
+      <p class="err">Error: {localError || planError()}</p>
     {/if}
 
     <footer class="foot">
@@ -261,6 +261,9 @@
     background: color-mix(in srgb, var(--bg) 55%, transparent);
     backdrop-filter: blur(3px);
     z-index: 90;
+    border: none;
+    padding: 0;
+    cursor: default;
   }
   .modal {
     position: fixed;

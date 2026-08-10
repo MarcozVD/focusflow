@@ -58,8 +58,16 @@
   class="evt {seg.kind} {task.status === 'vencida' ? 'overdue' : ''} {compact ? 'compact' : ''} {task.status === 'completada' ? 'done' : ''}"
   style="top: {top}px; height: {height}px; left: {left}%; width: {width}%; --c: {c.color}"
   title={tooltip}
+  role="button"
+  tabindex="0"
   onpointerdown={onMove}
   onclick={() => (onClick ? onClick(task) : openTaskDetail(task))}
+  onkeydown={(e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick ? onClick(task) : openTaskDetail(task);
+    }
+  }}
 >
   {#if !compact}
     <span class="evt-time">

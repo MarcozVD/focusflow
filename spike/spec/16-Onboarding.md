@@ -5,7 +5,7 @@ Fase 16. Pantalla de bienvenida + configuración de servicios (correo IMAP e IA)
 ## Flujo
 
 1. **Primer arranque**: `settings.onboarding.completed` ausente → la ventana principal muestra el onboarding. El widget y la bandeja no se ven afectados.
-2. **Paso 1 — Bienvenida**: propuesta de valor, 3 beneficios, "Comenzar →" y "Omitir y explorar" (marca completado y entra a la app).
+2. **Paso 1 — Bienvenida**: propuesta de valor, 3 beneficios, "Comenzar →" y "Omitir y explorar" (marca completado y entra a la app). Identidad visual: **icono real de la app** (`/icon.png`, copiado de `src-tauri/icons/128x128.png`) y colores del design system (`--primary`, gradientes del tema); sin emojis.
 3. **Paso 2 — Configuración** (45/55):
    - Izquierda: instrucciones adaptativas por proveedor (Gmail / Outlook / Yahoo / Otro).
    - Derecha: formulario correo IMAP (proveedor, correo, contraseña, servidor, puerto, SSL) + IA (endpoint, modelo, clave API).
@@ -43,7 +43,7 @@ Fase 16. Pantalla de bienvenida + configuración de servicios (correo IMAP e IA)
 
 ## Verificación manual
 
-1. `wipe_data` (Ajustes → Privacidad) → reload → onboarding visible.
+1. `data_wipe` (Ajustes → Privacidad, tecleando el token `WIPE`) → reload → onboarding visible.
 2. "Omitir y explorar" → app normal; relanzar → no reaparece.
 3. Configurar correo inválido → error humano con detalle técnico; bloquea Continuar.
 4. Configurar IMAP+IA válidos → "Comprobando…" → ✓ ✓ → app.

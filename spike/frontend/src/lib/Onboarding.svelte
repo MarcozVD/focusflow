@@ -243,18 +243,8 @@
 {#if step === 1}
   <div class="stage" in:fade={{ duration: reduced ? 0 : 500 }}>
     <div class="hero">
-      <div class="logo" aria-hidden="true">
-        <svg width="34" height="34" viewBox="0 0 30 30" fill="none">
-          <rect x="3" y="3" width="24" height="24" rx="7" stroke="url(#lg)" stroke-width="2.5" />
-          <path d="M3 12h24M15 3v24" stroke="url(#lg)" stroke-width="1.6" opacity="0.7" />
-          <rect x="11.5" y="11.5" width="7" height="7" rx="2.5" fill="url(#lg)" />
-          <defs>
-            <linearGradient id="lg" x1="4" y1="4" x2="26" y2="26" gradientUnits="userSpaceOnUse">
-              <stop stop-color="var(--primary)" />
-              <stop offset="1" stop-color="#8b5cf6" />
-            </linearGradient>
-          </defs>
-        </svg>
+      <div class="logo">
+        <img src="/icon.png" alt="Icono de FocusFlow" width="48" height="48" />
       </div>
       <h1>Tu calendario, al día. <span>Sin copiar ni pegar.</span></h1>
       <p class="lead">

@@ -130,11 +130,11 @@
             {#if activeProposal && activeProposal.id === m.turn.proposal.id}
               <PlanProposal />
             {:else if applied[m.turn.proposal.id]}
-              <div class="plan-done">✅ {applied[m.turn.proposal.id]}</div>
+              <div class="plan-done">Hecho: {applied[m.turn.proposal.id]}</div>
             {:else}
               <div class="card mini">
                 <div class="mini-row">
-                  <span class="k">📋 Propuesta de plan</span>
+                  <span class="k">Propuesta de plan</span>
                   <span class="mini-text">{m.turn.proposal.text}</span>
                 </div>
                 <div class="mini-rows">
@@ -163,10 +163,10 @@
               </div>
               <p class="summary">{a.summary}</p>
               {#if a.start_ms}
-                <p class="when">🗓 {fmtWhen(a.start_ms, a.end_ms)}</p>
+                <p class="when">{fmtWhen(a.start_ms, a.end_ms)}</p>
               {/if}
               {#if applied[a.proposal_id]}
-                <div class="plan-done">✅ {applied[a.proposal_id]}</div>
+                <div class="plan-done">Hecho: {applied[a.proposal_id]}</div>
               {:else}
                 <div class="row">
                   <button class="btn primary" onclick={() => acceptAction(a.proposal_id)} disabled={pendingAction === a.proposal_id}>
