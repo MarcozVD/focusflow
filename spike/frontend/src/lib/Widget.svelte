@@ -85,9 +85,14 @@
     const min = Math.max(0, Math.round((t.end.getTime() - now) / 60_000));
     if (min <= 1) return "termina ya";
     if (min < 60) return `${min} min restantes`;
-    const h = Math.floor(min / 60);
-    const m = min % 60;
-    return m === 0 ? `${h} h restantes` : `${h} h ${m} min restantes`;
+    if (min < 24 * 60) {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return m === 0 ? `${h} h restantes` : `${h} h ${m} min restantes`;
+    }
+    const d = Math.floor(min / (24 * 60));
+    const h = Math.floor((min % (24 * 60)) / 60);
+    return h === 0 ? `${d} d restantes` : `${d} d ${h} h restantes`;
   }
 
   function timeLabel(t: { allDay: boolean; start: Date }): string {

@@ -192,27 +192,6 @@ fn commit_email(
     Ok(count)
 }
 
-/// Procesa un correo con la IA: compromisos → sugerencias (o auto-aprobación).
-/// Fase 8: usa el pipeline de intenciones (event | deadline | availability |
-/// task), minimiza el cuerpo antes de mandarlo a la IA y deduplica entre
-/// correos (mismo compromiso en varios correos → una sola sugerencia).
-///
-/// Combina las tres fases; `run_sync` las ejecuta por separado para no
-/// mantener el `Mutex<Db>` durante la llamada HTTP de la IA.
-fn process_email(
-    app: &AppHandle,
-    db: &Db,
-    provider: &dyn ai::AiProvider,
-    configured: bool,
-    raw: &RawEmail,
-) -> Result<usize, String> {
-    if !prepare_email(db, raw)? {
-        return Ok(0);
-    }
-    let intents = analyze_email(app, provider, configured, raw)?;
-    commit_email(app, db, raw, &intents)
-}
-
 fn insert_intent_suggestion(
     app: &AppHandle,
     db: &Db,

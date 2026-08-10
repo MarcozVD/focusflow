@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     suggestions as suggestionsStore,
+    tasks as tasksStore,
     categories,
     cat,
     fmtDate,
@@ -18,6 +19,9 @@
   } from "./data.svelte";
 
   const suggestions = $derived(suggestionsStore());
+  const tasks = $derived(
+    [...tasksStore()].sort((a, b) => (a.start_at ?? 0) - (b.start_at ?? 0)),
+  );
 
   let editing = $state<number | null>(null);
   let mergeFor = $state<number | null>(null);
@@ -52,8 +56,14 @@
   }
 
   function startMerge(s: Suggestion) {
+    // el aviso marca una tarea existente → fusionar directo con ella
+    if (s.dedupe_task_id && (s.dedupe_note?.includes("duplicado de") ?? false)) {
+      void suggestionMerge(s.id, s.dedupe_task_id);
+      return;
+    }
+    // sin tarea en el aviso → elige manualmente
     mergeFor = s.id;
-    mergeTask = s.dedupe_task_id ? String(s.dedupe_task_id) : "";
+    mergeTask = "";
   }
 
   async function saveEdit() {
@@ -162,11 +172,14 @@
     {:else if mergeFor === s.id}
       <div class="card edit">
         <p class="mt">Fusionar con una tarea existente:</p>
-        <input
-          class="t"
-          bind:value={mergeTask}
-          placeholder="ID de la tarea (ver sugerencia duplicada o lista de tareas)"
-        />
+        <select class="t" bind:value={mergeTask}>
+          <option value="">Selecciona la tarea…</option>
+          {#each tasks as t (t.id)}
+            <option value={t.id}>
+              {t.title}{t.start_at ? ` · ${fmtDate(t.start_at)}` : ""}
+            </option>
+          {/each}
+        </select>
         <div class="row">
           <button class="btn primary" onclick={doMerge} disabled={!mergeTask}>Fusionar</button>
           <button class="btn" onclick={() => (mergeFor = null)}>Cancelar</button>

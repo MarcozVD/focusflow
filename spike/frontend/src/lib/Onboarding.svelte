@@ -253,21 +253,36 @@
       </p>
       <ul class="values">
         <li>
-          <span class="vi" aria-hidden="true">✉</span>
+          <span class="vi" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="m3 7 9 6 9-6" />
+            </svg>
+          </span>
           <div>
             <strong>Correo conectado</strong>
             <p>Las fechas de tus correos llegan solas como sugerencias.</p>
           </div>
         </li>
         <li>
-          <span class="vi" aria-hidden="true">✦</span>
+          <span class="vi" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+              <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
+              <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" />
+            </svg>
+          </span>
           <div>
             <strong>IA para planear</strong>
             <p>Describe una tarea en lenguaje natural y recibe un plan con horarios.</p>
           </div>
         </li>
         <li>
-          <span class="vi" aria-hidden="true">🛡</span>
+          <span class="vi" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6l7-3z" />
+              <path d="m9.5 12 1.8 1.8 3.4-3.6" />
+            </svg>
+          </span>
           <div>
             <strong>Privado por diseño</strong>
             <p>Tus claves se guardan cifradas en Windows, nunca en la base de datos.</p>

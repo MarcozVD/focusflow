@@ -736,6 +736,10 @@ impl Db {
     }
 
     pub fn set_notif_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        // whitelist: la UI solo envía estos tres estados
+        if !matches!(status, "planned" | "later" | "dismissed") {
+            return Ok(());
+        }
         self.conn.execute(
             "UPDATE notification_log SET status = ?2 WHERE id = ?1",
             rusqlite::params![id, status],
