@@ -118,12 +118,35 @@ fn is_organize_directive(text: &str) -> bool {
     ["organiz", "planific", "estructur", "distribu"].iter().any(|k| t.contains(k))
 }
 
+/// ¿La directiva de organizar apunta a la semana actual?
+/// ("organiza mi semana" sí; "organiza mi día" no).
+fn is_week_directive(text: &str) -> bool {
+    is_organize_directive(text) && text.to_lowercase().contains("semana")
+}
+
+/// Semana actual (local): (lunes 00:00, domingo 23:59:59.999) en ms.
+fn current_week_bounds() -> (i64, i64) {
+    let today = Local::now().date_naive();
+    let monday = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
+    let monday_ms = crate::engine::local_ms(monday.and_hms_opt(0, 0, 0).unwrap());
+    (monday_ms, monday_ms + 7 * DAY_MS - 1)
+}
+
+/// Días de horizonte para "organiza mi semana": desde hoy hasta el domingo
+/// de la semana actual (si hoy es domingo → solo hoy).
+fn days_until_sunday() -> u32 {
+    6 - Local::now().date_naive().weekday().num_days_from_monday()
+}
+
 /// Tareas flexibles pendientes: sin horario fijo (`end_at <= start_at`,
 /// compromisos reales son `end_at > start_at`) y sin completar. Se ordenan
 /// por prioridad (Alta → Media → Baja) y antigüedad, con tope
 /// [MAX_BACKLOG_ITEMS]. Nunca tocan compromisos fijos: el motor ya los
 /// bloquea como commitments.
-fn flexible_backlog(db: &Db) -> Vec<Intent> {
+/// Con `week = Some((from_ms, to_ms))` (lunes–domingo de la semana actual)
+/// solo entran las tareas con `start_at` dentro de la semana o atrasadas
+/// (anteriores al lunes); las de semanas futuras quedan fuera.
+fn flexible_backlog(db: &Db, week: Option<(i64, i64)>) -> Vec<Intent> {
     let Ok(tasks) = db.list() else { return Vec::new() };
     let rank = |p: &str| match p {
         "alta" => 0u8,
@@ -133,6 +156,10 @@ fn flexible_backlog(db: &Db) -> Vec<Intent> {
     let mut flex: Vec<TaskRow> = tasks
         .into_iter()
         .filter(|t| t.status != "completada" && t.end_at <= t.start_at)
+        .filter(|t| match week {
+            Some((from, to)) => t.start_at < from || (from..=to).contains(&t.start_at),
+            None => true,
+        })
         .collect();
     flex.sort_by(|a, b| (rank(&a.priority), a.start_at).cmp(&(rank(&b.priority), b.start_at)));
     flex.truncate(MAX_BACKLOG_ITEMS);
@@ -313,14 +340,24 @@ pub fn plan_from_text(
 ) -> Result<PlanProposalView, String> {
     let mut engine = engine_with_calendar(db);
     apply_intents(&mut engine, intents);
-    let planner = Planner { engine: engine.clone(), ..Planner::default() };
+    // "organiza mi semana": el horizonte se limita al domingo de la semana
+    // actual (no 14 días). Otras directivas ("organiza mi día", ...) usan el
+    // horizonte por defecto.
+    let week_mode = is_week_directive(text);
+    let planner = if week_mode {
+        Planner { engine: engine.clone(), horizon_days: days_until_sunday(), ..Planner::default() }
+    } else {
+        Planner { engine: engine.clone(), ..Planner::default() }
+    };
     let mut all = intents.to_vec();
     let mut report = planner.plan(intents);
     // "organiza mi semana": el texto no dimensiona nada (intents vacíos o sin
     // duración) → planificar el backlog flexible pendiente con la duración
     // por defecto (configurable). Los compromisos fijos ya bloquean el motor.
     if report.items.is_empty() && is_organize_directive(text) {
-        let backlog = flexible_backlog(db);
+        // modo semana: solo el backlog de esta semana (o atrasado); las
+        // flexibles de semanas futuras no entran en el plan
+        let backlog = flexible_backlog(db, if week_mode { Some(current_week_bounds()) } else { None });
         if !backlog.is_empty() {
             let extra = planner.plan(&backlog);
             report.items.extend(extra.items);
@@ -841,9 +878,10 @@ mod tests {
     #[test]
     fn organize_week_plans_flexible_backlog() {
         let d = clean_db();
-        // flexibles = sin horario fijo (end_at <= start_at)
-        d.create("Pagar internet", "otr", "media", day(1), day(1), false).unwrap();
-        d.create("Estudiar cálculo", "uni", "alta", day(2), day(2), false).unwrap();
+        // flexibles = sin horario fijo (end_at <= start_at); fechas dentro de
+        // la semana actual (hoy / atrasada) para el filtro de semana
+        d.create("Pagar internet", "otr", "media", day(0), day(0), false).unwrap();
+        d.create("Estudiar cálculo", "uni", "alta", day(-1), day(-1), false).unwrap();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
         assert_eq!(view.items.len(), 2, "planifica el backlog: {:?}", view.items.iter().map(|i| &i.title).collect::<Vec<_>>());
         assert_eq!(view.items[0].title, "Estudiar cálculo", "prioridad Alta primero");
@@ -883,7 +921,7 @@ mod tests {
     fn organize_week_uses_configured_duration() {
         let d = clean_db();
         d.settings_set("plan.default_task_min", "90").unwrap();
-        d.create("Escribir informe", "trab", "media", day(1), day(1), false).unwrap();
+        d.create("Escribir informe", "trab", "media", day(0), day(0), false).unwrap();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
         assert_eq!(view.items.len(), 1);
         let it = &view.items[0];
@@ -897,9 +935,60 @@ mod tests {
     fn organize_week_caps_backlog_at_max() {
         let d = clean_db();
         for i in 0..15 {
-            d.create(&format!("Tarea {i}"), "otr", "media", day(1), day(1), false).unwrap();
+            d.create(&format!("Tarea {i}"), "otr", "media", day(0), day(0), false).unwrap();
         }
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
         assert_eq!(view.items.len(), MAX_BACKLOG_ITEMS, "el backlog se recorta al tope");
+    }
+
+    #[test]
+    fn organize_week_sessions_stay_within_current_week() {
+        let d = clean_db();
+        let (monday, sunday_end) = current_week_bounds();
+        // flexible con start_at dentro de la semana actual (miércoles 10:00)
+        let mid = monday + 2 * DAY_MS + 10 * 3_600_000;
+        d.create("Estudiar cálculo", "uni", "alta", mid, mid, false).unwrap();
+        let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
+        assert_eq!(view.items.len(), 1, "la tarea de esta semana entra en el plan");
+        assert!(!view.items[0].sessions.is_empty(), "se planifica: {:?}", view.items[0].notes);
+        for s in &view.items[0].sessions {
+            assert!(s.end_ms - 1 <= sunday_end, "sesión dentro de la semana (<= domingo 23:59): {s:?}");
+            assert!(s.start_ms >= monday, "nunca antes del lunes de esta semana: {s:?}");
+        }
+    }
+
+    #[test]
+    fn organize_week_excludes_future_week_tasks() {
+        let d = clean_db();
+        let (monday, _) = current_week_bounds();
+        // atrasada (antes del lunes de esta semana) → entra
+        d.create("Atrasada", "otr", "alta", monday - 2 * DAY_MS, monday - 2 * DAY_MS, false).unwrap();
+        // dentro de la semana actual → entra
+        let mid = monday + 2 * DAY_MS + 10 * 3_600_000;
+        d.create("De esta semana", "otr", "media", mid, mid, false).unwrap();
+        // semana próxima y dentro de 3 semanas → fuera del plan
+        let next = monday + 8 * DAY_MS;
+        d.create("Semana próxima", "otr", "alta", next, next, false).unwrap();
+        let far = monday + 17 * DAY_MS;
+        d.create("Lejana", "otr", "media", far, far, false).unwrap();
+        let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
+        let titles: Vec<&str> = view.items.iter().map(|i| i.title.as_str()).collect();
+        assert!(titles.contains(&"Atrasada"), "entra la atrasada: {titles:?}");
+        assert!(titles.contains(&"De esta semana"), "entra la de esta semana: {titles:?}");
+        assert!(!titles.contains(&"Semana próxima"), "semana futura fuera: {titles:?}");
+        assert!(!titles.contains(&"Lejana"), "a 3 semanas fuera: {titles:?}");
+    }
+
+    #[test]
+    fn organize_day_keeps_default_horizon() {
+        // "organiza mi día" (sin "semana") conserva el horizonte de 14 días y
+        // no filtra el backlog por semana: una flexible de la semana próxima
+        // (dentro del horizonte) sí entra.
+        let d = clean_db();
+        let far = day(10);
+        d.create("Lejana", "otr", "media", far, far, false).unwrap();
+        let view = plan_from_text(&d, "organiza mi día", &[], "local").unwrap();
+        assert_eq!(view.items.len(), 1, "sin 'semana' no hay filtro de semana");
+        assert_eq!(view.items[0].title, "Lejana");
     }
 }
