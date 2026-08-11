@@ -184,6 +184,10 @@ const store = $state({
   theme: "" as "" | "light" | "dark",
   accent: "#2563EB",
   planProposal: null as PlanProposalView | null,
+  // Resultado persistente por propuesta de plan: sobrevive al re-montaje de
+  // pestañas. El Asistente lo lee para no volver a mostrar los botones de
+  // Aceptar/Descartar de una propuesta ya resuelta.
+  planResults: {} as Record<number, { ok: boolean; text: string }>,
   planBusy: false,
   planError: "",
   assistantThread: [] as { role: "user" | "assistant"; turn: AssistantTurn | null; text: string; at: number }[],
@@ -220,6 +224,8 @@ export const nextSyncAt = () => store.nextSyncAt;
 export const uiTheme = () => store.theme;
 export const uiAccent = () => store.accent;
 export const planProposal = () => store.planProposal;
+/** Resultado persistente de una propuesta de plan (aceptada/rechazada/error). */
+export const planResult = (id: number) => store.planResults[id];
 export const planBusy = () => store.planBusy;
 export const planError = () => store.planError;
 export const assistantThread = () => store.assistantThread;
@@ -256,15 +262,23 @@ export async function planFromText(text: string): Promise<{ ok: boolean; source:
 
 /** Acepta la propuesta; `edit` (opcional) reemplaza los bloques por ítem. */
 export async function planAccept(id: number, edit?: EditedPlan): Promise<{ ok: boolean; error?: string }> {
-  if (!inTauri()) return { ok: true };
+  if (!inTauri()) {
+    // demo: simular aceptación y cerrar la propuesta
+    store.planProposal = null;
+    store.planResults[id] = { ok: true, text: "Propuesta aceptada y añadida al calendario." };
+    return { ok: true };
+  }
   store.planBusy = true;
   store.planError = "";
   try {
     await invoke("plan_accept", { id, edit: edit ?? null });
     store.planProposal = null;
+    store.planResults[id] = { ok: true, text: "Propuesta aceptada y añadida al calendario." };
+    await refreshTasks();
     return { ok: true };
   } catch (e) {
     store.planError = String(e);
+    store.planResults[id] = { ok: false, text: String(e) };
     return { ok: false, error: String(e) };
   } finally {
     store.planBusy = false;
@@ -273,7 +287,11 @@ export async function planAccept(id: number, edit?: EditedPlan): Promise<{ ok: b
 
 /** Cancela la propuesta sin cambios en el calendario. */
 export async function planReject(id: number): Promise<void> {
-  if (!inTauri()) return;
+  if (!inTauri()) {
+    store.planProposal = null;
+    store.planResults[id] = { ok: true, text: "Propuesta cancelada." };
+    return;
+  }
   try {
     await invoke("plan_reject", { id });
   } catch (e) {
@@ -281,6 +299,7 @@ export async function planReject(id: number): Promise<void> {
   }
   store.planProposal = null;
   store.planError = "";
+  store.planResults[id] = { ok: true, text: "Propuesta cancelada." };
 }
 
 const MAX_HISTORY_TURNS = 6;

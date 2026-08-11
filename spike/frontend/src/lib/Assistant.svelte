@@ -9,6 +9,7 @@
     assistantActionAccept,
     assistantActionReject,
     planProposal,
+    planResult,
     planAccept,
     planReject,
     takeAssistantDraft,
@@ -26,7 +27,9 @@
 
   let input = $state("");
   let pendingAction = $state<number | null>(null);
-  let applied: Record<number, string> = $state({});
+  // Resultado de ACCIONES (no planes): local al componente. Los planes usan el
+  // estado global `planResult` del store, que persiste al re-montar la pestaña.
+  let appliedActions: Record<number, string> = $state({});
 
   $effect(() => {
     const draft = takeAssistantDraft();
@@ -52,9 +55,9 @@
     pendingAction = id;
     try {
       const summary = await assistantActionAccept(id);
-      applied[id] = summary;
+      appliedActions[id] = summary;
     } catch (e) {
-      applied[id] = `Error: ${e}`;
+      appliedActions[id] = `Error: ${e}`;
     } finally {
       pendingAction = null;
     }
@@ -63,24 +66,20 @@
   async function rejectAction(id: number) {
     try {
       await assistantActionReject(id);
-      applied[id] = "rechazada";
+      appliedActions[id] = "rechazada";
     } catch (e) {
-      applied[id] = `Error: ${e}`;
+      appliedActions[id] = `Error: ${e}`;
     }
   }
 
   async function acceptPlan(proposal: PlanProposalView) {
-    try {
-      const r = await planAccept(proposal.id);
-      applied[proposal.id] = r.ok ? "Propuesta aceptada y añadida al calendario." : (r.error ?? "Error");
-    } catch (e) {
-      applied[proposal.id] = `Error: ${e}`;
-    }
+    // planAccept registra el resultado en el store global (planResult) y
+    // refresca el calendario; el render lo lee de ahí.
+    await planAccept(proposal.id).catch((e) => console.error("acceptPlan", e));
   }
 
   async function rejectPlan(proposal: PlanProposalView) {
-    await planReject(proposal.id);
-    applied[proposal.id] = "Propuesta cancelada.";
+    await planReject(proposal.id).catch((e) => console.error("rejectPlan", e));
   }
 
   function fmtWhen(s: number | null, e: number | null): string {
@@ -127,10 +126,14 @@
           {:else if m.turn?.type === "Nothing"}
             <p class="answer muted">{m.turn.text}</p>
           {:else if m.turn?.type === "Plan"}
-            {#if activeProposal && activeProposal.id === m.turn.proposal.id}
+            {@const r = planResult(m.turn.proposal.id)}
+            {#if r?.ok}
+              <div class="plan-done">Hecho: {r.text}</div>
+            {:else if activeProposal && activeProposal.id === m.turn.proposal.id}
               <PlanProposal />
-            {:else if applied[m.turn.proposal.id]}
-              <div class="plan-done">Hecho: {applied[m.turn.proposal.id]}</div>
+              {#if r && !r.ok}
+                <div class="plan-done error">Error al aceptar: {r.text}</div>
+              {/if}
             {:else}
               <div class="card mini">
                 <div class="mini-row">
@@ -165,8 +168,8 @@
               {#if a.start_ms}
                 <p class="when">{fmtWhen(a.start_ms, a.end_ms)}</p>
               {/if}
-              {#if applied[a.proposal_id]}
-                <div class="plan-done">Hecho: {applied[a.proposal_id]}</div>
+              {#if appliedActions[a.proposal_id]}
+                <div class="plan-done">Hecho: {appliedActions[a.proposal_id]}</div>
               {:else}
                 <div class="row">
                   <button class="btn primary" onclick={() => acceptAction(a.proposal_id)} disabled={pendingAction === a.proposal_id}>
