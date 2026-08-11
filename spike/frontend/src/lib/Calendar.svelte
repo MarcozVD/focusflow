@@ -1,6 +1,17 @@
 <script lang="ts">
   import { DAYS_ES, tasks as tasksStore, cat, openTaskDetail, moveTask, type Task } from "./data.svelte";
   import EventBlock from "./EventBlock.svelte";
+  import {
+    sameDay,
+    startOfDay,
+    dayStartMs,
+    segmentFor,
+    chipTextFor,
+    topChipsOn,
+    monthChipsOn,
+    layoutMetrics,
+    type Segment,
+  } from "./taskDayLogic";
 
   let {
     view,
@@ -11,14 +22,6 @@
   const tasks = $derived(tasksStore());
 
   // ---- utilidades ----
-  function startOfDay(d: Date): Date {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
-  }
-  function sameDay(a: Date, b: Date): boolean {
-    return a.toDateString() === b.toDateString();
-  }
   const isToday = $derived((d: Date) => sameDay(d, new Date()));
 
   function weekDays(anchor: Date): Date[] {
@@ -70,7 +73,10 @@
         const seg = segmentFor(t, d);
         if (!seg) continue;
         lo = Math.min(lo, seg.start.getHours());
-        const endMin = seg.end.getHours() * 60 + seg.end.getMinutes();
+        // minutos RELATIVOS al día del inicio del segmento (igual que layoutMetrics):
+        // un fin a medianoche = 1440 min, no 0 (bug de expansión de cuadrícula)
+        const ref = dayStartMs(seg.start);
+        const endMin = (seg.end.getTime() - ref) / 60_000;
         hi = Math.max(hi, Math.min(24, Math.ceil(endMin / 60)));
       }
     }
@@ -97,36 +103,9 @@
     return (mins - grid.lo * 60) * (pxH / 60);
   }
 
-  /** Segmento de una tarea para un día concreto (multi-día → solo inicio/fin, ~2 h). */
-  function segmentFor(t: Task, d: Date): { start: Date; end: Date; kind: "full" | "inicio" | "fin" } | null {
-    const dayStart = startOfDay(d);
-    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
-    const multi = !sameDay(t.start, t.end);
-    if (!multi) {
-      if (t.end.getTime() <= dayStart.getTime() || t.start.getTime() >= dayEnd.getTime()) return null;
-      return { start: t.start, end: t.end, kind: "full" };
-    }
-    if (sameDay(t.start, d)) {
-      const end = new Date(Math.min(t.start.getTime() + 2 * 3_600_000, t.end.getTime()));
-      return { start: t.start, end, kind: "inicio" };
-    }
-    if (sameDay(t.end, d)) {
-      const start = new Date(Math.max(t.end.getTime() - 2 * 3_600_000, t.start.getTime()));
-      return { start, end: t.end, kind: "fin" };
-    }
-    return null;
-  }
-
-  function dayTasks(d: Date): Task[] {
-    return tasks.filter((t) => {
-      const s = t.start;
-      return s.getFullYear() === d.getFullYear() && s.getMonth() === d.getMonth() && s.getDate() === d.getDate();
-    });
-  }
-
   interface Placed {
     t: Task;
-    seg: { start: Date; end: Date; kind: "full" | "inicio" | "fin" };
+    seg: Segment;
     top: number;
     height: number;
     left: number;
@@ -135,13 +114,16 @@
 
   /** Algoritmo de columnas: las tareas que se solapan se reparten lado a lado. */
   function layoutDay(d: Date, maxCount = 999): Placed[] {
-    const items: { t: Task; seg: { start: Date; end: Date; kind: "full" | "inicio" | "fin" }; s: number; e: number }[] = [];
+    const items: { t: Task; seg: Segment; s: number; e: number }[] = [];
     for (const t of tasks) {
       if (t.status === "completada" || t.allDay) continue;
       const seg = segmentFor(t, d);
       if (!seg) continue;
-      const s = seg.start.getHours() * 60 + seg.start.getMinutes();
-      const e = seg.end.getHours() * 60 + seg.end.getMinutes();
+      // minutos relativos al día del inicio del segmento (mismo criterio que
+      // layoutMetrics): el fin a medianoche = 1440 min y agrupa en su día real
+      const ref = dayStartMs(seg.start);
+      const s = (seg.start.getTime() - ref) / 60_000;
+      const e = (seg.end.getTime() - ref) / 60_000;
       items.push({ t, seg, s, e });
     }
     items.sort((a, b) => a.s - b.s || b.e - a.e);
@@ -174,15 +156,12 @@
         } else {
           cols[ci].e = Math.max(cols[ci].e, it.e);
         }
+        const { top, height } = layoutMetrics(it.seg, grid.lo, grid.hi, pxH);
         placed.push({
           t: it.t,
           seg: it.seg,
-          top: Math.max(0, (it.s - grid.lo * 60) * (pxH / 60)),
-          height: Math.max(
-            20,
-            Math.min((it.e - grid.lo * 60) * (pxH / 60), (grid.hi - grid.lo) * pxH) -
-              Math.max(0, (it.s - grid.lo * 60) * (pxH / 60)),
-          ),
+          top,
+          height,
           left: (ci / n) * 100,
           width: 100 / n,
         });
@@ -229,56 +208,13 @@
 
   let popupDay = $state<Date | null>(null);
 
-  const allDayOf = (d: Date) =>
-    tasks.filter((t) => t.allDay && sameDay(t.start, d) && t.status !== "completada");
-
-  /**
-   * Modo de representación de un evento de rango (inicio y fin en días distintos).
-   * Punto de extensión: en el futuro, "continuo" servirá para vacaciones/ausencias
-   * (ocuparía todos los días intermedios). Por ahora el modo predeterminado es
-   * "solo_extremos": el evento se muestra ÚNICAMENTE en su día de inicio y su día
-   * de fin, aunque internamente conserve el rango completo (para conocer duración
-   * y poder abrir el detalle). Los días intermedios quedan vacíos.
-   */
-  function rangeMode(t: Task): "solo_extremos" | "continuo" {
-    return "solo_extremos";
-  }
-  const esExtremos = (t: Task) => rangeMode(t) === "solo_extremos" || !sameDay(t.start, t.end);
-
-  /** Multi-día en su DÍA DE FIN (modo solo_extremos): no ocupa los días intermedios. */
-  const finDeOf = (d: Date) => {
-    const ds = startOfDay(d).getTime();
-    const de = ds + 86_400_000;
-    return tasks.filter(
-      (t) =>
-        t.status !== "completada" &&
-        esExtremos(t) &&
-        !sameDay(t.start, t.end) &&
-        t.end.getTime() >= ds &&
-        t.end.getTime() < de,
-    );
-  };
-
-  /** Texto del chip según el rol del día (inicio, fin o único). */
-  function chipText(t: Task, d: Date): string {
-    if (sameDay(t.start, t.end)) return t.title;
-    const ds = startOfDay(d).getTime();
-    if (t.end.getTime() >= ds && t.end.getTime() < ds + 86_400_000) return `Fin · ${t.title}`;
-    return `Inicio · ${t.title}`;
-  }
-
-  const topChipsOf = (d: Date) => [...allDayOf(d), ...finDeOf(d)];
+  /** Chips de la fila superior (semana/día): todo el día + multi-día intermedio. */
+  const topChipsOf = (d: Date) => topChipsOn(tasks, d);
   const visibleTopChipsOf = (d: Date) => topChipsOf(d).slice(0, 3);
   const restTopChipsOf = (d: Date) => Math.max(0, topChipsOf(d).length - 3);
 
-  /** Chips de mes: todo el día + fin de multi-día + tareas del día (sin duplicados). */
-  const monthChipsOf = (d: Date) => {
-    const seen = new Map<number, Task>();
-    for (const t of [...allDayOf(d), ...finDeOf(d), ...dayTasks(d)]) {
-      if (t.status !== "completada" && !seen.has(t.id)) seen.set(t.id, t);
-    }
-    return [...seen.values()];
-  };
+  /** Chips de mes y popup: todo lo que cubre el día. */
+  const monthChipsOf = (d: Date) => monthChipsOn(tasks, d);
 
   /** Borde inferior del último evento visible (para el botón "+N más"). */
   function lastShownBottom(d: Date): number {
@@ -493,20 +429,14 @@
       ? segmentFor({ ...drag.task, start: new Date(drag.curStart), end: new Date(drag.curEnd) }, new Date(drag.curStart))
       : null,
   );
+  /** Mismas métricas que layoutDay: el fantasma coincide exactamente con el original. */
   function ghostTop(): number {
     if (!drag || !ghostSeg) return 0;
-    const mins = ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60;
-    return Math.max(0, mins * (pxH / 60));
+    return layoutMetrics(ghostSeg, grid.lo, grid.hi, pxH).top;
   }
-  /** Mismas métricas que layoutDay: el fantasma coincide exactamente con el original. */
   function ghostHeight(): number {
     if (!drag || !ghostSeg) return 0;
-    const spanPx = (grid.hi - grid.lo) * pxH;
-    const sMin = ghostSeg.start.getHours() * 60 + ghostSeg.start.getMinutes() - grid.lo * 60;
-    const eMin = ghostSeg.end.getHours() * 60 + ghostSeg.end.getMinutes() - grid.lo * 60;
-    const topPx = Math.max(0, sMin * (pxH / 60));
-    const bottomPx = Math.min(eMin * (pxH / 60), spanPx);
-    return Math.max(20, bottomPx - topPx);
+    return layoutMetrics(ghostSeg, grid.lo, grid.hi, pxH).height;
   }
 </script>
 
@@ -534,7 +464,7 @@
                 style="--c: {cat(t.categoryId).color}"
                 title={t.title}
                 onclick={(e) => { e.stopPropagation(); openTaskDetail(t); }}
-              >{chipText(t, d)}</button>
+              >{chipTextFor(t, d)}</button>
             {/each}
             {#if monthChipsOf(d).length > 2}
               <button
@@ -561,7 +491,7 @@
           {#each monthChipsOf(popupDay) as t (t.id)}
             <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
               <span class="pop-dot"></span>
-              <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipText(t, popupDay)}</span>
+              <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipTextFor(t, popupDay)}</span>
               <span class="pop-time">
                 {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
               </span>
@@ -605,7 +535,7 @@
                   ? t.title
                   : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
                 onclick={() => openTaskDetail(t)}
-              >{chipText(t, d)}</button>
+              >{chipTextFor(t, d)}</button>
             {/each}
             {#if restTopChipsOf(d) > 0}
               <span class="allday-more">+{restTopChipsOf(d)}</span>

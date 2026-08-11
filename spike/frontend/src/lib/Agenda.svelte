@@ -1,28 +1,22 @@
 <script lang="ts">
-  import { tasks as tasksStore, type Task } from "./data.svelte";
+  import { tasks as tasksStore } from "./data.svelte";
   import TaskCard from "./TaskCard.svelte";
+  import { groupAgenda } from "./taskDayLogic";
 
   const tasks = $derived(tasksStore());
 
-  const groups = $derived(() => {
-    const now = new Date();
-    const byDay = new Map<string, Task[]>();
-    const sorted = [...tasks].sort((a, b) => a.start.getTime() - b.start.getTime());
-    for (const t of sorted) {
-      if (t.status === "completada") continue;
-      const key = t.start.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" });
-      if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key)!.push(t);
-    }
-    return Array.from(byDay.entries()).slice(0, 5);
-  });
+  /** Primeros 5 días con presencia a partir de hoy (hoy primero, luego cronológico).
+   *  Los multi-día aparecen en cada día que cubren; las vencidas de hoy, hoy. */
+  const groups = $derived(groupAgenda(tasks, new Date()).slice(0, 5));
 </script>
 
 <div class="agenda">
-  {#each groups() as [day, list]}
+  {#each groups as g}
     <div class="group">
-      <div class="day-label">{day}</div>
-      {#each list as t}
+      <div class="day-label">
+        {new Date(g.dayMs).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" })}
+      </div>
+      {#each g.tasks as t}
         <TaskCard task={t} />
       {/each}
     </div>
