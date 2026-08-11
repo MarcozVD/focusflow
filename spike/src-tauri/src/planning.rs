@@ -12,7 +12,7 @@
 use chrono::{Datelike, Local, TimeZone, Timelike, Weekday};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::intent::{Intent, IntentType, Priority};
+use crate::ai::intent::{Duration, Intent, IntentType, Priority, TimeWindow};
 use crate::engine::planner::{PlannedItem, Planner};
 use crate::engine::{ConstraintEngine, DAY_MS, local_midnight};
 use crate::store::{Db, TaskRow};
@@ -91,6 +91,74 @@ fn priority_str(p: Priority) -> &'static str {
         Priority::Media => "media",
         Priority::Baja => "baja",
     }
+}
+
+/// Duración por defecto (min) para tareas flexibles del backlog cuando el
+/// texto pide organizar sin dar duraciones. Configurable en settings
+/// (`plan.default_task_min`, rango 15-480).
+pub const DEFAULT_FLEX_MIN: u32 = 60;
+
+/// Máximo de tareas del backlog que entran en un "organiza mi semana".
+const MAX_BACKLOG_ITEMS: usize = 10;
+
+/// Duración efectiva para tareas flexibles: lee la setting, si no, 60.
+fn flex_min(db: &Db) -> u32 {
+    db.settings_get("plan.default_task_min")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|m| (15..=480).contains(m))
+        .unwrap_or(DEFAULT_FLEX_MIN)
+}
+
+/// ¿El texto pide organizar el horario sin tareas concretas?
+/// ("organiza mi semana", "planifica mi día", ...).
+fn is_organize_directive(text: &str) -> bool {
+    let t = text.to_lowercase();
+    ["organiz", "planific", "estructur", "distribu"].iter().any(|k| t.contains(k))
+}
+
+/// Tareas flexibles pendientes: sin horario fijo (`end_at <= start_at`,
+/// compromisos reales son `end_at > start_at`) y sin completar. Se ordenan
+/// por prioridad (Alta → Media → Baja) y antigüedad, con tope
+/// [MAX_BACKLOG_ITEMS]. Nunca tocan compromisos fijos: el motor ya los
+/// bloquea como commitments.
+fn flexible_backlog(db: &Db) -> Vec<Intent> {
+    let Ok(tasks) = db.list() else { return Vec::new() };
+    let rank = |p: &str| match p {
+        "alta" => 0u8,
+        "media" => 1,
+        _ => 2,
+    };
+    let mut flex: Vec<TaskRow> = tasks
+        .into_iter()
+        .filter(|t| t.status != "completada" && t.end_at <= t.start_at)
+        .collect();
+    flex.sort_by(|a, b| (rank(&a.priority), a.start_at).cmp(&(rank(&b.priority), b.start_at)));
+    flex.truncate(MAX_BACKLOG_ITEMS);
+    flex.into_iter()
+        .map(|t| Intent {
+            intent_type: IntentType::Task,
+            title: t.title,
+            description: String::new(),
+            category_id: t.category_id,
+            priority: match t.priority.as_str() {
+                "alta" => Priority::Alta,
+                "media" => Priority::Media,
+                _ => Priority::Baja,
+            },
+            window: TimeWindow { start: None, end: None, all_day: false },
+            duration: Some(Duration { minutes: flex_min(db) }),
+            deadline: None,
+            preparation: None,
+            recurrence: None,
+            reminders: Vec::new(),
+            constraints: Vec::new(),
+            confidence: 0.9,
+            reason: "backlog".into(),
+            source: "local".into(),
+        })
+        .collect()
 }
 
 fn day_name(d: &chrono::DateTime<Local>) -> &'static str {
@@ -246,7 +314,19 @@ pub fn plan_from_text(
     let mut engine = engine_with_calendar(db);
     apply_intents(&mut engine, intents);
     let planner = Planner { engine: engine.clone(), ..Planner::default() };
+    let mut all = intents.to_vec();
     let mut report = planner.plan(intents);
+    // "organiza mi semana": el texto no dimensiona nada (intents vacíos o sin
+    // duración) → planificar el backlog flexible pendiente con la duración
+    // por defecto (configurable). Los compromisos fijos ya bloquean el motor.
+    if report.items.is_empty() && is_organize_directive(text) {
+        let backlog = flexible_backlog(db);
+        if !backlog.is_empty() {
+            let extra = planner.plan(&backlog);
+            report.items.extend(extra.items);
+            all.extend(backlog);
+        }
+    }
     // Eventos all-day multi-día sin duración: no hay sesiones dimensionables,
     // pero el usuario espera cubrir el rango. Sintetizar sesiones por día
     // (todo el horario libre de cada día, día inicio bloqueado por el propio
@@ -271,7 +351,7 @@ pub fn plan_from_text(
         .items
         .into_iter()
         .map(|it| {
-            let intent = intent_for(intents, &it.title);
+            let intent = intent_for(&all, &it.title);
             PlanItemView {
                 category_id: intent.map(|i| i.category_id.clone()).unwrap_or_else(|| "otr".into()),
                 title: it.title,
@@ -298,7 +378,7 @@ pub fn plan_from_text(
         text: text.to_string(),
         status: "pending".into(),
         source: source.to_string(),
-        understanding: understanding(intents),
+        understanding: understanding(&all),
         items,
         created_at: 0,
     };
@@ -572,11 +652,11 @@ mod tests {
         // día inicial: bloqueado completo
         assert_eq!(e.available_minutes(day(1) + 9 * hour, day(1) + 10 * hour), 0);
         assert_eq!(e.available_minutes(day(1), day(1) + 24 * hour), 0);
-        // días intermedios: libres (09:00–18:00 = 9h)
-        assert_eq!(e.available_minutes(day(2), day(2) + 24 * hour), 9 * 60);
+        // días intermedios: libres (06:00–22:00 = 16h)
+        assert_eq!(e.available_minutes(day(2), day(2) + 24 * hour), 16 * 60);
         assert_eq!(e.available_minutes(day(3) + 9 * hour, day(3) + 10 * hour), 60);
         // día de fin sin hora de cierre: libre, con fecha límite 22:00
-        assert_eq!(e.available_minutes(day(4), day(4) + 24 * hour), 9 * 60);
+        assert_eq!(e.available_minutes(day(4), day(4) + 24 * hour), 16 * 60);
         let dl = e
             .deadlines
             .iter()
@@ -598,10 +678,10 @@ mod tests {
         for s in &it.sessions {
             let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
             let et = Local.timestamp_millis_opt(s.end_ms).earliest().unwrap();
-            assert_eq!(st.hour(), 9, "empiezan a las 09:00");
-            assert_eq!(et.hour(), 18, "terminan a las 18:00");
+            assert_eq!(st.hour(), 6, "empiezan a las 06:00");
+            assert_eq!(et.hour(), 22, "terminan a las 22:00");
         }
-        assert_eq!(it.required_min, 3 * 9 * 60, "3 días x 9 h");
+        assert_eq!(it.required_min, 3 * 16 * 60, "3 días x 16 h");
         assert!(it.complete);
         // aceptar crea el evento + las sesiones
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
@@ -637,7 +717,7 @@ mod tests {
         let engine = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
         assert_eq!(engine.available_minutes(day(2), day(2) + 24 * hour), 0, "todo el día sigue ocupado");
-        assert_eq!(engine.available_minutes(day(1) + 12 * hour, day(2)), 6 * 60, "día anterior libre (12:00–18:00)");
+        assert_eq!(engine.available_minutes(day(1) + 12 * hour, day(2)), 10 * 60, "día anterior libre (12:00–22:00)");
         assert!(engine.deadlines.is_empty(), "todo el día simple no crea fecha límite");
     }
 
@@ -752,5 +832,74 @@ mod tests {
         };
         let tasks = accept_plan(&d, view.id, &edit).unwrap();
         assert_eq!(tasks.len(), 1, "se acepta con el hueco liberado");
+    }
+
+    // ------------------------------------------------------------------
+    // "organiza mi semana": backlog flexible
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn organize_week_plans_flexible_backlog() {
+        let d = clean_db();
+        // flexibles = sin horario fijo (end_at <= start_at)
+        d.create("Pagar internet", "otr", "media", day(1), day(1), false).unwrap();
+        d.create("Estudiar cálculo", "uni", "alta", day(2), day(2), false).unwrap();
+        let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
+        assert_eq!(view.items.len(), 2, "planifica el backlog: {:?}", view.items.iter().map(|i| &i.title).collect::<Vec<_>>());
+        assert_eq!(view.items[0].title, "Estudiar cálculo", "prioridad Alta primero");
+        assert_eq!(view.understanding.len(), 2, "el backlog aparece en 'Entendido'");
+        for it in &view.items {
+            assert!(it.complete);
+            assert_eq!(it.task_min, DEFAULT_FLEX_MIN, "duración por defecto 60");
+            for s in &it.sessions {
+                assert_eq!(((s.end_ms - s.start_ms) / 60_000) as u32, DEFAULT_FLEX_MIN);
+            }
+        }
+    }
+
+    #[test]
+    fn organize_week_respects_fixed_commitments() {
+        let d = clean_db();
+        // compromiso fijo 10:00-12:00 bloquea; el flexible se planifica fuera
+        d.create("Clase", "uni", "alta", day(1) + 10 * 3_600_000, day(1) + 12 * 3_600_000, false).unwrap();
+        d.create("Estudiar", "uni", "media", day(1), day(1), false).unwrap();
+        let view = plan_from_text(&d, "organiza mi día", &[], "local").unwrap();
+        assert_eq!(view.items.len(), 1);
+        for s in &view.items[0].sessions {
+            let in_clase = s.start_ms < day(1) + 12 * 3_600_000 && s.end_ms > day(1) + 10 * 3_600_000;
+            assert!(!in_clase, "sesión solapa la clase fija");
+        }
+    }
+
+    #[test]
+    fn organize_week_without_flexible_keeps_empty() {
+        let d = clean_db();
+        let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
+        assert!(view.items.is_empty(), "sin backlog no hay nada que planificar");
+        assert!(view.understanding.is_empty());
+    }
+
+    #[test]
+    fn organize_week_uses_configured_duration() {
+        let d = clean_db();
+        d.settings_set("plan.default_task_min", "90").unwrap();
+        d.create("Escribir informe", "trab", "media", day(1), day(1), false).unwrap();
+        let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
+        assert_eq!(view.items.len(), 1);
+        let it = &view.items[0];
+        assert_eq!(it.task_min, 90, "duración desde settings");
+        for s in &it.sessions {
+            assert_eq!(((s.end_ms - s.start_ms) / 60_000) as u32, 90);
+        }
+    }
+
+    #[test]
+    fn organize_week_caps_backlog_at_max() {
+        let d = clean_db();
+        for i in 0..15 {
+            d.create(&format!("Tarea {i}"), "otr", "media", day(1), day(1), false).unwrap();
+        }
+        let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
+        assert_eq!(view.items.len(), MAX_BACKLOG_ITEMS, "el backlog se recorta al tope");
     }
 }

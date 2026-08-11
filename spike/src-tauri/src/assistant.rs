@@ -200,7 +200,7 @@ pub fn context_snapshot(db: &Db) -> String {
     serde_json::json!({
         "today": today.format("%Y-%m-%d").to_string(),
         "now_local": chrono::Local::now().format("%H:%M").to_string(),
-        "working_hours": "09:00–18:00",
+        "working_hours": "06:00–22:00",
         "pending_tasks": tasks,
         "pending_total": total,
         "overdue": overdue,

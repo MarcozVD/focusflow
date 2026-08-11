@@ -171,7 +171,7 @@ fn insufficient_time_is_partial_and_explained() {
     for day in 1..15i64 {
         let t = chrono::Local::now().date_naive() + chrono::Duration::days(day);
         let s = focusflow_spike_lib::engine::local_ms(t.and_hms_opt(0, 0, 0).unwrap());
-        d.create("Jornada", "trab", "media", s + 9 * 3_600_000, s + 17 * 3_600_000 + 30 * 60_000, false).unwrap();
+        d.create("Jornada", "trab", "media", s + 6 * 3_600_000, s + 21 * 3_600_000 + 30 * 60_000, false).unwrap();
     }
     let (intents, source) = interpret("Preparar presentación 10 horas");
     let view = plan_from_text(&d, "Preparar presentación 10 horas", &intents, &source).unwrap();

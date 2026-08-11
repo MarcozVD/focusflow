@@ -1583,6 +1583,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             db.settings_default("notif.daily_cap", "5").ok();
             db.settings_default("notif.free_minutes", "120").ok();
             db.settings_default("notif.cooldown_hours", "24").ok();
+            db.settings_default("plan.default_task_min", "60").ok();
             app.manage(Mutex::new(db));
 
             let show = MenuItem::with_id(&handle, "show", "Abrir FocusFlow", true, None::<&str>)?;

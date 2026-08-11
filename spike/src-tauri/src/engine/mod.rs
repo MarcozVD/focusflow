@@ -31,9 +31,9 @@ pub const MIN_MS: i64 = 60_000;
 pub const HOUR_MS: i64 = 3_600_000;
 pub const DAY_MS: i64 = 24 * HOUR_MS;
 
-/// Inicio por defecto del horario laboral (09:00). El cap "don't schedule
+/// Inicio por defecto del horario laboral (06:00). El cap "don't schedule
 /// before HH:MM" lo reemplaza; sobre horarios explícitos solo lo eleva.
-pub const DEFAULT_WORK_START_MIN: u32 = 9 * 60;
+pub const DEFAULT_WORK_START_MIN: u32 = 6 * 60;
 
 /// ms epoch local para un NaiveDateTime (mismo convenio que `ai::nl`).
 pub fn local_ms(dt: NaiveDateTime) -> i64 {
@@ -232,7 +232,7 @@ impl Default for ConstraintEngine {
             blocks: Vec::new(),
             deadlines: Vec::new(),
             availability: Vec::new(),
-            working_hours: Some(DayWindow { start_min: 9 * 60, end_min: 18 * 60 }),
+            working_hours: Some(DayWindow { start_min: 6 * 60, end_min: 22 * 60 }),
             sleep: None,
             preferences: Vec::new(),
             min_duration_min: None,
@@ -346,7 +346,7 @@ impl ConstraintEngine {
                                             });
                                         }
                                         // cap más temprano sobre el horario por
-                                        // defecto (09:00) → reemplaza el inicio
+                                        // defecto (06:00) → reemplaza el inicio
                                         Some(w) if w.start_min == DEFAULT_WORK_START_MIN => {
                                             e.working_hours = Some(DayWindow {
                                                 start_min: min,
@@ -556,7 +556,8 @@ impl ConstraintEngine {
     /// Reglas:
     /// - `duration_min < min_duration_min` → `None` (duración insuficiente).
     /// - Escanea `lookahead_days` días desde hoy, en pasos de `step_min`
-    ///   sobre los intervalos libres.
+    ///   sobre los intervalos libres. En el día actual solo se consideran
+    ///   horas a partir de "ahora" (nunca en el pasado).
     /// - Solo candidatos sin violación hard (región permitida, sin choques,
     ///   termina antes de `deadline_ms`).
     /// - Penalización soft: minutos que el inicio de la tarea se adelanta a
@@ -581,6 +582,8 @@ impl ConstraintEngine {
         for d in 0..self.lookahead_days {
             let day = today + chrono::Duration::days(d as i64);
             for f in self.allowed_on(day) {
+                // hoy: nunca antes de "ahora" (horas pasadas no se agendan)
+                let f = clamp_today(f, day);
                 if f.end - f.start < total {
                     continue;
                 }
@@ -841,6 +844,16 @@ fn grid_ceil(ms: i64, step: i64) -> i64 {
     }
 }
 
+/// Recorta un intervalo de HOY a partir de "ahora": el planificador nunca
+/// agenda en horas ya pasadas del día actual. El resto de días no se toca.
+pub(crate) fn clamp_today(iv: Interval, day: NaiveDate) -> Interval {
+    if day != Local::now().date_naive() {
+        return iv;
+    }
+    let now = Local::now().timestamp_millis();
+    Interval { start: iv.start.max(now), end: iv.end }
+}
+
 /// Minutos desde medianoche local (hora del día) de un instante.
 fn time_of_day_min(ms: i64) -> u32 {
     Local
@@ -942,7 +955,8 @@ mod tests {
         let b = e.is_available(dt(day(1), 9, 30), dt(day(1), 10, 30));
         assert_eq!(b.len(), 2, "choca con ambos: {b:?}");
         let free = e.free_intervals_on(Local::now().date_naive() + chrono::Duration::days(1));
-        assert_eq!(free[0], iv(dt(day(1), 12, 0), dt(day(1), 18, 0)), "unión [9,12) bloqueada");
+        assert_eq!(free[0], iv(dt(day(1), 6, 0), dt(day(1), 9, 0)), "mañana libre");
+        assert_eq!(free[1], iv(dt(day(1), 12, 0), dt(day(1), 22, 0)), "unión [9,12) bloqueada");
         assert_eq!(e.available_minutes(dt(day(1), 9, 0), dt(day(1), 18, 0)), 360);
     }
 
@@ -956,8 +970,9 @@ mod tests {
         assert!(!e.is_available(dt(day(1), 9, 0), dt(day(1), 10, 0)).is_empty(), "A ocupado");
         assert!(!e.is_available(dt(day(1), 10, 0), dt(day(1), 11, 0)).is_empty(), "B ocupado");
         let free = e.free_intervals_on(Local::now().date_naive() + chrono::Duration::days(1));
-        assert_eq!(free.len(), 1);
-        assert_eq!(free[0], iv(dt(day(1), 11, 0), dt(day(1), 18, 0)));
+        assert_eq!(free.len(), 2);
+        assert_eq!(free[0], iv(dt(day(1), 6, 0), dt(day(1), 9, 0)));
+        assert_eq!(free[1], iv(dt(day(1), 11, 0), dt(day(1), 22, 0)));
         assert_eq!(e.available_minutes(dt(day(1), 9, 0), dt(day(1), 18, 0)), 7 * 60);
     }
 
@@ -998,7 +1013,7 @@ mod tests {
         e.deadlines.push(Deadline { at_ms: dt(day(3), 10, 0), label: "entrega".into() });
         let slot = e.suggest_slot(300, 0, None, None).unwrap();
         assert!(slot.task_end_ms <= dt(day(3), 10, 0), "5h antes del vencimiento: {slot:?}");
-        assert_eq!(slot.task_start_ms, dt(day(1), 9, 0), "primer slot hábil");
+        assert_eq!(slot.task_start_ms, dt(day(1), 6, 0), "primer slot hábil");
     }
 
     // ------------------------------------------------------------------
@@ -1011,9 +1026,9 @@ mod tests {
         e.min_duration_min = Some(120);
         e.lookahead_days = 2;
         assert!(e.suggest_slot(60, 0, None, None).is_none(), "60 < 120 → rechazado");
-        e.blocks.push(hard(iv(dt(day(1), 11, 0), dt(day(1), 18, 0)), "bloque"));
+        e.blocks.push(hard(iv(dt(day(1), 8, 0), dt(day(1), 22, 0)), "bloque"));
         let s60 = e.suggest_slot(120, 0, None, None).unwrap();
-        assert_eq!(s60.task_start_ms, dt(day(1), 9, 0));
+        assert_eq!(s60.task_start_ms, dt(day(1), 6, 0), "solo 06:00-08:00 libre");
         assert!(e.suggest_slot(240, 0, None, None).is_none(), "solo quedan 120 min");
     }
 
@@ -1026,9 +1041,9 @@ mod tests {
         let mut e = no_today(base());
         e.availability = vec![iv(dt(day(1), 8, 0), dt(day(1), 11, 0))];
         let s = e.suggest_slot(90, 0, None, None).unwrap();
-        assert_eq!(s.task_start_ms, dt(day(1), 9, 0), "intersección con horario laboral");
-        assert_eq!(s.task_end_ms, dt(day(1), 10, 30));
-        let b = e.is_available(dt(day(1), 8, 0), dt(day(1), 9, 0));
+        assert_eq!(s.task_start_ms, dt(day(1), 8, 0), "intersección con horario laboral");
+        assert_eq!(s.task_end_ms, dt(day(1), 9, 30));
+        let b = e.is_available(dt(day(1), 5, 0), dt(day(1), 6, 0));
         assert!(!b.is_empty(), "antes del horario laboral → bloqueado");
         assert!(e.is_available(dt(day(1), 14, 0), dt(day(1), 15, 0)).len() == 1);
     }
@@ -1051,6 +1066,7 @@ mod tests {
         let mut e = no_today(base());
         e.commitments.push(hard(iv(dt(day(1), 10, 0), dt(day(1), 11, 0)), "reunión"));
         e.blocks.push(hard(iv(dt(day(1), 12, 0), dt(day(1), 13, 0)), "almuerzo"));
+        e.blocks.push(hard(iv(dt(day(1), 6, 0), dt(day(1), 10, 0)), "madrugada"));
         e.deadlines.push(Deadline { at_ms: dt(day(1), 15, 0), label: "informe".into() });
         e.lookahead_days = 2;
 
@@ -1071,12 +1087,12 @@ mod tests {
 
     #[test]
     fn conflicting_constraints_infeasible() {
-        // horario 9-18 pero vencimiento a las 12:00 con 6h de tarea → imposible
+        // horario 6-22 pero vencimiento a las 08:00 con 6h de tarea → imposible
         let e = no_today(base());
-        let slot = e.suggest_slot(360, 0, Some(dt(day(1), 12, 0)), None);
-        assert!(slot.is_none(), "no cabe 6h antes de las 12");
-        let slot2 = e.suggest_slot(180, 0, Some(dt(day(1), 12, 0)), None);
-        assert_eq!(slot2.unwrap().task_end_ms, dt(day(1), 12, 0));
+        let slot = e.suggest_slot(360, 0, Some(dt(day(1), 8, 0)), None);
+        assert!(slot.is_none(), "no cabe 6h antes de las 8");
+        let slot2 = e.suggest_slot(120, 0, Some(dt(day(1), 8, 0)), None);
+        assert_eq!(slot2.unwrap().task_end_ms, dt(day(1), 8, 0), "120 min caben 06:00-08:00");
     }
 
     #[test]
@@ -1109,9 +1125,9 @@ mod tests {
     fn soft_preference_yields_when_infeasible() {
         let mut e = no_today(base());
         e.preferences.push(SoftPreference::StartAfter { minute: 17 * 60 });
-        e.commitments.push(hard(iv(dt(day(1), 17, 0), dt(day(1), 18, 0)), "fijo"));
+        e.commitments.push(hard(iv(dt(day(1), 17, 0), dt(day(1), 22, 0)), "fijo"));
         let s = e.suggest_slot(60, 0, None, None).unwrap();
-        assert_eq!(s.task_start_ms, dt(day(1), 9, 0), "cede y usa el primer hueco");
+        assert_eq!(s.task_start_ms, dt(day(1), 6, 0), "cede y usa el primer hueco");
     }
 
     #[test]
@@ -1136,9 +1152,9 @@ mod tests {
     fn preparation_occupies_contiguous_block_before() {
         let e = no_today(base());
         let s = e.suggest_slot(120, 60, None, None).unwrap();
-        assert_eq!(s.prep_start_ms, Some(dt(day(1), 9, 0)));
-        assert_eq!(s.task_start_ms, dt(day(1), 10, 0));
-        assert_eq!(s.task_end_ms, dt(day(1), 12, 0));
+        assert_eq!(s.prep_start_ms, Some(dt(day(1), 6, 0)));
+        assert_eq!(s.task_start_ms, dt(day(1), 7, 0));
+        assert_eq!(s.task_end_ms, dt(day(1), 9, 0));
         let span = Interval { start: s.prep_start_ms.unwrap(), end: s.task_end_ms };
         assert!(e.is_available(span.start, span.end).is_empty(), "prep+tarea ocupan un bloque libre");
     }
@@ -1147,7 +1163,7 @@ mod tests {
     fn preparation_plus_deadline() {
         let e = no_today(base());
         let s = e.suggest_slot(120, 60, Some(dt(day(1), 12, 30)), None).unwrap();
-        assert_eq!(s.task_end_ms, dt(day(1), 12, 0), "prep y tarea terminan antes del vencimiento");
+        assert_eq!(s.task_end_ms, dt(day(1), 9, 0), "prep y tarea terminan antes del vencimiento");
     }
 
     // ------------------------------------------------------------------
@@ -1198,10 +1214,10 @@ mod tests {
     #[test]
     fn working_hours_enforced_when_present() {
         let e = base();
-        assert!(!e.is_available(dt(day(1), 20, 0), dt(day(1), 21, 0)).is_empty());
+        assert!(!e.is_available(dt(day(1), 23, 0), dt(day(2), 0, 0)).is_empty(), "fuera del horario 06-22");
         assert!(e.is_available(dt(day(1), 17, 0), dt(day(1), 18, 0)).is_empty());
         let free = e.free_intervals_on(Local::now().date_naive() + chrono::Duration::days(1));
-        assert_eq!(free, vec![iv(dt(day(1), 9, 0), dt(day(1), 18, 0))]);
+        assert_eq!(free, vec![iv(dt(day(1), 6, 0), dt(day(1), 22, 0))]);
     }
 
     #[test]
@@ -1218,16 +1234,16 @@ mod tests {
         let mut e = no_today(base());
         e.commitments.push(hard(iv(dt(day(1), 10, 0), dt(day(1), 12, 0)), "bloque"));
         let s = e.suggest_slot(60, 0, None, None).unwrap();
-        assert_eq!(s.task_start_ms, dt(day(1), 9, 0), "9-10 primero");
+        assert_eq!(s.task_start_ms, dt(day(1), 6, 0), "6-7 primero");
     }
 
     #[test]
     fn grid_alignment_step() {
         let mut e = no_today(base());
-        e.blocks.push(hard(iv(dt(day(1), 9, 0), dt(day(1), 9, 07)), "corto"));
+        e.blocks.push(hard(iv(dt(day(1), 6, 0), dt(day(1), 6, 07)), "corto"));
         e.step_min = 15;
         let s = e.suggest_slot(60, 0, None, None).unwrap();
-        assert_eq!(s.task_start_ms, dt(day(1), 9, 15), "alinea al grid de 15'");
+        assert_eq!(s.task_start_ms, dt(day(1), 6, 15), "alinea al grid de 15'");
     }
 
     // ------------------------------------------------------------------
@@ -1249,6 +1265,16 @@ mod tests {
         e.lookahead_days = 1;
         e.blocks.push(hard(iv(dt(day(1), 0, 0), dt(day(2), 0, 0)), "todo el día"));
         assert!(e.suggest_slot(30, 0, None, None).is_none());
+    }
+
+    #[test]
+    fn suggest_never_schedules_in_past_on_today() {
+        // sin bloquear hoy, el primer intervalo del día empieza a las 06:00
+        // (antes de "ahora") → el slot propuesto nunca cae en horas pasadas.
+        let e = base();
+        let now = Local::now().timestamp_millis();
+        let s = e.suggest_slot(30, 0, None, None).unwrap();
+        assert!(s.task_start_ms >= now, "slot en el pasado: {s:?} (ahora {now})");
     }
 
     // ------------------------------------------------------------------
@@ -1371,7 +1397,7 @@ mod tests {
         assert_eq!(e.commitments.len(), 1);
         assert_eq!(e.commitments[0].label, "Clase de álgebra");
         assert_eq!(e.commitments[0].interval, iv(dt(day(1), 14, 0), dt(day(1), 16, 0)));
-        assert_eq!(e.working_hours.unwrap().start_min, 6 * 60, "daily_cap 06:00 eleva el inicio");
+        assert_eq!(e.working_hours.unwrap().start_min, 6 * 60, "daily_cap 06:00 coincide con el default");
         assert_eq!(e.deadlines.len(), 1);
         assert_eq!(e.deadlines[0].label, "Proyecto");
         assert_eq!(e.availability.len(), 1);
@@ -1387,9 +1413,9 @@ mod tests {
         let intents = vec![intent_cap("10:00")];
         let e2 = ConstraintEngine::from_intents(&intents);
         assert_eq!(e2.working_hours.unwrap().start_min, 10 * 60, "eleva el inicio por defecto");
-        let intents3 = vec![intent_cap("07:00")];
+        let intents3 = vec![intent_cap("05:00")];
         let e3 = ConstraintEngine::from_intents(&intents3);
-        assert_eq!(e3.working_hours.unwrap().start_min, 7 * 60, "cap temprano reemplaza el inicio por defecto");
+        assert_eq!(e3.working_hours.unwrap().start_min, 5 * 60, "cap temprano reemplaza el inicio por defecto");
     }
 
     #[test]

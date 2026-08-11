@@ -21,7 +21,7 @@ use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike, Weekday};
 
 use crate::ai::intent::{Intent, IntentType, Priority};
 
-use super::{time_of_day_min, Block, ConstraintEngine, Interval, Severity, MIN_MS};
+use super::{clamp_today, time_of_day_min, Block, ConstraintEngine, Interval, Severity, MIN_MS};
 
 /// Sesión individual propuesta.
 #[derive(Debug, Clone, PartialEq)]
@@ -334,6 +334,9 @@ impl Planner {
             let day_cap_left = cap.saturating_sub(*day_load.get(&day).unwrap_or(&0));
             if day_cap_left > 0 {
                 for f in engine.allowed_on(day) {
+                    // hoy: el intervalo se recorta a partir de "ahora" (no
+                    // se planifica en horas pasadas del día actual)
+                    let f = clamp_today(f, day);
                     let iv_len = ((f.end - f.start) / MIN_MS) as u32;
                     if iv_len == 0 {
                         continue;
@@ -539,9 +542,9 @@ mod tests {
             let t = Local::now().date_naive() + chrono::Duration::days(d);
             let s = super::super::local_ms(t.and_hms_opt(0, 0, 0).unwrap());
             if d == 1 {
-                block(&mut e, s + 12 * HOUR_MS, s + 24 * HOUR_MS, "tarde ocupada");
+                block(&mut e, s + 9 * HOUR_MS, s + 24 * HOUR_MS, "tarde ocupada");
             } else {
-                block(&mut e, s + 9 * HOUR_MS, s + 24 * HOUR_MS, "día ocupado");
+                block(&mut e, s + 6 * HOUR_MS, s + 24 * HOUR_MS, "día ocupado");
             }
         }
         let p = Planner { engine: e, per_day_max_min: Some(300), ..Planner::default() };
@@ -698,7 +701,7 @@ mod tests {
         for d in 1..15i64 {
             let t = Local::now().date_naive() + chrono::Duration::days(d);
             let s = super::super::local_ms(t.and_hms_opt(0, 0, 0).unwrap());
-            block(&mut e, s + 9 * HOUR_MS, s + 17 * HOUR_MS + 30 * MIN_MS, "día ocupado");
+            block(&mut e, s + 6 * HOUR_MS, s + 21 * HOUR_MS + 30 * MIN_MS, "día ocupado");
         }
         let p = planner(e);
         let report = p.plan(&[intent("Tarea", IntentType::Task, Priority::Media, 300, 0, None)]);
@@ -782,6 +785,32 @@ mod tests {
         let s1: Vec<_> = r1.items.iter().map(|i| i.sessions.clone()).collect();
         let s2: Vec<_> = r2.items.iter().map(|i| i.sessions.clone()).collect();
         assert_eq!(s1, s2, "mismo estado → mismo plan");
+    }
+
+    #[test]
+    fn plan_never_schedules_in_past_on_today() {
+        // hoy libre (sin no_today): el planner recorta los intervalos a
+        // partir de "ahora" → ninguna sesión empieza en horas pasadas.
+        let e = engine_free();
+        let p = planner(e);
+        let report = p.plan(&[intent("Hoy", IntentType::Task, Priority::Media, 60, 0, None)]);
+        let now = Local::now().timestamp_millis();
+        for s in &report.items[0].sessions {
+            assert!(s.start_ms >= now, "sesión en el pasado: {s:?} (ahora {now})");
+        }
+    }
+
+    #[test]
+    fn default_working_hours_are_06_to_22() {
+        let e = engine_free();
+        assert_eq!(
+            e.working_hours,
+            Some(DayWindow { start_min: 6 * 60, end_min: 22 * 60 }),
+            "horario unificado 06:00-22:00"
+        );
+        let day = Local::now().date_naive() + chrono::Duration::days(1);
+        let start = super::super::local_ms(day.and_hms_opt(0, 0, 0).unwrap());
+        assert_eq!(e.free_intervals_on(day), vec![Interval { start: start + 6 * HOUR_MS, end: start + 22 * HOUR_MS }]);
     }
 
     #[test]

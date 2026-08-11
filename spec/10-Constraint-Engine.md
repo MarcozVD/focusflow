@@ -61,7 +61,7 @@ texto ──► interpret() ──► IntentBatch ──► ConstraintEngine::fr
 | Bloques explícitos | `engine.blocks` | intervalo bloqueado ("tengo clase de 2 a 4") |
 | Vencimiento | `Intent::Deadline` / `deadline_ms` | el ítem debe **terminar** antes |
 | Sueño | `Night` | intervalo bloqueado, con cruce de medianoche |
-| Horario laboral | `DayWindow` (default 09:00-18:00) | fuera de la ventana → no se agenda |
+| Horario laboral | `DayWindow` (default 06:00-22:00) | fuera de la ventana → no se agenda |
 | Ventana de disponibilidad | `Intent::Availability` | región permitida = disponibilidad ∩ horario laboral |
 | Duración mínima | `min_duration_min` | `suggest_slot` rechaza tareas más cortas |
 
@@ -75,7 +75,7 @@ texto ──► interpret() ──► IntentBatch ──► ConstraintEngine::fr
 ### 2.4 Semántica de `daily_cap` (ejemplo "Don't schedule anything before 6 AM")
 
 - El cap `"HH:MM"` fija el inicio mínimo del horario laboral (hard).
-- Sobre el horario **por defecto** (09:00): el cap lo **reemplaza**.
+- Sobre el horario **por defecto** (06:00): el cap lo **reemplaza**.
 - Sobre un horario **explícito**: solo lo **eleva** (nunca lo reduce).
 
 ## 3. Consultas del motor
