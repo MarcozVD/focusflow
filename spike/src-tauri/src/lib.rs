@@ -337,6 +337,19 @@ fn ai_config_get(state: State<'_, Mutex<Db>>) -> AiConfigView {
 
 #[tauri::command]
 fn ai_config_set(state: State<'_, Mutex<Db>>, endpoint: String, model: String) -> Result<(), String> {
+    // Auto-completado: si el usuario deja un campo vacío y existe un default
+    // (variable de entorno AI_ENDPOINT/AI_MODEL), se materializa al guardar.
+    // Evita que el frontend borre el default al guardar con el campo en blanco.
+    let endpoint = if endpoint.trim().is_empty() {
+        ai::default_endpoint()
+    } else {
+        endpoint
+    };
+    let model = if model.trim().is_empty() {
+        ai::default_model()
+    } else {
+        model
+    };
     let db = state.lock().unwrap();
     db.settings_set("ai.endpoint", &endpoint).map_err(|e| e.to_string())?;
     db.settings_set("ai.model", &model).map_err(|e| e.to_string())?;
@@ -867,7 +880,11 @@ async fn assistant_turn(
                 let db = state.lock().unwrap();
                 assistant::action_mode(&db, &decision, &note)
             }
-            _ => assistant::answer_text(provider.as_ref(), &user),
+            _ => {
+                // fase 3: refs estructuradas reales (deterministas) para el frontend
+                let db = state.lock().unwrap();
+                assistant::answer_text(provider.as_ref(), &user, assistant::task_refs(&db, crate::email::now_ms()))
+            }
         }
     })
     .await
@@ -1102,6 +1119,8 @@ const SETTINGS_ONBOARDING_COMPLETED: &str = "onboarding.completed";
 struct OnboardingAiView {
     endpoint: String,
     model: String,
+    effective_endpoint: String,
+    effective_model: String,
     has_key: bool,
 }
 
@@ -1126,8 +1145,18 @@ fn onboarding_status(state: State<'_, Mutex<Db>>) -> OnboardingStatusView {
     OnboardingStatusView {
         completed,
         ai: OnboardingAiView {
-            endpoint: ai_cfg.endpoint,
-            model: ai_cfg.model,
+            endpoint: ai_cfg.endpoint.clone(),
+            model: ai_cfg.model.clone(),
+            effective_endpoint: if ai_cfg.endpoint.is_empty() {
+                ai::default_endpoint()
+            } else {
+                ai_cfg.endpoint.clone()
+            },
+            effective_model: if ai_cfg.model.is_empty() {
+                ai::default_model()
+            } else {
+                ai_cfg.model.clone()
+            },
             has_key: ai::keyring_get(ai::AI_KEY_USER).is_some(),
         },
         email,

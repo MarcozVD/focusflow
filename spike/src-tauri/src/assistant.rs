@@ -118,13 +118,28 @@ pub struct AssistantActionView {
 #[serde(tag = "type")]
 pub enum AssistantTurnView {
     /// Respuesta informativa (solo lectura).
-    Answer { text: String },
+    Answer { text: String, #[serde(default)] tasks: Vec<TaskRefView> },
     /// Propuesta de planificación (flujo de la fase 7, nada mutado aún).
     Plan { proposal: planning::PlanProposalView, note: String },
     /// Propuesta de acción concreta, pendiente de aprobación.
     Action { action: AssistantActionView },
     /// El asistente no puede/debe hacer nada con la petición.
     Nothing { text: String },
+}
+
+/// Referencia estructurada a una tarea real, con nivel de urgencia calculado
+/// de forma DETERMINISTA (sin LLM): el modelo nunca inventa tareas ni fechas.
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskRefView {
+    pub id: i64,
+    pub title: String,
+    pub cat: String,
+    pub priority: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub all_day: bool,
+    /// "URGENT" | "IMPORTANT" | "NORMAL"
+    pub level: String,
 }
 
 const MAX_TASKS_IN_CONTEXT: usize = 40;
@@ -176,6 +191,9 @@ pub fn context_snapshot(db: &Db) -> String {
 
     let engine = planning::engine_with_calendar(db);
     let mut free_days = serde_json::json!({});
+    // Ventanas libres CONCRETAS (deterministas, del motor real): el LLM puede
+    // decir "el martes 15h tienes 2 horas libres" con datos, no con agregados.
+    let mut free_windows = serde_json::json!({});
     for d in 0..7 {
         let day = today + chrono::Duration::days(d);
         let start = crate::engine::local_ms(day.and_hms_opt(0, 0, 0).unwrap());
@@ -185,7 +203,43 @@ pub fn context_snapshot(db: &Db) -> String {
             day.format("%Y-%m-%d").to_string(),
             serde_json::json!(free_min / 60),
         );
+        let windows: Vec<serde_json::Value> = engine
+            .free_intervals_on(day)
+            .iter()
+            .filter(|iv| iv.end - iv.start >= 30 * crate::engine::MIN_MS)
+            .take(8)
+            .map(|iv| {
+                let s = chrono::Local.timestamp_millis_opt(iv.start).earliest().unwrap();
+                let e = chrono::Local.timestamp_millis_opt(iv.end).earliest().unwrap();
+                serde_json::json!({
+                    "from": s.format("%H:%M").to_string(),
+                    "to": e.format("%H:%M").to_string(),
+                })
+            })
+            .collect();
+        free_windows
+            .as_object_mut()
+            .unwrap()
+            .insert(day.format("%Y-%m-%d").to_string(), serde_json::Value::Array(windows));
     }
+
+    // Horario laboral y preferencia REALES del motor (no constantes).
+    let working_hours = match engine.working_hours {
+        Some(w) => format!(
+            "{:02}:{:02}–{:02}:{:02}",
+            w.start_min / 60,
+            w.start_min % 60,
+            w.end_min / 60,
+            w.end_min % 60
+        ),
+        None => "24 horas".into(),
+    };
+    let preferred_start = engine.preferences.iter().find_map(|p| match p {
+        crate::engine::SoftPreference::StartAfter { minute } => {
+            Some(format!("{:02}:{:02}", minute / 60, minute % 60))
+        }
+        _ => None,
+    });
 
     let overdue = db
         .list()
@@ -200,13 +254,75 @@ pub fn context_snapshot(db: &Db) -> String {
     serde_json::json!({
         "today": today.format("%Y-%m-%d").to_string(),
         "now_local": chrono::Local::now().format("%H:%M").to_string(),
-        "working_hours": "06:00–22:00",
+        "working_hours": working_hours,
+        "preferred_start": preferred_start,
         "pending_tasks": tasks,
         "pending_total": total,
         "overdue": overdue,
         "free_hours_next_days": free_days,
+        "free_windows_next_days": free_windows,
     })
     .to_string()
+}
+
+/// Clasifica las tareas pendientes reales en URGENT/IMPORTANT/NORMAL con
+/// reglas deterministas (fechas y prioridad de la BD — la IA no inventa nada):
+///
+/// - URGENT: vencida (end < ahora) o vence hoy (mismo día de calendario).
+/// - IMPORTANT: prioridad alta o vence en los próximos 7 días.
+/// - NORMAL: el resto.
+///
+/// Orden estable: URGENT primero (por vencimiento), luego IMPORTANT, luego
+/// NORMAL, cada grupo ordenado por end_at. Tope de 15 para no inflar la
+/// respuesta. Solo tareas no completadas.
+pub fn task_refs(db: &Db, now: i64) -> Vec<TaskRefView> {
+    let today = chrono::Local::now().date_naive();
+    const MAX: usize = 15;
+
+    let mut refs: Vec<TaskRefView> = db
+        .list()
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter(|t| t.status != "completada")
+        .map(|t| {
+            let end_day = chrono::Local
+                .timestamp_millis_opt(t.end_at)
+                .earliest()
+                .map(|d| d.date_naive())
+                .unwrap_or(today);
+            let level = if t.end_at < now || end_day == today {
+                "URGENT"
+            } else if t.priority == "alta" || (end_day - today).num_days() <= 7 {
+                "IMPORTANT"
+            } else {
+                "NORMAL"
+            };
+            TaskRefView {
+                id: t.id,
+                title: t.title.clone(),
+                cat: t.category_id.clone(),
+                priority: t.priority.clone(),
+                start_ms: t.start_at,
+                end_ms: t.end_at,
+                all_day: t.all_day,
+                level: level.into(),
+            }
+        })
+        .collect();
+
+    let rank = |l: &str| match l {
+        "URGENT" => 0,
+        "IMPORTANT" => 1,
+        _ => 2,
+    };
+    refs.sort_by(|a, b| {
+        rank(&a.level)
+            .cmp(&rank(&b.level))
+            .then(a.end_ms.cmp(&b.end_ms))
+    });
+    refs.truncate(MAX);
+    refs
 }
 
 fn fmt_history(history: &[HistoryMsg]) -> String {
@@ -421,6 +537,15 @@ pub fn build_user_prompt(ctx: &str, text: &str, history: &[HistoryMsg]) -> Strin
     )
 }
 
+/// Error distinguible de límite de peticiones: `ia_429 [retry_after] [detalle]`.
+/// El detalle (p. ej. FreeUsageLimitError) es técnico: va al log, no al frontend.
+pub fn rate_limited_err(retry_after: Option<u64>, detail: String) -> String {
+    let wait = retry_after
+        .map(|s| format!(" {s}"))
+        .unwrap_or_default();
+    format!("ia_429{wait} {detail}")
+}
+
 /// Primera decisión del asistente: clasifica la petición (solo red).
 pub fn request_decision(
     provider: &dyn AiProvider,
@@ -430,6 +555,7 @@ pub fn request_decision(
         provider.chat_json(DECISION_SYSTEM_PROMPT, user, ASSISTANT_DECISION_SCHEMA);
     match decision {
         Ok(v) => Ok(v),
+        Err(AiError::RateLimited { retry_after, detail }) => Err(rate_limited_err(retry_after, detail)),
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
             Err(format!("ia_fail {e}"))
         }
@@ -443,7 +569,12 @@ pub fn note_from_decision(decision: &serde_json::Value) -> String {
 
 /// Modo "answer": respuesta conversacional con contexto (solo red).
 /// El usuario envía el MISMO prompt que la decisión (tiene el contexto).
-pub fn answer_text(provider: &dyn AiProvider, user: &str) -> Result<AssistantTurnView, String> {
+/// `tasks` son referencias estructuradas reales que el frontend resalta.
+pub fn answer_text(
+    provider: &dyn AiProvider,
+    user: &str,
+    tasks: Vec<TaskRefView>,
+) -> Result<AssistantTurnView, String> {
     let a: AiResult<serde_json::Value> =
         provider.chat_json(ANSWER_SYSTEM_PROMPT, user, r#"{"text":"string"}"#);
     match a {
@@ -454,9 +585,10 @@ pub fn answer_text(provider: &dyn AiProvider, user: &str) -> Result<AssistantTur
                     text: "No pude formular una respuesta. Intenta reformular la pregunta.".into(),
                 })
             } else {
-                Ok(AssistantTurnView::Answer { text: t })
+                Ok(AssistantTurnView::Answer { text: t, tasks })
             }
         }
+        Err(AiError::RateLimited { retry_after, detail }) => Err(rate_limited_err(retry_after, detail)),
         Err(e) => Err(format!("ia_fail {e}")),
     }
 }
@@ -502,7 +634,7 @@ pub fn action_mode(
     // → responder de forma conversacional, sin crear propuestas basura
     let action = match build_action(db, &action_obj, note) {
         Ok(a) => a,
-        Err(clarify) => return Ok(AssistantTurnView::Answer { text: clarify }),
+        Err(clarify) => return Ok(AssistantTurnView::Answer { text: clarify, tasks: Vec::new() }),
     };
     let payload = serde_json::to_string(&action).map_err(|e| e.to_string())?;
     let proposal_id = db.insert_assistant_action(&action.kind, &payload).map_err(|e| e.to_string())?;
@@ -549,7 +681,7 @@ pub fn assistant_turn(
     match mode {
         "plan" => plan_mode(db, text, provider, note),
         "action" => action_mode(db, &decision, &note),
-        _ => answer_text(provider, &user),
+        _ => answer_text(provider, &user, task_refs(db, crate::email::now_ms())),
     }
 }
 
@@ -677,7 +809,7 @@ mod tests {
         ]);
         let t = assistant_turn(&db(), "¿tengo tiempo hoy?", &[], Some(&p), true).unwrap();
         match t {
-            AssistantTurnView::Answer { text } => assert!(text.contains("2 horas"), "{text}"),
+            AssistantTurnView::Answer { text, .. } => assert!(text.contains("2 horas"), "{text}"),
             other => panic!("esperado Answer, got {other:?}"),
         }
     }
@@ -736,7 +868,7 @@ mod tests {
         })]);
         let turn = assistant_turn(&d, "marca eso como hecho", &[], Some(&p), true).unwrap();
         match turn {
-            AssistantTurnView::Answer { text } | AssistantTurnView::Nothing { text } => {
+            AssistantTurnView::Answer { text, .. } | AssistantTurnView::Nothing { text } => {
                 assert!(text.contains("No encontré"), "{text}")
             }
             other => panic!("esperado aclaración, got {other:?}"),
@@ -755,7 +887,7 @@ mod tests {
         })]);
         let turn = assistant_turn(&d, "marca informe como hecho", &[], Some(&p), true).unwrap();
         match turn {
-            AssistantTurnView::Answer { text } | AssistantTurnView::Nothing { text } => {
+            AssistantTurnView::Answer { text, .. } | AssistantTurnView::Nothing { text } => {
                 assert!(text.contains("varias tareas"), "{text}");
                 assert!(text.contains("Informe A") && text.contains("Informe B"), "{text}");
             }
@@ -838,5 +970,75 @@ mod tests {
         let ctx = context_snapshot(&d);
         assert!(ctx.contains("Estudiar cálculo"), "título sí va");
         assert!(!ctx.contains("secreta"), "descripción NO va");
+    }
+
+    #[test]
+    fn context_snapshot_has_real_windows_and_working_hours() {
+        // La tarea del test anterior es un compromiso del motor real → las
+        // ventanas libres de hoy se derivan de ella; el horario laboral sale
+        // del motor (default 06:00–22:00), no de una constante.
+        let d = Db::open_memory_clean_pub().unwrap();
+        d.create("Clase 10:00", "uni", "media", day_start(0) + 10 * 3_600_000, day_start(0) + 12 * 3_600_000, false).unwrap();
+        let ctx = context_snapshot(&d);
+        assert!(ctx.contains("free_windows_next_days"), "ventanas libres concretas");
+        assert!(ctx.contains("free_hours_next_days"), "agregado por día sigue");
+        assert!(ctx.contains("06:00–22:00"), "working_hours real del motor");
+        assert!(ctx.contains("\"preferred_start\":null") || ctx.contains("preferred_start"), "campo esté presente");
+    }
+
+    fn day_start(days_from_today: i64) -> i64 {
+        crate::engine::local_ms(
+            (chrono::Local::now().date_naive() + chrono::Duration::days(days_from_today))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn task_refs_classify_urgent_important_normal() {
+        let d = Db::open_memory_clean_pub().unwrap();
+        // vencida → URGENT
+        d.create("Entrega pasada", "uni", "media", day_start(-2), day_start(-1), false).unwrap();
+        // vence hoy → URGENT
+        d.create("Entrega hoy", "uni", "media", day_start(0), day_start(0) + 3_600_000, false).unwrap();
+        // prioridad alta futura → IMPORTANT
+        d.create("Parcial", "uni", "alta", day_start(5), day_start(5) + 3_600_000, false).unwrap();
+        // vence en 7 días → IMPORTANT
+        d.create("Informe 7d", "tra", "media", day_start(7), day_start(7) + 3_600_000, false).unwrap();
+        // lejana y baja → NORMAL
+        d.create("Leer libro", "per", "baja", day_start(20), day_start(20) + 3_600_000, false).unwrap();
+        // completada → excluida
+        let done = d.create("Hecha", "tra", "alta", day_start(-1), day_start(-1) + 3_600_000, false).unwrap();
+        d.set_completed(done.id, true).unwrap();
+
+        let refs = task_refs(&d, crate::email::now_ms());
+        let levels: Vec<&str> = refs.iter().map(|r| r.level.as_str()).collect();
+        assert_eq!(levels[..3], ["URGENT", "URGENT", "IMPORTANT"], "{levels:?}");
+        assert_eq!(levels[3], "IMPORTANT", "{levels:?}");
+        assert_eq!(levels[4], "NORMAL", "{levels:?}");
+        assert_eq!(refs.len(), 5, "la completada no aparece: {levels:?}");
+        assert!(!refs.iter().any(|r| r.title == "Hecha"));
+    }
+
+    #[test]
+    fn task_refs_never_invent_and_stay_under_cap() {
+        let d = Db::open_memory_clean_pub().unwrap();
+        for i in 0..40 {
+            d.create(
+                &format!("Tarea {i}"),
+                "uni",
+                "media",
+                day_start((i % 30) as i64 + 1),
+                day_start((i % 30) as i64 + 1) + 3_600_000,
+                false,
+            )
+            .unwrap();
+        }
+        let refs = task_refs(&d, crate::email::now_ms());
+        assert!(refs.len() <= 15, "topado a 15: {}", refs.len());
+        for r in &refs {
+            let t = d.get_task(r.id).unwrap().unwrap();
+            assert_eq!(r.title, t.title, "referencia real, no inventada");
+        }
     }
 }
