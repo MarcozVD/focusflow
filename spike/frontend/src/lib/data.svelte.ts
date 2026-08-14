@@ -467,22 +467,9 @@ export function takeAssistantDraft(): string {
   return t;
 }
 
-/** Mensaje amigable para el usuario; el detalle técnico queda en el log. */
-function friendlyAssistantError(e: unknown): { text: string; retryable: boolean; waitSecs?: number } {
-  const s = String(e);
-  const m = s.match(/^ia_429(?:\s+(\d+))?\s/);
-  if (m) {
-    const wait = m[1] ? Number(m[1]) : 0;
-    let text =
-      "El proveedor de IA está temporalmente saturado (límite de peticiones). Espera un momento y vuelve a intentarlo.";
-    if (wait > 0) text += ` Inténtalo de nuevo en ~${Math.round(wait)} s.`;
-    return { text, retryable: true, waitSecs: wait || undefined };
-  }
-  if (s.startsWith("Error: ia_429") || s.includes("saturado por el límite de peticiones")) {
-    return { text: "El proveedor de IA está temporalmente saturado (límite de peticiones). Inténtalo de nuevo en un momento.", retryable: true };
-  }
-  return { text: s, retryable: false };
-}
+export { friendlyAssistantError } from "./assistantError";
+import type { FriendlyAssistantError } from "./assistantError";
+export type { FriendlyAssistantError };
 
 export function clearAssistantThread() {
   store.assistantThread = [];
