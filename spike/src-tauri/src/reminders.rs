@@ -134,6 +134,19 @@ pub fn parse_reminder_minutes(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::parse_reminder_minutes;
+    use super::reminder_body;
+    use crate::store::DueReminder;
+
+    fn due(start_at: i64, all_day: bool) -> DueReminder {
+        DueReminder {
+            task_id: 1,
+            title: "Tarea".into(),
+            start_at,
+            end_at: start_at + 3_600_000,
+            all_day,
+            reminder_minutes: 60,
+        }
+    }
 
     #[test]
     fn parses_short_forms() {
@@ -157,5 +170,18 @@ mod tests {
         assert_eq!(parse_reminder_minutes(""), None);
         assert_eq!(parse_reminder_minutes("-5"), None);
         assert_eq!(parse_reminder_minutes("0d"), None);
+    }
+
+    #[test]
+    fn reminder_body_all_day_and_timed() {
+        let now = chrono::Local::now();
+        assert_eq!(reminder_body(&due(now.timestamp_millis(), true)), "Todo el día");
+        assert_eq!(
+            reminder_body(&due(now.timestamp_millis(), false)),
+            format!("Hoy a las {}", now.format("%H:%M"))
+        );
+        let mañana = now + chrono::Duration::days(1);
+        let b = reminder_body(&due(mañana.timestamp_millis(), false));
+        assert_eq!(b, format!("{} a las {}", mañana.format("%d/%m"), mañana.format("%H:%M")));
     }
 }
