@@ -133,6 +133,7 @@ fn s3_email_suggestion_accept_persists() {
         mailbox: "INBOX".into(),
         uid: 3,
         message_id: "e2e-msg-3".into(),
+        thread: Vec::new(),
         subject: "Tutoría de tesis mañana".into(),
         sender: "director@unab.edu.co".into(),
         date: "2026-08-08".into(),

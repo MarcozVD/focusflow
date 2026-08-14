@@ -11,7 +11,9 @@ use super::{AiError, AiProvider, AiResult};
 use crate::email::RawEmail;
 
 /// Limites de la minimización: solo se manda a la IA una ventana del cuerpo.
-const MAX_BODY_CHARS: usize = 900;
+/// El cuerpo completo llega del IMAP (hasta 8000); al proveedor le basta esta
+/// ventana para extraer materia, fechas e instrucciones sin mandar el buzón.
+const MAX_BODY_CHARS: usize = 4000;
 
 /// Prompt de sistema para correos. Igual esquema que el texto libre, con
 /// reglas específicas de correo: compromisos, no a la información
@@ -36,6 +38,8 @@ REGLAS:
 10. Un correo puede producir VARIOS intents (varias fechas/compromisos).
 11. Si el correo NO contiene compromisos accionables, devuelve {"intents": []}.
 12. reason: breve justificación en español, o null.
+13. HILOS: si el correo es una RESPUESTA dentro de una conversación y corrige/actualiza un compromiso mencionado antes ("corrección: la entrega es el lunes", "se pospone al viernes"), usa la fecha NUEVA en el intent. NO generes dos intents por el mismo compromiso: el correo nuevo es la versión vigente.
+14. CONTEXTO ACADÉMICO: extrae materia/asignatura y profesor cuando se mencionen ("para la materia de Arquitectura", "Profesor: X"). Pon la materia como category si es académica, y el profesor en la descripción (description) del intent si es necesario para identificarlo.
 
 Ejemplos:
 Correo: "Hola, te escribo para recordarte que el informe del proyecto se entrega el lunes 10 a las 23:59. También necesitamos verte el martes 11 a las 10:00. Un saludo."
@@ -70,9 +74,14 @@ pub fn minimize_email(raw: &RawEmail) -> String {
         clean.push_str("\n[…]");
     }
     let snippet = clean.trim();
+    let thread_line = if raw.thread.is_empty() {
+        String::new()
+    } else {
+        format!("Hilo (respuesta a): {}\n", raw.thread.join(", "))
+    };
     format!(
-        "De: {}\nAsunto: {}\nFecha: {}\n\nCuerpo:\n{}",
-        raw.sender, raw.subject, raw.date, snippet
+        "De: {}\nAsunto: {}\nFecha: {}\n{}Cuerpo:\n{}",
+        raw.sender, raw.subject, raw.date, thread_line, snippet
     )
 }
 
@@ -117,11 +126,22 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
+    /// fecha futura relativa a hoy (los fixtures no pueden caducar)
+    fn future_date(days: i64) -> String {
+        chrono::Local::now()
+            .date_naive()
+            .checked_add_signed(chrono::Duration::days(days))
+            .unwrap()
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
     fn raw(body: &str) -> RawEmail {
         RawEmail {
             mailbox: "INBOX".into(),
             uid: 1,
             message_id: "msg-1".into(),
+            thread: Vec::new(),
             subject: "Reunión".into(),
             sender: "jefe@corp.com".into(),
             date: "2026-08-08".into(),
@@ -166,13 +186,25 @@ mod tests {
     }
 
     #[test]
+    fn minimize_includes_thread_context() {
+        let mut r = raw("corrección: la entrega pasa al lunes");
+        r.thread = vec!["<msg-abc@x.com>".into(), "msg-2".into()];
+        let m = minimize_email(&r);
+        assert!(m.contains("Hilo (respuesta a)"), "{m}");
+        assert!(m.contains("msg-abc@x.com"), "{m}");
+        assert!(m.contains("corrección"), "{m}");
+    }
+
+    #[test]
     fn parse_deadline_and_event_from_email() {
+        let d1 = future_date(3);
+        let d2 = future_date(4);
         let fixture = json!({"intents": [
             {"intent_type":"deadline","title":"Informe del proyecto","category":"Trabajo",
-             "priority":"alta","deadline_date":"2026-08-10","deadline_time":"23:59",
+             "priority":"alta","deadline_date":d1,"deadline_time":"23:59",
              "confidence":0.95,"reason":"entrega explícita"},
             {"intent_type":"event","title":"Reunión","category":"Trabajo",
-             "start_date":"2026-08-11","start_time":"10:00","duration_minutes":60,
+             "start_date":d2,"start_time":"10:00","duration_minutes":60,
              "confidence":0.9,"reason":"fecha concreta"}
         ]});
         let p = DummyProvider(fixture);
@@ -187,9 +219,11 @@ mod tests {
 
     #[test]
     fn parse_availability_range() {
+        let s = future_date(1);
+        let e = future_date(9);
         let fixture = json!({"intents": [
             {"intent_type":"availability","title":"Encuesta","category":"Personal",
-             "start_date":"2026-08-05","end_date":"2026-08-23",
+             "start_date":s,"end_date":e,
              "confidence":0.9,"reason":"ventana"}
         ]});
         let p = DummyProvider(fixture);

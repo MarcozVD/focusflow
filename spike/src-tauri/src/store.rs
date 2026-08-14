@@ -1088,6 +1088,44 @@ impl Db {
         )
     }
 
+    /// Compromiso ya sugerido por OTRO correo del mismo hilo (las
+    /// referencias `In-Reply-To`/`References` permiten vincular conversación).
+    /// La corrección dentro de un hilo (título similar) NO debe duplicar la
+    /// sugerencia original: devuelve la sugerencia predecesora.
+    pub fn find_similar_suggestion_in_thread(
+        &self,
+        title: &str,
+        thread_ids: &[String],
+        exclude_email_id: Option<&str>,
+    ) -> rusqlite::Result<Option<(i64, String)>> {
+        if thread_ids.is_empty() {
+            return Ok(None);
+        }
+        let placeholders = vec!["?"; thread_ids.len()].join(",");
+        let sql = format!(
+            "SELECT id, title FROM suggested_events
+             WHERE status IN ('pending','auto_approved')
+               AND source_email_id IS NOT NULL
+               AND source_email_id IN ({placeholders})
+               AND (? IS NULL OR source_email_id != ?)
+             ORDER BY created_at ASC"
+        );
+        let mut params: Vec<&dyn rusqlite::ToSql> =
+            thread_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        params.push(&exclude_email_id);
+        params.push(&exclude_email_id);
+        let mut stmt = self.conn.prepare(&sql)?;
+        let candidates: Vec<(i64, String)> = stmt
+            .query_map(rusqlite::params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, t) in candidates {
+            if crate::store::title_similar(title, &t) {
+                return Ok(Some((id, t)));
+            }
+        }
+        Ok(None)
+    }
+
     // ---- trusted senders ----
     pub fn trusted_add(&self, sender: &str) -> rusqlite::Result<()> {
         self.conn.execute(
@@ -1572,6 +1610,30 @@ mod tests {
         db.delete_suggestion(id).unwrap();
         assert!(db.get_suggestion(id).unwrap().is_none());
         assert!(db.get_task(t.id).unwrap().is_none(), "tarea creada también borrada");
+    }
+
+    #[test]
+    fn find_similar_suggestion_in_thread_links_reply_to_parent() {
+        let db = db();
+        let start = now_ms() + 86_400_000;
+        // email-1 anuncia el compromiso ("entrega viernes")
+        ins_suggestion(&db, "email-1", "Entrega proyecto", "deadline", "Entregar proyecto", start);
+        // email-2 es respuesta del hilo (References incluye email-1) y corrige
+        let thread = vec!["email-1".to_string()];
+        let hit = db
+            .find_similar_suggestion_in_thread("Entregar proyecto", &thread, Some("email-2"))
+            .unwrap();
+        assert!(hit.is_some(), "corrección del hilo → no duplicar");
+        // sin referencias → no hay vínculo de hilo
+        let none = db
+            .find_similar_suggestion_in_thread("Entregar proyecto", &[], Some("email-2"))
+            .unwrap();
+        assert!(none.is_none());
+        // título distinto en el hilo → compromiso nuevo
+        let other = db
+            .find_similar_suggestion_in_thread("Cena de cumpleaños", &thread, Some("email-2"))
+            .unwrap();
+        assert!(other.is_none());
     }
 
     #[test]

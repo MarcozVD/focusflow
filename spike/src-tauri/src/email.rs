@@ -105,6 +105,9 @@ pub struct RawEmail {
     pub mailbox: String,
     pub uid: u32,
     pub message_id: String,
+    /// Identificadores de la conversación (In-Reply-To + References), para
+    /// detectar correcciones dentro de un hilo sin duplicar compromisos.
+    pub thread: Vec<String>,
     pub subject: String,
     pub sender: String,
     pub date: String,
@@ -331,13 +334,22 @@ pub fn fetch_mailbox(
             }
         }
 
-        let mut body_text = parse_body(&pm);
+let mut body_text = parse_body(&pm);
         body_text.truncate(MAX_BODY_CHARS);
+
+        // hilo: In-Reply-To (padre inmediato) + References (toda la cadena)
+        let thread: Vec<String> = [header("In-Reply-To"), header("References")]
+            .join(" ")
+            .split_whitespace()
+            .map(|s| s.trim_matches(|c| c == '<' || c == '>').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
 
         emails.push(RawEmail {
             mailbox: mailbox.to_string(),
             uid,
             message_id: header("Message-ID"),
+            thread,
             subject: header("Subject"),
             sender: header("From"),
             date: date_raw,
@@ -365,6 +377,7 @@ mod tests {
             mailbox: "INBOX".into(),
             uid: 1,
             message_id: "m1".into(),
+            thread: Vec::new(),
             subject: subject.into(),
             sender: sender.into(),
             date: "2026-08-08".into(),

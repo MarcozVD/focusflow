@@ -28,6 +28,10 @@ pub const PROVIDER_GEMINI: &str = "gemini";
 pub enum AiError {
     NotConfigured(String),
     Http(String),
+    /// HTTP 429 / límite de peticiones alcanzado (p. ej. FreeUsageLimitError
+    /// de Zen). `retry_after` es el `Retry-After` del servidor, si viene.
+    /// `detail` es el cuerpo técnico (solo para logs internos, no al usuario).
+    RateLimited { retry_after: Option<u64>, detail: String },
     BadResponse(String),
     InvalidJson(String),
 }
@@ -37,8 +41,72 @@ impl std::fmt::Display for AiError {
         match self {
             AiError::NotConfigured(m) => write!(f, "IA no configurada: {m}"),
             AiError::Http(m) => write!(f, "Error HTTP: {m}"),
+            AiError::RateLimited { .. } => {
+                write!(f, "El proveedor de IA está temporalmente saturado por el límite de peticiones. Espera un momento y vuelve a intentarlo.")
+            }
             AiError::BadResponse(m) => write!(f, "Respuesta inválida de la IA: {m}"),
             AiError::InvalidJson(m) => write!(f, "JSON inválido: {m}"),
+        }
+    }
+}
+
+/// Nº de reintentos por HTTP 429 (además de la primera petición).
+const MAX_RATE_LIMIT_RETRIES: u32 = 2;
+/// Límite de espera por reintento (segundos) para no bloquear el hilo demasiado.
+const MAX_RETRY_WAIT_SECS: u64 = 30;
+
+/// Lee `Retry-After`: o bien segundos, o bien una fecha HTTP (RFC 2822).
+fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    let v = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim();
+    if let Ok(secs) = v.parse::<u64>() {
+        return Some(secs.min(MAX_RETRY_WAIT_SECS));
+    }
+    let when = chrono::DateTime::parse_from_rfc2822(v).ok()?;
+    let delta = (when.with_timezone(&chrono::Utc) - chrono::Utc::now())
+        .num_seconds()
+        .max(0) as u64;
+    Some(delta.min(MAX_RETRY_WAIT_SECS).max(1))
+}
+
+fn map_http_status(
+    status: reqwest::StatusCode,
+    text: &str,
+    headers: &reqwest::header::HeaderMap,
+) -> AiError {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        AiError::RateLimited {
+            retry_after: extract_retry_after(headers),
+            detail: format!("{status} {}", text.chars().take(300).collect::<String>()),
+        }
+    } else {
+        AiError::Http(format!(
+            "{status} {}",
+            text.chars().take(300).collect::<String>()
+        ))
+    }
+}
+
+/// Reintenta con backoff exponencial mientras el error sea `RateLimited`.
+/// Después de `MAX_RATE_LIMIT_RETRIES` intentos devuelve el último error.
+fn chat_with_retry<F>(mut call: F) -> AiResult<serde_json::Value>
+where
+    F: FnMut() -> AiResult<serde_json::Value>,
+{
+    let mut attempts: u32 = 0;
+    loop {
+        match call() {
+            Err(AiError::RateLimited { retry_after, .. }) if attempts < MAX_RATE_LIMIT_RETRIES => {
+                attempts += 1;
+                // backoff: 2s -> 4s -> ... improbable llegar al tope de retries.
+                let base = 2u64 << (attempts - 1);
+                let wait = retry_after.unwrap_or(base).min(MAX_RETRY_WAIT_SECS).max(1);
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+            }
+            other => return other,
         }
     }
 }
@@ -120,31 +188,32 @@ impl AiProvider for OpenAiCompatProvider {
             "temperature": 0,
             "response_format": { "type": "json_object" }
         });
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .map_err(|e| AiError::Http(e.to_string()))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(AiError::Http(format!(
-                "{status} {}",
-                text.chars().take(300).collect::<String>()
-            )));
-        }
-        let json: serde_json::Value = resp
-            .json()
-            .map_err(|e| AiError::BadResponse(format!("no JSON: {e}")))?;
-        let content = json
-            .pointer("/choices/0/message/content")
-            .and_then(|c| c.as_str())
-            .ok_or_else(|| AiError::BadResponse("falta choices[0].message.content".into()))?;
-        let parsed = super::validation::extract_json(content)
-            .ok_or_else(|| AiError::InvalidJson("no se encontró objeto JSON".into()))?;
-        serde_json::from_value(parsed).map_err(|e| AiError::InvalidJson(e.to_string()))
+        chat_with_retry(|| {
+            let resp = self
+                .http
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send()
+                .map_err(|e| AiError::Http(e.to_string()))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let headers = resp.headers().clone();
+                let text = resp.text().unwrap_or_default();
+                return Err(map_http_status(status, &text, &headers));
+            }
+            let json: serde_json::Value = resp
+                .json()
+                .map_err(|e| AiError::BadResponse(format!("no JSON: {e}")))?;
+            let content = json
+                .pointer("/choices/0/message/content")
+                .and_then(|c| c.as_str())
+                .ok_or_else(|| AiError::BadResponse("falta choices[0].message.content".into()))?;
+            let parsed = super::validation::extract_json(content)
+                .ok_or_else(|| AiError::InvalidJson("no se encontró objeto JSON".into()))?;
+            serde_json::from_value(parsed)
+                .map_err(|e| AiError::InvalidJson(e.to_string()))
+        })
     }
 }
 
@@ -205,31 +274,32 @@ impl AiProvider for GeminiProvider {
                 serde_json::json!({"parts": [{"text": system}]});
         }
         let url = self.url();
-        let resp = self
-            .http
-            .post(&url)
-            .query(&[("key", &self.api_key)])
-            .json(&body)
-            .send()
-            .map_err(|e| AiError::Http(e.to_string()))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(AiError::Http(format!(
-                "{status} {}",
-                text.chars().take(300).collect::<String>()
-            )));
-        }
-        let json: serde_json::Value = resp
-            .json()
-            .map_err(|e| AiError::BadResponse(format!("no JSON: {e}")))?;
-        let text = json
-            .pointer("/candidates/0/content/parts/0/text")
-            .and_then(|t| t.as_str())
-            .ok_or_else(|| AiError::BadResponse("falta candidates[0].content.parts[0].text".into()))?;
-        let parsed = super::validation::extract_json(text)
-            .ok_or_else(|| AiError::InvalidJson("no se encontró objeto JSON".into()))?;
-        serde_json::from_value(parsed).map_err(|e| AiError::InvalidJson(e.to_string()))
+        chat_with_retry(|| {
+            let resp = self
+                .http
+                .post(&url)
+                .query(&[("key", &self.api_key)])
+                .json(&body)
+                .send()
+                .map_err(|e| AiError::Http(e.to_string()))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let headers = resp.headers().clone();
+                let text = resp.text().unwrap_or_default();
+                return Err(map_http_status(status, &text, &headers));
+            }
+            let json: serde_json::Value = resp
+                .json()
+                .map_err(|e| AiError::BadResponse(format!("no JSON: {e}")))?;
+            let text = json
+                .pointer("/candidates/0/content/parts/0/text")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| AiError::BadResponse("falta candidates[0].content.parts[0].text".into()))?;
+            let parsed = super::validation::extract_json(text)
+                .ok_or_else(|| AiError::InvalidJson("no se encontró objeto JSON".into()))?;
+            serde_json::from_value(parsed)
+                .map_err(|e| AiError::InvalidJson(e.to_string()))
+        })
     }
 }
 
@@ -373,5 +443,55 @@ mod tests {
         let p = GeminiProvider::new("gemini-2.5-flash".into(), "k".into());
         assert!(p.url().contains(":generateContent"));
         assert!(p.url().contains("gemini-2.5-flash"));
+    }
+
+    #[test]
+    fn retry_on_rate_limited_then_succeeds() {
+        let mut calls = 0;
+        let out = chat_with_retry(|| {
+            calls += 1;
+            match calls {
+                1 | 2 => Err(AiError::RateLimited {
+                    retry_after: Some(1), // 1s para no ralentizar el test
+                    detail: "FreeUsageLimitError".into(),
+                }),
+                _ => Ok(serde_json::json!({"ok": true})),
+            }
+        });
+        assert!(out.is_ok());
+        assert_eq!(calls, 3, "2 reintentos + éxito");
+    }
+
+    #[test]
+    fn retry_gives_up_after_max_attempts() {
+        let mut calls = 0;
+        let out = chat_with_retry(|| {
+            calls += 1;
+            Err(AiError::RateLimited {
+                retry_after: Some(1),
+                detail: "FreeUsageLimitError".into(),
+            })
+        });
+        assert!(matches!(out, Err(AiError::RateLimited { .. })));
+        assert_eq!(calls, MAX_RATE_LIMIT_RETRIES as usize + 1);
+    }
+
+    #[test]
+    fn map_status_429_is_rate_limited_else_http() {
+        let headers = reqwest::header::HeaderMap::new();
+        let rl = map_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "FreeUsageLimitError: fast read",
+            &headers,
+        );
+        match rl {
+            AiError::RateLimited { detail, retry_after } => {
+                assert!(detail.contains("FreeUsageLimitError"));
+                assert_eq!(retry_after, None);
+            }
+            other => panic!("esperaba RateLimited, got {other:?}"),
+        }
+        let h = map_http_status(reqwest::StatusCode::BAD_GATEWAY, "bad proxy", &headers);
+        assert!(matches!(h, AiError::Http(_)));
     }
 }

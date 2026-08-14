@@ -145,6 +145,18 @@ fn analyze_email(
 ) -> Result<Vec<crate::ai::intent::Intent>, String> {
     let res = ai::email_intent::parse_email_intent(raw, provider, configured);
     match res {
+        Err(AiError::RateLimited { retry_after, detail }) => {
+            crate::append_log(
+                app,
+                &format!(
+                    "email_parse_429{} uid={} {}",
+                    retry_after.map(|s| format!(" {s}")).unwrap_or_default(),
+                    raw.uid,
+                    detail
+                ),
+            );
+            Err(format!("ia_429 {detail}"))
+        }
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
             Err(format!("ia_fail {e}"))
         }
@@ -215,16 +227,30 @@ fn insert_intent_suggestion(
     let prep_min = it.preparation.as_ref().map(|p| p.minutes).unwrap_or(0);
 
     // dedupe entre correos: mismo compromiso pendiente de otro correo
-    let (dedupe_id, dedupe_note) = match db.find_similar_suggestion(&it.title, start, end, Some(&raw.message_id)) {
-        Ok(Some((id, t))) => (Some(id), format!("Ya detectado en otro correo: {t}")),
-        _ => {
-            // y contra tareas ya existentes
-            match start {
-                Some(s) => match db.find_similar_task(&it.title, s, &raw.sender) {
-                    Ok(Some((id, t))) => (Some(id), format!("Posible duplicado de: {t}")),
-                    _ => (None, String::new()),
-                },
-                None => (None, String::new()),
+    // 0) primero, corrección dentro del MISMO hilo (References/In-Reply-To):
+    //    "entrega viernes" → "corrección: entrega lunes" NO crea duplicado.
+    let thread_dedupe = if raw.thread.is_empty() {
+        None
+    } else {
+        db.find_similar_suggestion_in_thread(&it.title, &raw.thread, Some(&raw.message_id))
+            .ok()
+            .flatten()
+    };
+    let (dedupe_id, dedupe_note) = match thread_dedupe {
+        Some((id, t)) => (Some(id), format!("Corrección del mismo hilo: {t}")),
+        None => {
+            match db.find_similar_suggestion(&it.title, start, end, Some(&raw.message_id)) {
+                Ok(Some((id, t))) => (Some(id), format!("Ya detectado en otro correo: {t}")),
+                _ => {
+                    // y contra tareas ya existentes
+                    match start {
+                        Some(s) => match db.find_similar_task(&it.title, s, &raw.sender) {
+                            Ok(Some((id, t))) => (Some(id), format!("Posible duplicado de: {t}")),
+                            _ => (None, String::new()),
+                        },
+                        None => (None, String::new()),
+                    }
+                }
             }
         }
     };
