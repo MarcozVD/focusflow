@@ -735,6 +735,41 @@ mod tests {
     }
 
     #[test]
+    fn tasks_inside_multiday_allday_range_use_free_days() {
+        // Evento all-day multi-día (lunes–jueves): el día de inicio queda
+        // bloqueado por el motor, pero un vencimiento intermedio (miércoles)
+        // se planifica DENTRO del rango, en los días libres.
+        let d = clean_db();
+        let mut ev = intent("Vacaciones", IntentType::Event, 0);
+        ev.window = TimeWindow { start: Some(day(1)), end: Some(day(4)), all_day: true };
+        let mut inf = intent("Informe", IntentType::Task, 120);
+        inf.priority = Priority::Alta;
+        inf.deadline = Some(day(3) + 12 * 3_600_000); // miércoles 12:00
+        let dline = inf.deadline;
+        let view = plan_from_text(&d, "vacaciones e informe del miércoles", &[ev, inf], "local").unwrap();
+        let informe = view.items.iter().find(|i| i.title == "Informe").expect("informe planificado");
+        assert!(informe.complete, "el informe se agenda: {:?}", informe.notes);
+        let d1 = Local::now().date_naive() + chrono::Duration::days(1);
+        for s in &informe.sessions {
+            let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
+            assert_ne!(st.date_naive(), d1, "nunca dentro del día 1 (bloqueado por el evento): {s:?}");
+            assert!(s.end_ms <= dline.unwrap(), "respeta el vencimiento del miércoles: {s:?}");
+        }
+        // el evento multi-día genera su ítem de rango (fill_range_item): las
+        // sesiones cubren los días libres del rango, nunca el día 1 (bloqueado)
+        let vacaciones = view.items.iter().find(|i| i.title == "Vacaciones").expect("rango sintetizado");
+        assert_eq!(vacaciones.sessions.len(), 3, "días libres del rango (lun bloqueado): {view:?}");
+        for s in &vacaciones.sessions {
+            let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
+            assert_ne!(st.date_naive(), d1, "el propio evento no se planifica en su día 1");
+            let sd = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive();
+            let ed = Local.timestamp_millis_opt(s.end_ms).earliest().unwrap().date_naive();
+            let d4 = Local::now().date_naive() + chrono::Duration::days(4);
+            assert!(sd >= d1 && ed <= d4, "sesiones dentro del rango del evento: {s:?}");
+        }
+    }
+
+    #[test]
     fn multiday_allday_with_close_time_blocks_two_hours_before() {
         let d = clean_db();
         // cierra el jueves a las 22:00 → ocupa 20:00–22:00 de ese día
