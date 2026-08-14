@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
+  import gsap from "gsap";
   import { invoke } from "@tauri-apps/api/core";
   import { onboarding, completeOnboarding } from "./data.svelte";
 
@@ -64,7 +65,10 @@
   const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
   let step = $state(1);
-  let reduced = $state(false);
+  let reduced = $state(
+    typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
+  );
+  let stageEl = $state<HTMLElement | null>(null);
 
   let provider = $state<ProviderId>("gmail");
   let emailUser = $state("");
@@ -95,7 +99,6 @@
   }
 
   onMount(() => {
-    reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const o = onboarding();
     if (o) {
       const em = o.email;
@@ -106,9 +109,37 @@
         useSsl = em.ssl ?? true;
         emailUser = em.user || "";
       }
-      aiEndpoint = o.ai.endpoint;
-      aiModel = o.ai.model;
+      aiEndpoint = o.ai.effective_endpoint;
+      aiModel = o.ai.effective_model;
     }
+  });
+
+  // Entrada escalonada de las cards (GSAP). Se respeta prefers-reduced-motion:
+  // con reduce, las cards aparecen sin animación (solo el fade CSS global).
+  $effect(() => {
+    const s = step;
+    if (reduced || !stageEl) return;
+    const ctx = gsap.context(() => {
+      if (s === 1) {
+        gsap.from(".values > li", {
+          y: 14, opacity: 0, duration: 0.45, ease: "power2.out", stagger: 0.09, delay: 0.05,
+        });
+        gsap.from(".hero .actions", {
+          y: 10, opacity: 0, duration: 0.35, ease: "power2.out", delay: 0.3,
+        });
+      } else {
+        gsap.from(".setup .head", {
+          y: 10, opacity: 0, duration: 0.3, ease: "power2.out", delay: 0.05,
+        });
+        gsap.from(".guide .g-card", {
+          y: 16, opacity: 0, duration: 0.4, ease: "power2.out", stagger: 0.1, delay: 0.15,
+        });
+        gsap.from(".form fieldset", {
+          y: 16, opacity: 0, duration: 0.4, ease: "power2.out", stagger: 0.12, delay: 0.35,
+        });
+      }
+    }, stageEl);
+    return () => ctx.revert();
   });
 
   function pickProvider(p: ProviderId) {
@@ -241,7 +272,7 @@
 </script>
 
 {#if step === 1}
-  <div class="stage" in:fade={{ duration: reduced ? 0 : 500 }}>
+  <div class="stage" bind:this={stageEl} in:fade={{ duration: reduced ? 0 : 500 }}>
     <div class="hero">
       <div class="logo">
         <img src="/icon.png" alt="Icono de FocusFlow" width="48" height="48" />
@@ -299,7 +330,7 @@
     </div>
   </div>
 {:else}
-  <div class="stage" in:fade={{ duration: reduced ? 0 : 350 }}>
+  <div class="stage" bind:this={stageEl} in:fade={{ duration: reduced ? 0 : 350 }}>
     <div class="setup">
       <div class="head">
         <button class="back" onclick={() => (step = 1)} aria-label="Volver">←</button>
@@ -317,6 +348,20 @@
               {#each PROVIDERS[provider].steps as s}
                 <li>{s}</li>
               {/each}
+            </ol>
+          </div>
+          <div class="g-card">
+            <h2>OpenCode Zen</h2>
+            <p class="g-tip">
+              El asistente con IA entiende lenguaje natural y prepara planes de estudio, trabajo o
+              personales. La clave se guarda cifrada en Windows.
+            </p>
+            <ol class="g-steps">
+              <li>Entra en <code>opencode.ai/auth</code> y crea una cuenta o inicia sesión.</li>
+              <li>En tu panel abre <strong>API keys</strong> y copia tu clave (hay modelos gratis: <code>big-pickle</code>, <code>kimi-k3</code>…).</li>
+              <li>Pégala en <em>Clave de API</em> del formulario.</li>
+              <li>En <em>Endpoint</em> pon <code>https://opencode.ai/zen/v1</code>.</li>
+              <li>En <em>Modelo</em> pon uno válido, por ejemplo <code>big-pickle</code>.</li>
             </ol>
           </div>
         </aside>
@@ -684,6 +729,8 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    /* altura mínima compartida CORREO/IA: sin salto al cargar la configuración */
+    min-height: 300px;
   }
   .g-card h2 {
     margin: 0;
@@ -712,6 +759,12 @@
   .g-steps li::marker {
     color: var(--primary);
     font-weight: 700;
+  }
+  .g-steps code {
+    background: var(--surface-3);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 12px;
   }
 
   .form {

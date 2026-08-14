@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { fade } from "svelte/transition";
   import PlanProposal from "./PlanProposal.svelte";
   import {
     assistantThread,
     assistantBusy,
     assistantError,
+    assistantRetry,
     assistantTurn,
     assistantActionAccept,
     assistantActionReject,
@@ -16,13 +18,18 @@
     cat,
     fmtDate,
     fmtMs,
+    tasks as tasksStore,
+    openTaskDetail,
+    openTaskRemote,
     type AssistantTurn,
     type PlanProposalView,
+    type TaskRefView,
   } from "./data.svelte";
 
   const thread = $derived(assistantThread());
   const busy = $derived(assistantBusy());
   const err = $derived(assistantError());
+  const retryMsg = $derived(assistantRetry());
   const activeProposal = $derived(planProposal());
 
   let input = $state("");
@@ -30,6 +37,51 @@
   // Resultado de ACCIONES (no planes): local al componente. Los planes usan el
   // estado global `planResult` del store, que persiste al re-montar la pestaña.
   let appliedActions: Record<number, string> = $state({});
+
+  // ---- auto-scroll del hilo ----
+  // El usuario está "pegado" abajo si el scroll está a menos de umbral del
+  // final. Solo entonces se auto-desplaza al llegar mensajes nuevos; si está
+  // leyendo mensajes anteriores no se le roba el scroll y aparece el badge.
+  let threadEl = $state<HTMLDivElement | null>(null);
+  let pinned = $state(true);
+  let unseen = $state(0);
+  const PIN_EPS = 64; // px de margen respecto al fondo
+
+  function nearBottom(): boolean {
+    const el = threadEl;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_EPS;
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior = "auto") {
+    const el = threadEl;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    pinned = true;
+    unseen = 0;
+  }
+
+  function onThreadScroll() {
+    if (!threadEl) return;
+    pinned = nearBottom();
+    if (pinned) unseen = 0;
+  }
+
+  // Reacciona a cualquier cambio del hilo (mensaje nuevo, respuesta larga,
+  // plan/acción renderizada) o del estado de carga (aparece/desaparece el
+  // indicador de typing, que cambia la altura). `tick()` espera a que Svelte
+  // aplique el DOM; si no, el scrollTo mediría la altura anterior.
+  $effect(() => {
+    const n = thread.length;
+    const b = busy;
+    if (threadEl) {
+      if (pinned) {
+        void tick().then(() => scrollToBottom("smooth"));
+      } else if (b || n > 0) {
+        unseen += 1;
+      }
+    }
+  });
 
   $effect(() => {
     const draft = takeAssistantDraft();
@@ -48,7 +100,12 @@
     const t = (text ?? input).trim();
     if (!t || busy) return;
     input = "";
-    await assistantTurn(t);
+    // el mensaje del usuario se pushea al hilo de forma síncrona al entrar en
+    // assistantTurn; esperamos a que Svelte lo pinte y bajamos al hilo nuevo.
+    const p = assistantTurn(t);
+    await tick();
+    scrollToBottom();
+    await p;
   }
 
   async function acceptAction(id: number) {
@@ -87,6 +144,24 @@
     return `${fmtDate(s)} ${e && e > s ? fmtMs(s) + "–" + fmtMs(e) : fmtMs(s)}`;
   }
 
+  const TASKS_META: Record<string, { label: string; cls: string }> = {
+    URGENT: { label: "URGENTE", cls: "urgent" },
+    IMPORTANT: { label: "IMPORTANTE", cls: "important" },
+    NORMAL: { label: "NORMAL", cls: "normal" },
+  };
+
+  /** Abre una tarea real completa desde el store; si aún no está en caché,
+   *  usa el comando remoto (como el widget). */
+  function openTaskRef(ref: TaskRefView) {
+    const full = tasksStore().find((t) => t.id === ref.id);
+    if (full) openTaskDetail(full);
+    else openTaskRemote(ref.id);
+  }
+
+  function taskRefsOf(turn: AssistantTurn): TaskRefView[] {
+    return turn.type === "Answer" && turn.tasks ? turn.tasks : [];
+  }
+
   const actionLabel: Record<string, string> = {
     complete: "Marcar completada",
     reschedule: "Reagendar",
@@ -115,7 +190,7 @@
     {/each}
   </div>
 
-  <div class="thread">
+  <div class="thread" bind:this={threadEl} onscroll={onThreadScroll}>
     {#each thread as m, i (msgId(i, m))}
       {#if m.role === "user"}
         <div class="msg user">{m.text}</div>
@@ -123,6 +198,41 @@
         <div class="msg ai" transition:fade={{ duration: 160 }}>
           {#if m.turn?.type === "Answer"}
             <p class="answer">{m.turn.text}</p>
+            {#if taskRefsOf(m.turn).length > 0}
+              <div class="task-refs">
+                {#each ["URGENT", "IMPORTANT", "NORMAL"] as level}
+                  {@const refs = taskRefsOf(m.turn).filter((r) => r.level === level)}
+                  {#if refs.length > 0}
+                    <div class="task-ref-group">
+                      <p class="task-ref-level {TASKS_META[level].cls}">
+                        {TASKS_META[level].label}
+                      </p>
+                      {#each refs as r}
+                        <div class="task-ref">
+                          <div class="task-ref-body">
+                            <p class="task-ref-title">{r.title}</p>
+                            <p class="task-ref-meta">
+                              {#if r.end_ms}
+                                Vence: {fmtDate(r.end_ms)}
+                                {r.all_day ? "" : " · " + fmtMs(r.end_ms)}
+                              {/if}
+                              {#if r.priority && r.priority !== "media"}
+                                <span class="task-ref-prio prio-{r.priority}">
+                                  {r.priority === "alta" ? "Prioridad: alta" : "Prioridad: " + r.priority}
+                                </span>
+                              {/if}
+                            </p>
+                          </div>
+                          <button class="btn ghost small" onclick={() => openTaskRef(r)}>
+                            Abrir tarea
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
           {:else if m.turn?.type === "Nothing"}
             <p class="answer muted">{m.turn.text}</p>
           {:else if m.turn?.type === "Plan"}
@@ -190,6 +300,16 @@
 
     {#if err}
       <p class="error">{err}</p>
+    {/if}
+
+    {#if retryMsg && !busy}
+      <button class="retry" onclick={() => send(retryMsg)}>Reintentar</button>
+    {/if}
+
+    {#if unseen > 0}
+      <button class="goto-last" onclick={() => scrollToBottom("smooth")}>
+        Ir al último mensaje
+      </button>
     {/if}
   </div>
 
@@ -283,6 +403,106 @@
   .msg.ai.typing {
     color: var(--text-3);
   }
+  .goto-last {
+    align-self: center;
+    margin: 10px auto 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    color: var(--text-2);
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: var(--e1);
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .goto-last:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .task-refs {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .task-ref-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .task-ref-level {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    padding: 3px 10px;
+    border-radius: var(--r-full);
+    width: fit-content;
+  }
+  .task-ref-level.urgent {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+  }
+  .task-ref-level.important {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+  }
+  .task-ref-level.normal {
+    color: var(--text-2);
+    background: var(--surface-2);
+  }
+  .task-ref {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: var(--r-md);
+    padding: 8px 12px;
+    background: var(--surface-2);
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .task-ref.urgent {
+    border-left-color: var(--danger);
+  }
+  .task-ref.important {
+    border-left-color: var(--warning);
+  }
+  .task-ref.normal {
+    border-left-color: var(--border);
+  }
+  .task-ref-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .task-ref-title {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-1);
+  }
+  .task-ref-meta {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .task-ref-prio {
+    margin-left: 8px;
+    font-weight: 600;
+  }
+  .task-ref-prio.prio-alta {
+    color: var(--danger);
+  }
+  .task-ref-prio.prio-baja {
+    color: var(--text-3);
+  }
+  .btn.small {
+    padding: 5px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
   .answer {
     margin: 0;
     white-space: pre-line;
@@ -344,6 +564,20 @@
     color: var(--danger);
     font-size: 13px;
     margin: 0;
+  }
+  .retry {
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .retry:hover {
+    filter: brightness(1.08);
   }
   .row {
     display: flex;

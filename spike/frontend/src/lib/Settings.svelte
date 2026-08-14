@@ -172,8 +172,9 @@
   $effect(() => {
     const c = aiConfig();
     if (c) {
-      aiEndpoint = c.endpoint;
-      aiModel = c.model;
+      // valores efectivos: muestran el default (env) cuando el guardado está vacío
+      aiEndpoint = c.effective_endpoint;
+      aiModel = c.effective_model;
     }
   });
   $effect(() => {

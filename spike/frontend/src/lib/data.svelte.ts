@@ -154,8 +154,19 @@ export interface AssistantActionView {
   summary: string;
 }
 
+export type TaskRefView = {
+  id: number;
+  title: string;
+  cat: string;
+  priority: string;
+  start_ms: number;
+  end_ms: number;
+  all_day: boolean;
+  level: "URGENT" | "IMPORTANT" | "NORMAL";
+};
+
 export type AssistantTurn =
-  | { type: "Answer"; text: string }
+  | { type: "Answer"; text: string; tasks?: TaskRefView[] }
   | { type: "Plan"; proposal: PlanProposalView; note: string }
   | { type: "Action"; action: AssistantActionView }
   | { type: "Nothing"; text: string };
@@ -193,6 +204,8 @@ const store = $state({
   assistantThread: [] as { role: "user" | "assistant"; turn: AssistantTurn | null; text: string; at: number }[],
   assistantBusy: false,
   assistantError: "",
+  // Última petición que falló por 429; re-enviable con el botón Reintentar.
+  assistantRetry: "",
   assistantActions: 0,
   notifPrefs: null as NotifPrefsView | null,
   contextualNotif: null as ContextualNotif | null,
@@ -231,6 +244,8 @@ export const planError = () => store.planError;
 export const assistantThread = () => store.assistantThread;
 export const assistantBusy = () => store.assistantBusy;
 export const assistantError = () => store.assistantError;
+/** Petición pendiente de reintento por 429 ("" = no hay). */
+export const assistantRetry = () => store.assistantRetry;
 export const assistantActionsPending = () => store.assistantActions;
 export const onboarding = () => store.onboarding;
 export const onboardingBusy = () => store.onboardingBusy;
@@ -330,6 +345,7 @@ export async function assistantTurn(text: string): Promise<{ ok: boolean; error?
   if (!inTauri()) return { ok: false, error: "sin Tauri" };
   store.assistantBusy = true;
   store.assistantError = "";
+  store.assistantRetry = "";
   store.assistantThread.push({ role: "user", turn: null, text, at: Date.now() });
   try {
     const turn = await invoke<AssistantTurn>("assistant_turn", { text, history: historyForTurn() });
@@ -342,14 +358,16 @@ export async function assistantTurn(text: string): Promise<{ ok: boolean; error?
     await refreshTasks();
     return { ok: true };
   } catch (e) {
-    store.assistantError = String(e);
+    const friendly = friendlyAssistantError(e);
+    store.assistantError = friendly.text;
+    if (friendly.retryable) store.assistantRetry = text;
     store.assistantThread.push({
       role: "assistant",
-      turn: { type: "Nothing", text: `Error: ${String(e)}` },
+      turn: { type: "Nothing", text: friendly.text },
       text: "",
       at: Date.now(),
     });
-    return { ok: false, error: String(e) };
+    return { ok: false, error: friendly.text };
   } finally {
     store.assistantBusy = false;
   }
@@ -449,9 +467,27 @@ export function takeAssistantDraft(): string {
   return t;
 }
 
+/** Mensaje amigable para el usuario; el detalle técnico queda en el log. */
+function friendlyAssistantError(e: unknown): { text: string; retryable: boolean; waitSecs?: number } {
+  const s = String(e);
+  const m = s.match(/^ia_429(?:\s+(\d+))?\s/);
+  if (m) {
+    const wait = m[1] ? Number(m[1]) : 0;
+    let text =
+      "El proveedor de IA está temporalmente saturado (límite de peticiones). Espera un momento y vuelve a intentarlo.";
+    if (wait > 0) text += ` Inténtalo de nuevo en ~${Math.round(wait)} s.`;
+    return { text, retryable: true, waitSecs: wait || undefined };
+  }
+  if (s.startsWith("Error: ia_429") || s.includes("saturado por el límite de peticiones")) {
+    return { text: "El proveedor de IA está temporalmente saturado (límite de peticiones). Inténtalo de nuevo en un momento.", retryable: true };
+  }
+  return { text: s, retryable: false };
+}
+
 export function clearAssistantThread() {
   store.assistantThread = [];
   store.assistantError = "";
+  store.assistantRetry = "";
 }
 
 export function openTaskDetail(t: Task) {
@@ -824,7 +860,13 @@ export interface AiConfigView {
 
 export interface OnboardingStatus {
   completed: boolean;
-  ai: { endpoint: string; model: string; has_key: boolean };
+  ai: {
+    endpoint: string;
+    model: string;
+    effective_endpoint: string;
+    effective_model: string;
+    has_key: boolean;
+  };
   email: {
     host: string;
     port: number;
