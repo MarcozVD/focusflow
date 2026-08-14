@@ -231,22 +231,33 @@ impl Planner {
 
     /// Planifica todos los ítems. Los ítems ya planificados pasan a ser
     /// compromisos del motor (sin solapamientos ni doble reserva).
+    ///
+    /// El tope de carga por día ([Planner::per_day_max_min]) es GLOBAL a todo
+    /// el plan: varios ítems NO pueden llenar el mismo día por separado. Sin
+    /// esto, "organiza mi semana" con 10 tareas de 60 min las metía todas en
+    /// hoy (cada ítem tenía su propio tope y el bonus por planificar pronto
+    /// las empujaba al día 1).
     pub fn plan(&self, intents: &[Intent]) -> PlanReport {
         let mut engine = self.engine.clone();
         let mut report = PlanReport { items: Vec::new() };
+        let mut day_load: std::collections::HashMap<NaiveDate, u32> = Default::default();
         for it in order_items(intents) {
-            let planned = self.plan_item(&mut engine, &it);
+            let planned = self.plan_item(&mut engine, &it, &mut day_load);
             report.items.push(planned);
         }
         report
     }
 
-    fn plan_item(&self, engine: &mut ConstraintEngine, it: &ItemSpec) -> PlannedItem {
+    fn plan_item(
+        &self,
+        engine: &mut ConstraintEngine,
+        it: &ItemSpec,
+        day_load: &mut std::collections::HashMap<NaiveDate, u32>,
+    ) -> PlannedItem {
         let from = Local::now().date_naive();
         let mut sessions: Vec<PlanSession> = Vec::new();
         let mut notes: Vec<String> = Vec::new();
         let mut remaining = it.required_min;
-        let mut day_load: std::collections::HashMap<NaiveDate, u32> = Default::default();
         let overdue = it
             .deadline_bound_ms
             .is_some_and(|d| {
@@ -845,6 +856,33 @@ mod tests {
             it.notes
         );
         assert!(it.complete || !it.sessions.is_empty(), "al menos intenta hoy: {report:?}");
+    }
+
+    #[test]
+    fn load_cap_is_shared_across_items_not_per_item() {
+        // "organiza mi semana" con 6 tareas de 60 min: el tope diario (120)
+        // es GLOBAL → reparte en ≥3 días. Antes cada ítem tenía su propio
+        // tope y las 6 caían el primer día.
+        let e = no_today(engine_free());
+        let p = planner(e.clone());
+        let items: Vec<Intent> = (0..6)
+            .map(|i| intent(&format!("T{i}"), IntentType::Task, Priority::Media, 60, 0, None))
+            .collect();
+        let report = p.plan(&items);
+        assert!(report.items.iter().all(|it| it.complete), "todo se planifica: {report:?}");
+        let mut days: Vec<NaiveDate> = report
+            .items
+            .iter()
+            .flat_map(|it| it.sessions.iter().map(|s| {
+                Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive()
+            }))
+            .collect();
+        days.sort();
+        days.dedup();
+        assert!(days.len() >= 3, "6×60 con tope 120 → mínimo 3 días, no uno: {days:?}");
+        for it in &report.items {
+            assert_no_overlap_with(&e, it);
+        }
     }
 
     #[test]
