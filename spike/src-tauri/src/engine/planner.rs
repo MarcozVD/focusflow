@@ -247,6 +247,17 @@ impl Planner {
         let mut notes: Vec<String> = Vec::new();
         let mut remaining = it.required_min;
         let mut day_load: std::collections::HashMap<NaiveDate, u32> = Default::default();
+        let overdue = it
+            .deadline_bound_ms
+            .is_some_and(|d| {
+                chrono::Local
+                    .timestamp_millis_opt(d)
+                    .earliest()
+                    .is_some_and(|t| t.date_naive() < from)
+            });
+        if overdue {
+            notes.push("vencida: se agenda hoy para recuperarla".into());
+        }
 
         while remaining > 0 {
             let so_far = sessions.len();
@@ -322,12 +333,21 @@ impl Planner {
         let cap = self.per_day_max_min.unwrap_or(u32::MAX);
         let mut best: Option<Candidate> = None;
         let mut best_score = i64::MAX;
-        let horizon = from + chrono::Duration::days(self.horizon_days as i64);
         let deadline_day = deadline_bound_ms.and_then(|d| chrono::Local.timestamp_millis_opt(d).earliest().map(|t| t.date_naive()));
+        // Vencida (deadline anterior a hoy): se agenda HOY para recuperarla,
+        // nunca salta a mañana. El horizonte se reduce al día actual.
+        let overdue = deadline_day.is_some_and(|dd| dd < from);
+        let horizon = if overdue {
+            from
+        } else {
+            from + chrono::Duration::days(self.horizon_days as i64)
+        };
         let mut day = from;
         while day <= horizon {
             if let Some(dd) = deadline_day {
-                if day > dd {
+                // solo limita cuando el vencimiento es futuro; vencida ya
+                // está acotada por `horizon = from`
+                if !overdue && day > dd {
                     break;
                 }
             }
@@ -793,11 +813,38 @@ mod tests {
         // partir de "ahora" → ninguna sesión empieza en horas pasadas.
         let e = engine_free();
         let p = planner(e);
-        let report = p.plan(&[intent("Hoy", IntentType::Task, Priority::Media, 60, 0, None)]);
+        // "ahora" se captura ANTES de planificar: el planner agenda desde su
+        // propio ahora (≥ este valor); capturarlo después creaba una carrera
+        // de milisegundos que flakeaba el test.
         let now = Local::now().timestamp_millis();
+        let report = p.plan(&[intent("Hoy", IntentType::Task, Priority::Media, 60, 0, None)]);
         for s in &report.items[0].sessions {
             assert!(s.start_ms >= now, "sesión en el pasado: {s:?} (ahora {now})");
         }
+    }
+
+    #[test]
+    fn overdue_deadline_schedules_today_not_later() {
+        // Si queda una tarea vencida (deadline de ayer), el plan de hoy la
+        // agenda HOY para recuperarla; no se salta a mañana ni la ignora.
+        let e = engine_free();
+        let p = planner(e);
+        let today = Local::now().date_naive();
+        let past = super::super::local_ms((today - chrono::Duration::days(1)).and_hms_opt(12, 0, 0).unwrap());
+        let report = p.plan(&[intent("Vencida", IntentType::Task, Priority::Alta, 120, 0, Some(past))]);
+        let it = &report.items[0];
+        assert!(
+            it.sessions
+                .iter()
+                .all(|s| Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive() == today),
+            "vencida → sesiones HOY, nunca mañana ni más tarde: {report:?}"
+        );
+        assert!(
+            it.notes.iter().any(|n| n.contains("vencida")),
+            "explica la decisión: {:?}",
+            it.notes
+        );
+        assert!(it.complete || !it.sessions.is_empty(), "al menos intenta hoy: {report:?}");
     }
 
     #[test]
