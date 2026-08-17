@@ -330,48 +330,55 @@ fn fill_fixed_item(i: &Intent, start: i64, end: i64) -> PlannedItem {
     }
 }
 
-/// Normaliza ventanas de evento mal formadas por la IA antes de planificar:
+/// Normaliza ventanas de evento antes de planificar:
 ///
-/// - **Multi-día con hora de cierre** ("inicia hoy y finaliza el lunes del
-///   siguiente mes a las 4pm"): la IA devuelve start=hoy 00:00, end=lunes
-///   16:00 y `all_day=false` (hay hora de fin), lo que produce un bloque crudo
-///   que se solapa con todo lo intermedio. Se convierte en:
-///   1. un evento de rango todo el día (medianoche de inicio → medianoche del
-///      día de cierre), y
-///   2. un evento de cierre "<título> (entrega)" de 2 h que EMPIEZA a la hora
-///      dicha (16:00–18:00): "finaliza a las 4pm" significa que el último día
-///      se trabaja de 16:00 a 18:00, nunca de 00:00 a 16:00.
-/// - **Multi-día que termina a medianoche**: rango puro → `all_day=true`.
+/// - **Multi-día** ("inicia hoy y finaliza el lunes del siguiente mes a las
+///   4pm", "proyecto del lunes al viernes"): NADA de banner todo el día ni
+///   relleno intermedio — solo dos bloques vinculados:
+///   1. **Inicio**: si el texto da hora de inicio, ese día a esa hora (2 h);
+///      si no y el día de inicio es hoy, a la hora en que el usuario lo
+///      plantea (ahora, 2 h); si es un día futuro sin hora, marcador de
+///      todo el día solo ese día.
+///   2. **Cierre** "<título> (entrega)": si el fin lleva hora ("a las 4pm"),
+///      bloque de 2 h que EMPIEZA a esa hora (16:00–18:00, nunca 00:00–16:00);
+///      si no, marcador de todo el día del último día.
+///   Los días intermedios quedan libres: no bloquean ni causan solapes.
 /// - **Un solo día 00:00–HH:MM** ("lunes 00:00–16:00"): la IA quiso decir
 ///   "termina a las HH:MM" → bloque de cierre HH:MM–HH:MM+2h.
 fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
     const HOUR: i64 = 3_600_000;
+    let now = chrono::Local::now().timestamp_millis();
+    let today = local_midnight(now);
     let mut out: Vec<Intent> = Vec::with_capacity(intents.len());
     for i in intents {
         let mut i = i.clone();
-        if i.intent_type == IntentType::Event && !i.window.all_day {
+        if i.intent_type == IntentType::Event {
             if let (Some(s), Some(e)) = (i.window.start, i.window.end) {
                 if e > s {
                     let s_day = local_midnight(s);
                     let e_day = local_midnight(e);
                     if e_day > s_day {
-                        // multi-día: banner todo el día + cierre con hora
-                        let closing = if e > e_day {
-                            let mut c = i.clone();
-                            c.title = format!("{} (entrega)", i.title);
-                            c.window = TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false };
-                            Some(c)
+                        // inicio
+                        i.window = if s > s_day {
+                            TimeWindow { start: Some(s), end: Some(s + 2 * HOUR), all_day: false }
+                        } else if s_day <= today {
+                            TimeWindow { start: Some(now), end: Some(now + 2 * HOUR), all_day: false }
                         } else {
-                            None
+                            TimeWindow { start: Some(s_day), end: Some(s_day + DAY_MS), all_day: true }
                         };
-                        i.window = TimeWindow { start: Some(s_day), end: Some(e_day), all_day: true };
                         out.push(i);
-                        if let Some(c) = closing {
-                            out.push(c);
-                        }
+                        // cierre
+                        let mut c = out.last().unwrap().clone();
+                        c.title = format!("{} (entrega)", c.title);
+                        c.window = if e > e_day {
+                            TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false }
+                        } else {
+                            TimeWindow { start: Some(e_day), end: Some(e_day + DAY_MS), all_day: true }
+                        };
+                        out.push(c);
                         continue;
                     }
-                    if s == s_day {
+                    if !i.window.all_day && s == s_day {
                         // "00:00–16:00" del mismo día: es un cierre, no un bloque
                         i.window = TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false };
                     }
@@ -566,9 +573,9 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     let mut created: Vec<TaskRow> = Vec::new();
 
     // 1. validar los eventos del texto contra el calendario y entre sí.
-    // Los eventos de rango "todo el día" multi-día son banners: no ocupan los
-    // días intermedios, así que no se validan por solape crudo (el motor solo
-    // reserva el día inicial y el cierre).
+    // Los eventos "todo el día" son marcadores de día (inicio/cierre de un
+    // rango, etc.): no ocupan horas concretas, así que no se validan por
+    // solape crudo; solo chocan los bloques con hora (inicio/cierre).
     let event_spans: Vec<(i64, i64, String, bool)> = plan
         .understanding
         .iter()
@@ -579,10 +586,10 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         })
         .filter(|(s, e, _, _)| e > s)
         .collect();
-    let is_banner = |s: i64, e: i64, all_day: bool| all_day && local_midnight(e) > local_midnight(s);
+    let is_marker = |_s: i64, _e: i64, all_day: bool| all_day;
     let mut check_spans: Vec<(i64, i64, String)> = event_spans
         .iter()
-        .filter(|(s, e, _, ad)| !is_banner(*s, *e, *ad))
+        .filter(|(s, e, _, ad)| !is_marker(*s, *e, *ad))
         .map(|(s, e, t, _)| (*s, *e, t.clone()))
         .collect();
     check_spans.sort_by_key(|(s, _, _)| *s);
@@ -794,25 +801,27 @@ mod tests {
     }
 
     #[test]
-    fn multiday_with_closing_hour_becomes_banner_plus_closing_block() {
+    fn multiday_becomes_start_block_plus_closing_block() {
         // "proyecto de programacion, inicia hoy y finaliza el lunes a las 4pm":
-        // la IA devuelve start=hoy 00:00, end=lunes 16:00, all_day=false.
-        // Se normaliza a banner todo el día + cierre 16:00–18:00 el último día.
+        // solo dos bloques vinculados — inicio (hoy, a la hora actual) y cierre
+        // (último día 16:00–18:00). Nada de banner todo el día ni intermedios.
         let d = clean_db();
         let hour = crate::engine::HOUR_MS;
-        // algo a mitad del rango: el banner NO debe chocar con ello
+        // algo a mitad del rango: no debe chocar con nada
         d.create("Otra cosa", "otr", "media", day(2) + 10 * hour, day(2) + 11 * hour, false).unwrap();
+        let before = chrono::Local::now().timestamp_millis();
         let mut i = intent("Proyecto de programación", IntentType::Event, 0);
         i.window = TimeWindow { start: Some(day(0)), end: Some(day(5) + 16 * hour), all_day: false };
         let view = plan_from_text(&d, "proyecto, inicia hoy y finaliza el lunes a las 4pm", &[i], "ai").unwrap();
-        let banner = view
+        let inicio = view
             .understanding
             .iter()
             .find(|u| u.title == "Proyecto de programación")
-            .expect("banner del rango");
-        assert!(banner.all_day, "el rango queda todo el día");
-        assert_eq!(banner.window_start, Some(day(0)));
-        assert_eq!(banner.window_end, Some(day(5)), "banner hasta medianoche del día de cierre");
+            .expect("bloque de inicio");
+        assert!(!inicio.all_day, "el inicio es un bloque con hora, no todo el día");
+        let s0 = inicio.window_start.unwrap();
+        assert!(s0 >= before && s0 <= before + 60_000, "inicia ahora: {s0} vs {before}");
+        assert_eq!(inicio.window_end, Some(s0 + 2 * hour), "bloque de 2 h");
         let cierre = view
             .understanding
             .iter()
@@ -820,13 +829,12 @@ mod tests {
             .expect("bloque de cierre");
         assert_eq!(cierre.window_start, Some(day(5) + 16 * hour), "el cierre empieza a la hora dicha");
         assert_eq!(cierre.window_end, Some(day(5) + 18 * hour), "y dura 2 h (16:00–18:00)");
-        // aceptar: no falla por el evento intermedio y no duplica el cierre
+        // aceptar: solo 2 eventos; nada en los días intermedios
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
-        assert_eq!(created.len(), 2, "solo banner + cierre; días intermedios libres");
+        assert_eq!(created.len(), 2, "solo inicio + cierre");
+        assert!(created.iter().all(|t| !t.all_day));
         let cierres: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación (entrega)").collect();
         assert_eq!(cierres.len(), 1, "el cierre se crea una sola vez (evento, no sesión duplicada)");
-        let banners: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación").collect();
-        assert!(banners.iter().any(|t| t.all_day), "banner todo el día creado");
     }
 
     #[test]
@@ -882,20 +890,25 @@ mod tests {
     }
 
     #[test]
-    fn multiday_allday_without_duration_no_flood() {
-        // Rango multi-día: solo inicio + fin vinculados; los días intermedios
-        // quedan libres (sin sesiones sintetizadas que choquen con las tareas
-        // que el usuario cree en medio del rango).
+    fn multiday_allday_becomes_start_and_end_markers() {
+        // Rango multi-día sin horas ("proyecto del lunes al jueves"): solo
+        // marcador de inicio (lunes, todo el día) + marcador de entrega
+        // (jueves, todo el día). Los días intermedios quedan libres.
         let d = clean_db();
         let mut i = intent("Proyecto", IntentType::Event, 0);
         i.window = TimeWindow { start: Some(day(1)), end: Some(day(4)), all_day: true };
         let view = plan_from_text(&d, "proyecto del lunes al jueves", &[i], "local").unwrap();
         assert!(view.items.is_empty(), "sin relleno de los días intermedios");
+        let u = &view.understanding;
+        assert_eq!(u.len(), 2, "inicio + entrega");
+        assert_eq!(u[0].title, "Proyecto");
+        assert!(u[0].all_day);
+        assert_eq!(u[0].window_start, Some(day(1)));
+        assert_eq!(u[1].title, "Proyecto (entrega)");
+        assert_eq!(u[1].window_start, Some(day(4)));
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
-        assert_eq!(created.len(), 1, "solo el evento de rango");
-        assert!(created[0].all_day);
-        assert_eq!(created[0].start_at, day(1));
-        assert_eq!(created[0].end_at, day(4));
+        assert_eq!(created.len(), 2, "solo inicio + entrega");
+        assert!(created.iter().all(|t| t.all_day));
     }
 
     #[test]
