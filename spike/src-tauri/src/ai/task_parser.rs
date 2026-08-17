@@ -47,7 +47,10 @@ pub fn parse_task_text(
     if configured {
         match provider.chat_json(&system_prompt_now(), text, TASK_SCHEMA) {
             Ok(v) => match validation::validate_task_json(&v) {
-                Ok(t) => return Ok((t, "ai".into())),
+                Ok(mut t) => {
+                    correct_relative_day(text, &mut t);
+                    return Ok((t, "ai".into()));
+                }
                 Err(e) => {
                     // JSON inválido → no confiar, caer a heurística
                     return Err(e);
@@ -59,6 +62,22 @@ pub fn parse_task_text(
     super::nl::parse_task_nl(text)
         .map(|t| (t, "local".into()))
         .ok_or_else(|| AiError::InvalidJson("no se pudo interpretar el texto".into()))
+}
+
+/// Los modelos pequeños calculan mal el día de la semana ("el viernes" cae en
+/// otro día). Si el texto menciona UN día relativo o de la semana, la fecha
+/// determinista local manda sobre la de la IA; se conserva la hora que dio la
+/// IA. Rangos y fechas absolutas no se tocan.
+fn correct_relative_day(text: &str, t: &mut validation::ParsedTask) {
+    let Some(day_ms) = super::nl::relative_day_ms(text) else { return };
+    let Some(start_day) = super::nl::day_start_ms(t.start_ms) else { return };
+    if start_day == day_ms {
+        return;
+    }
+    let start_tod = t.start_ms - start_day;
+    let end_tod = if t.end_ms > t.start_ms { t.end_ms - start_day } else { start_tod };
+    t.start_ms = day_ms + start_tod;
+    t.end_ms = day_ms + end_tod;
 }
 
 /// ¿La configuración permite llamar a la IA?

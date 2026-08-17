@@ -192,6 +192,70 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
     None
 }
 
+/// Día mencionado SOLO de forma relativa o por nombre de día de la semana
+/// ("hoy", "mañana", "el viernes", "próximo lunes"). Devuelve la medianoche
+/// LOCAL en ms. Devuelve None ante rangos ("del lunes al viernes", "del 5 al
+/// 23"), fechas absolutas o varias menciones de día: ahí manda la IA.
+pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
+    let now = chrono::Local::now();
+    let today = now.date_naive();
+    let lower = text.to_lowercase();
+
+    // Rango de fechas → no hay un único día que corregir.
+    let range = regex::Regex::new(r"\b(del|desde|entre)\b.{0,60}\b(al|hasta)\b").ok()?;
+    if range.is_match(&lower) {
+        return None;
+    }
+
+    if lower.contains("pasado mañana") || lower.contains("pasado manana") || lower.contains("day after tomorrow") {
+        return Some(local_ms((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap()));
+    }
+    // "mañana" como fecha, no como parte del día ("de la mañana", "por la mañana").
+    let manana_es_manana = lower.contains("de la mañana")
+        || lower.contains("por la mañana")
+        || lower.contains("en la mañana")
+        || lower.contains("de la manana")
+        || lower.contains("por la manana")
+        || lower.contains("en la manana");
+    if !manana_es_manana && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow")) {
+        return Some(local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap()));
+    }
+    if lower.contains("hoy") || lower.contains("today") {
+        return Some(local_ms(today.and_hms_opt(0, 0, 0).unwrap()));
+    }
+
+    // Un único nombre de día de la semana (nombre COMPLETO: "marzo" no es
+    // "martes"); si hay dos ("de lunes a viernes") es un rango y no se toca.
+    let mut found: Option<chrono::Weekday> = None;
+    for tok in lower.split(|c: char| !c.is_alphabetic()) {
+        let wd = match tok {
+            "lunes" | "monday" => Some(chrono::Weekday::Mon),
+            "martes" | "tuesday" => Some(chrono::Weekday::Tue),
+            "miércoles" | "miercoles" | "wednesday" => Some(chrono::Weekday::Wed),
+            "jueves" | "thursday" => Some(chrono::Weekday::Thu),
+            "viernes" | "friday" => Some(chrono::Weekday::Fri),
+            "sábado" | "sabado" | "saturday" => Some(chrono::Weekday::Sat),
+            "domingo" | "sunday" => Some(chrono::Weekday::Sun),
+            _ => None,
+        };
+        if let Some(wd) = wd {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(wd);
+        }
+    }
+    let wd = found?;
+    let delta = weekday_delta(wd);
+    Some(local_ms((today + chrono::Duration::days(delta)).and_hms_opt(0, 0, 0).unwrap()))
+}
+
+/// Medianoche LOCAL (ms) del día al que pertenece un timestamp.
+pub(crate) fn day_start_ms(ms: i64) -> Option<i64> {
+    let dt = chrono::DateTime::from_timestamp_millis(ms)?.with_timezone(&chrono::Local);
+    Some(local_ms(dt.date_naive().and_hms_opt(0, 0, 0)?))
+}
+
 /// Duración desde texto: "2 horas", "durante 3h", "media hora", "for two hours",
 /// "1h30m", "half an hour". Devuelve minutos. Sin duración → None.
 pub(crate) fn duration_from_text(text: &str) -> Option<i64> {
@@ -499,6 +563,27 @@ mod tests {
         assert_eq!(t.start_ms, mon);
         assert!(t.all_day);
         assert_eq!(t.category_id, "sal");
+    }
+
+    #[test]
+    fn relative_day_ms_rules() {
+        let fri = midnight(weekday_delta(chrono::Weekday::Fri) as i64);
+        assert_eq!(relative_day_ms("reunión de programación competitiva el viernes"), Some(fri));
+        assert_eq!(
+            relative_day_ms("quiz el martes a las 6pm"),
+            Some(midnight(weekday_delta(chrono::Weekday::Tue) as i64))
+        );
+        assert_eq!(relative_day_ms("pagar internet mañana"), Some(midnight(1)));
+        assert_eq!(relative_day_ms("cita pasado mañana"), Some(midnight(2)));
+        assert_eq!(relative_day_ms("llamar hoy"), Some(midnight(0)));
+        // "de la mañana" no es la fecha "mañana"
+        assert_eq!(relative_day_ms("clase el viernes a las 10 de la mañana"), Some(fri));
+        // rangos y fechas absolutas: sin corrección
+        assert_eq!(relative_day_ms("disponible del 5 al 23 de agosto"), None);
+        assert_eq!(relative_day_ms("de lunes a viernes estudiar"), None);
+        assert_eq!(relative_day_ms("el 15 de agosto presentar informe"), None);
+        // sin día → None
+        assert_eq!(relative_day_ms("comprar leche"), None);
     }
 
     #[test]
