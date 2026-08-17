@@ -23,6 +23,24 @@
   let isWidget = $state(false);
   let bootReady = $state(false);
   let showOnboarding = $state(false);
+  // Último error de UI no capturado: sin esto, una excepción en un effect o
+  // render dejaba la app congelada sin ninguna pista visible.
+  let fatalError = $state("");
+
+  onMount(() => {
+    const onErr = (e: ErrorEvent) => {
+      fatalError = e.message || "Error inesperado de interfaz";
+    };
+    const onRej = (e: PromiseRejectionEvent) => {
+      fatalError = String(e.reason ?? "Error inesperado de interfaz");
+    };
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return () => {
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+  });
 
   const onboardingPending = $derived(showOnboarding || onboarding()?.completed === false);
 
@@ -188,6 +206,12 @@
     {#if !isWidget}
       <ContextualToast onplan={planFromNotif} />
     {/if}
+    {#if fatalError}
+      <div class="fatal" role="alert">
+        <span>Algo falló en la interfaz: {fatalError}</span>
+        <button onclick={() => (fatalError = "")}>Cerrar</button>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -233,6 +257,36 @@
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+  }
+  .fatal {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(640px, calc(100vw - 40px));
+    background: var(--surface);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-raised-lg, 0 12px 32px rgba(0, 0, 0, 0.18));
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .fatal button {
+    border: none;
+    background: var(--danger);
+    color: #fff;
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
   }
   :global([data-widget] html) {
     background: transparent;

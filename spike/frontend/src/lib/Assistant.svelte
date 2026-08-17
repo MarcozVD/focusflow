@@ -44,7 +44,13 @@
   // leyendo mensajes anteriores no se le roba el scroll y aparece el badge.
   let threadEl = $state<HTMLDivElement | null>(null);
   let pinned = $state(true);
-  let unseen = $state(0);
+  // Mensajes sin ver = tamaño del hilo − lo ya visto (derivado).
+  // OJO: antes era `unseen += 1` dentro del $effect de abajo — leer y
+  // escribir el mismo estado en un effect crea un bucle infinito de
+  // actualizaciones que congelaba la app al llegar una respuesta del
+  // asistente (el auto-scroll suave ponía pinned=false a mitad de animación).
+  let seenCount = $state(0);
+  const unseen = $derived(Math.max(0, thread.length - seenCount));
   const PIN_EPS = 64; // px de margen respecto al fondo
 
   function nearBottom(): boolean {
@@ -58,28 +64,26 @@
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
     pinned = true;
-    unseen = 0;
+    seenCount = thread.length;
   }
 
   function onThreadScroll() {
     if (!threadEl) return;
     pinned = nearBottom();
-    if (pinned) unseen = 0;
+    if (pinned) seenCount = thread.length;
   }
 
   // Reacciona a cualquier cambio del hilo (mensaje nuevo, respuesta larga,
   // plan/acción renderizada) o del estado de carga (aparece/desaparece el
   // indicador de typing, que cambia la altura). `tick()` espera a que Svelte
   // aplique el DOM; si no, el scrollTo mediría la altura anterior.
+  // Solo escribe estado vía scrollToBottom (pinned/seenCount), que este
+  // effect no lee con fines de escritura: no hay bucle.
   $effect(() => {
     const n = thread.length;
     const b = busy;
-    if (threadEl) {
-      if (pinned) {
-        void tick().then(() => scrollToBottom("smooth"));
-      } else if (b || n > 0) {
-        unseen += 1;
-      }
+    if (threadEl && pinned && (n > 0 || b)) {
+      void tick().then(() => scrollToBottom("smooth"));
     }
   });
 
