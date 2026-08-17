@@ -835,6 +835,32 @@ async fn plan_from_text(
     Ok(view)
 }
 
+/// Variante 100% local de plan_from_text: sin IA ni cooldown, para cuando el
+/// proveedor está lento/saturado y el usuario elige la interpretación rápida.
+#[tauri::command]
+async fn plan_from_text_local(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    text: String,
+) -> Result<planning::PlanProposalView, String> {
+    let text_ai = text.clone();
+    let (intents, source) = tauri::async_runtime::spawn_blocking(move || {
+        ai::intent_parser::parse_intent(&text_ai, None, false)
+            .map(|b| (b.intents, b.source))
+            .map_err(|e| format!("no se pudo interpretar el texto: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let view = {
+        let db = lock_recover(&state);
+        planning::plan_from_text(&db, &text, &intents, &source)?
+    };
+    append_log(&app, &format!("plan_created id={} source={} items={} (local)", view.id, view.source, view.items.len()));
+    let _ = app.emit("plans:changed", ());
+    Ok(view)
+}
+
 #[tauri::command]
 fn plan_proposal_get(state: State<'_, Mutex<Db>>, id: i64) -> Result<Option<planning::PlanProposalView>, String> {
     planning::get_plan(&lock_recover(&state), id)
@@ -1637,6 +1663,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             trusted_senders_add,
             trusted_senders_remove,
             plan_from_text,
+            plan_from_text_local,
             plan_proposal_get,
             plan_proposals_list,
             plan_accept,

@@ -7,6 +7,8 @@
   let showPreview = $state(false);
   let flash = $state(false);
   let flashText = $state("Tarea creada");
+  let slowAi = $state(false);
+  let slowTimer: ReturnType<typeof setTimeout> | undefined;
   let inputEl: HTMLInputElement;
 
   $effect(() => {
@@ -55,39 +57,65 @@
     return out.slice(0, 4);
   }
 
+  function showFlash(msg: string, ms: number) {
+    flashText = msg;
+    flash = true;
+    setTimeout(() => (flash = false), ms);
+  }
+
   async function confirm() {
     // guardia anti-doble-envío: Enter repetido mientras procesa no debe
     // lanzar peticiones concurrentes (duplicaba la tarea)
     if (!text.trim() || planBusy() || nlBusy()) return;
     const input = text;
-    // flujo fase 7: el texto se convierte en propuesta; el usuario la
-    // revisa y aprueba antes de tocar el calendario
-    const r = await planFromText(input);
+    // si la IA tarda más de 8 s, ofrecer la interpretación local instantánea
+    slowAi = false;
+    clearTimeout(slowTimer);
+    slowTimer = setTimeout(() => {
+      if (planBusy()) slowAi = true;
+    }, 8000);
+    try {
+      // flujo fase 7: el texto se convierte en propuesta; el usuario la
+      // revisa y aprueba antes de tocar el calendario
+      const r = await planFromText(input);
+      if (r.ok) {
+        text = "";
+        showPreview = false;
+        showFlash("Plan generado — revísalo antes de aceptar", 2000);
+        return;
+      }
+      if (r.source === "stale") return;
+      if (r.source === "error") {
+        // sin Tauri o fallo del pipeline → creación directa (comportamiento anterior)
+        const direct = await createTaskFromText(input);
+        if (direct.source === "stale") return;
+        if (direct.ok) {
+          text = "";
+          showPreview = false;
+        }
+        showFlash(direct.ok ? "Tarea creada" : "No se pudo interpretar la tarea", 1600);
+        return;
+      }
+      showFlash("No se pudo interpretar la tarea", 1600);
+    } finally {
+      clearTimeout(slowTimer);
+      slowAi = false;
+    }
+  }
+
+  /** Atajo cuando la IA va lenta: parser local de reglas, instantáneo. La
+   *  respuesta tardía de la IA se descarta sola (última petición gana). */
+  async function useLocal() {
+    if (!text.trim()) return;
+    slowAi = false;
+    const r = await planFromText(text, { local: true });
     if (r.ok) {
       text = "";
       showPreview = false;
-      flashText = "Plan generado — revísalo antes de aceptar";
-      flash = true;
-      setTimeout(() => (flash = false), 2000);
-      return;
+      showFlash("Plan generado con interpretación rápida — revísalo", 2200);
+    } else if (r.source === "error") {
+      showFlash("Tampoco se pudo interpretar localmente", 1800);
     }
-    if (r.source === "stale") return;
-    if (r.source === "error") {
-      // sin Tauri o fallo del pipeline → creación directa (comportamiento anterior)
-      const direct = await createTaskFromText(input);
-      if (direct.source === "stale") return;
-      flashText = direct.ok ? "Tarea creada" : "No se pudo interpretar la tarea";
-      if (direct.ok) {
-        text = "";
-        showPreview = false;
-      }
-      flash = true;
-      setTimeout(() => (flash = false), 1600);
-      return;
-    }
-    flashText = "No se pudo interpretar la tarea";
-    flash = true;
-    setTimeout(() => (flash = false), 1600);
   }
 </script>
 
@@ -120,6 +148,13 @@
       <button class="create" onclick={confirm} disabled={planBusy() || nlBusy()}>
         {planBusy() || nlBusy() ? "Procesando…" : "Planificar"}
       </button>
+    </div>
+  {/if}
+
+  {#if slowAi}
+    <div class="slow" transition:fade={{ duration: 150 }}>
+      <span>La IA está tardando más de lo normal.</span>
+      <button class="slow-btn" onclick={useLocal}>Usar interpretación rápida</button>
     </div>
   {/if}
 
@@ -244,6 +279,37 @@
   .create:disabled {
     opacity: 0.6;
     pointer-events: none;
+  }
+  .slow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    background: var(--surface);
+    box-shadow: var(--e2);
+    border-radius: var(--r-md);
+    padding: 8px 12px;
+    font-size: 12.5px;
+    color: var(--text-2);
+  }
+  .slow-btn {
+    border: none;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 10px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-out);
+    flex-shrink: 0;
+  }
+  .slow-btn:hover {
+    background: var(--primary-hover);
+  }
+  .slow-btn:active {
+    transform: scale(0.98);
   }
   .toast {
     position: fixed;

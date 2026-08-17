@@ -255,25 +255,33 @@ export function closePlanProposal() {
   store.planError = "";
 }
 
-/** Texto → propuesta de plan (no toca el calendario hasta aceptar). */
-export async function planFromText(text: string): Promise<{ ok: boolean; source: string; error?: string }> {
+/** Texto → propuesta de plan (no toca el calendario hasta aceptar).
+ *  `opts.local` usa el parser de reglas (instantáneo, sin IA). La última
+ *  petición gana: si el usuario pide la vía local mientras la IA sigue
+ *  pensando, la respuesta tardía de la IA se descarta. */
+let planReqId = 0;
+
+export async function planFromText(text: string, opts?: { local?: boolean }): Promise<{ ok: boolean; source: string; error?: string }> {
   if (!inTauri()) {
     store.planProposal = null;
     return { ok: false, source: "stale", error: "sin Tauri" };
   }
-  // una petición a la vez: llamadas concurrentes duplicaban la propuesta
-  if (store.planBusy) return { ok: false, source: "stale", error: "ya hay una propuesta en curso" };
+  const myId = ++planReqId;
   store.planBusy = true;
   store.planError = "";
   try {
-    const view = await invoke<PlanProposalView>("plan_from_text", { text });
+    const view = opts?.local
+      ? await invoke<PlanProposalView>("plan_from_text_local", { text })
+      : await invoke<PlanProposalView>("plan_from_text", { text });
+    if (myId !== planReqId) return { ok: false, source: "stale", error: "reemplazada" };
     store.planProposal = view;
     return { ok: true, source: view.source };
   } catch (e) {
+    if (myId !== planReqId) return { ok: false, source: "stale", error: "reemplazada" };
     store.planError = String(e);
     return { ok: false, source: "error", error: String(e) };
   } finally {
-    store.planBusy = false;
+    if (myId === planReqId) store.planBusy = false;
   }
 }
 
