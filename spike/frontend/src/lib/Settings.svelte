@@ -88,6 +88,17 @@
   let aiModel = $state("");
   let aiKey = $state("");
   const aiHttp = $derived(/^https:\/\//i.test(aiEndpoint.trim()));
+
+  /** Presets de proveedores gratuitos compatibles con OpenAI chat completions. */
+  const AI_PRESETS = [
+    { label: "Groq · recomendado", endpoint: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+    { label: "OpenCode Zen", endpoint: "https://opencode.ai/zen/v1", model: "big-pickle" },
+    { label: "Gemini (AI Studio)", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-2.5-flash" },
+  ];
+  function pickAiPreset(p: { endpoint: string; model: string }) {
+    aiEndpoint = p.endpoint;
+    aiModel = p.model;
+  }
   let emailHost = $state("");
   let emailPort = $state(993);
   let emailUser = $state("");
@@ -408,6 +419,16 @@
         </li>
       </ol>
     </details>
+    <div class="pills">
+      {#each AI_PRESETS as p}
+        <button
+          class="pill {aiEndpoint === p.endpoint ? 'on' : ''}"
+          onclick={() => pickAiPreset(p)}
+        >
+          {p.label}
+        </button>
+      {/each}
+    </div>
     <div class="grid">
       <label>Endpoint (base URL)
         <input type="text" bind:value={aiEndpoint} placeholder="https://…/v1" />
@@ -963,6 +984,32 @@
   .btn:disabled {
     opacity: 0.5;
     pointer-events: none;
+  }
+  .pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    border: none;
+    background: var(--surface-2);
+    color: var(--text-2);
+    border-radius: var(--r-full);
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .pill:hover {
+    color: var(--primary);
+    background: var(--surface-3);
+  }
+  .pill.on {
+    background: var(--primary-soft);
+    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
+    color: var(--primary);
   }
   .sync-run {
     background: var(--surface-2);

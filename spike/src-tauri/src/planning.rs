@@ -357,6 +357,26 @@ fn fill_range_item(engine: &ConstraintEngine, i: &Intent, start: i64, end: i64) 
     })
 }
 
+/// Ítem trivial para compromisos de hora fija ("domingo viaje 7am"): no hay
+/// nada que optimizar — el plan es el propio bloque, tal como lo pidió el
+/// usuario. Sin esto la propuesta salía vacía ("nada que planificar").
+fn fill_fixed_item(i: &Intent, start: i64, end: i64) -> PlannedItem {
+    let mins = ((end - start).max(0) / 60_000) as u32;
+    PlannedItem {
+        title: i.title.clone(),
+        intent_type: i.intent_type,
+        priority: i.priority,
+        deadline_bound_ms: None,
+        prep_min: 0,
+        task_min: mins,
+        required_min: mins,
+        planned_min: mins,
+        sessions: vec![crate::engine::planner::PlanSession { start_ms: start, end_ms: end, is_prep: false }],
+        complete: true,
+        notes: Vec::new(),
+    }
+}
+
 fn apply_intents(base: &mut ConstraintEngine, intents: &[Intent]) {
     let ie = ConstraintEngine::from_intents(intents);
     base.commitments.extend(ie.commitments);
@@ -426,6 +446,21 @@ pub fn plan_from_text(
         if let Some(item) = fill_range_item(&engine, i, s, en) {
             report.items.push(item);
         }
+    }
+    // Compromisos de hora fija y un solo bloque ("domingo viaje 7am",
+    // "cita el martes a las 6pm"): el plan es el propio bloque tal cual.
+    for i in intents {
+        if i.duration.is_some() || i.preparation.is_some() {
+            continue;
+        }
+        let (Some(s), Some(en)) = (i.window.start, i.window.end) else { continue };
+        if i.window.all_day || en <= s || en - s > DAY_MS {
+            continue;
+        }
+        if report.items.iter().any(|it| it.title == i.title) {
+            continue;
+        }
+        report.items.push(fill_fixed_item(i, s, en));
     }
 
     let items: Vec<PlanItemView> = report
@@ -744,6 +779,25 @@ mod tests {
             .find(|x| x.label == "Proyecto")
             .expect("deadline del día de fin");
         assert_eq!(dl.at_ms, day(4) + 22 * hour, "fecha límite al final del día (22:00)");
+    }
+
+    #[test]
+    fn fixed_slot_without_duration_proposes_the_block() {
+        // "domingo viaje 7am": compromiso de hora fija; el plan es el propio
+        // bloque tal cual (antes salía "no hay nada que planificar").
+        let d = clean_db();
+        let mut i = intent("Viaje", IntentType::Task, 0);
+        let s = day(3) + 7 * 3_600_000;
+        i.window = TimeWindow { start: Some(s), end: Some(s + 3_600_000), all_day: false };
+        let view = plan_from_text(&d, "domingo viaje 7am", &[i], "local").unwrap();
+        assert_eq!(view.items.len(), 1);
+        let it = &view.items[0];
+        assert_eq!(it.title, "Viaje");
+        assert_eq!(it.sessions.len(), 1);
+        assert_eq!(it.sessions[0].start_ms, s);
+        assert_eq!(it.sessions[0].end_ms, s + 3_600_000);
+        assert_eq!(it.planned_min, 60);
+        assert!(it.complete);
     }
 
     #[test]

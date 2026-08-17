@@ -64,6 +64,58 @@
 
   const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+  type AiPresetId = "groq" | "opencode" | "other";
+
+  interface AiPreset {
+    label: string;
+    endpoint: string;
+    model: string;
+    name: string;
+    tip: string;
+    steps: string[];
+  }
+
+  const AI_PRESETS: Record<AiPresetId, AiPreset> = {
+    groq: {
+      label: "Groq · recomendado",
+      endpoint: "https://api.groq.com/openai/v1",
+      model: "llama-3.3-70b-versatile",
+      name: "Groq — gratis y muy rápida",
+      tip: "La opción gratuita más rápida (hardware LPU): entiende tus tareas al instante. 1.000 peticiones al día gratis, sin tarjeta. La clave se guarda cifrada en Windows.",
+      steps: [
+        "Entra en console.groq.com y crea una cuenta (con Google o correo; puede pedir verificar tu teléfono).",
+        "En el menú lateral abre API Keys y pulsa Create API Key — ponle un nombre, por ejemplo focusflow.",
+        "Copia la clave (empieza por gsk_…) y pégala en el campo Clave de API.",
+        "Endpoint y Modelo ya vienen rellenados: no hace falta tocarlos.",
+      ],
+    },
+    opencode: {
+      label: "OpenCode Zen",
+      endpoint: "https://opencode.ai/zen/v1",
+      model: "big-pickle",
+      name: "OpenCode Zen",
+      tip: "Modelos gratuitos dentro de OpenCode. Pueden ir lentos o saturarse (límite de peticiones). La clave se guarda cifrada en Windows.",
+      steps: [
+        "Entra en opencode.ai/auth y crea una cuenta o inicia sesión.",
+        "En tu panel abre API keys y copia tu clave.",
+        "Pégala en el campo Clave de API.",
+        "Endpoint y Modelo ya vienen rellenados (hay otros modelos gratis: kimi-k3…).",
+      ],
+    },
+    other: {
+      label: "Otro",
+      endpoint: "",
+      model: "",
+      name: "Otro proveedor",
+      tip: "Cualquier API compatible con OpenAI chat completions funciona: Gemini (AI Studio), Cerebras, OpenRouter…",
+      steps: [
+        "Copia el endpoint base de tu proveedor (suele terminar en /v1).",
+        "Escribe el nombre exacto del modelo que quieras usar.",
+        "Pega tu clave de API en el campo Clave de API.",
+      ],
+    },
+  };
+
   let step = $state(1);
   let reduced = $state(
     typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
@@ -77,9 +129,10 @@
   let port = $state(993);
   let useSsl = $state(true);
 
-  let aiEndpoint = $state("");
-  let aiModel = $state("");
+  let aiEndpoint = $state(AI_PRESETS.groq.endpoint);
+  let aiModel = $state(AI_PRESETS.groq.model);
   let aiKey = $state("");
+  let aiPreset = $state<AiPresetId>("groq");
 
   let emailState = $state<"idle" | "loading" | "ok" | "error" | "skip">("idle");
   let aiState = $state<"idle" | "loading" | "ok" | "error" | "skip">("idle");
@@ -109,10 +162,26 @@
         useSsl = em.ssl ?? true;
         emailUser = em.user || "";
       }
-      aiEndpoint = o.ai.effective_endpoint;
-      aiModel = o.ai.effective_model;
+      const ep = (o.ai.effective_endpoint || "").toLowerCase();
+      if (ep) {
+        // configuración existente: manda sobre los valores por defecto
+        aiEndpoint = o.ai.effective_endpoint;
+        aiModel = o.ai.effective_model;
+        if (ep.includes("groq")) aiPreset = "groq";
+        else if (ep.includes("opencode")) aiPreset = "opencode";
+        else aiPreset = "other";
+      }
     }
   });
+
+  function pickAiPreset(p: AiPresetId) {
+    aiPreset = p;
+    if (p !== "other") {
+      aiEndpoint = AI_PRESETS[p].endpoint;
+      aiModel = AI_PRESETS[p].model;
+    }
+    fieldErr = {};
+  }
 
   // Entrada escalonada de las cards (GSAP). Se respeta prefers-reduced-motion:
   // con reduce, las cards aparecen sin animación (solo el fade CSS global).
@@ -351,17 +420,12 @@
             </ol>
           </div>
           <div class="g-card">
-            <h2>OpenCode Zen</h2>
-            <p class="g-tip">
-              El asistente con IA entiende lenguaje natural y prepara planes de estudio, trabajo o
-              personales. La clave se guarda cifrada en Windows.
-            </p>
+            <h2>{AI_PRESETS[aiPreset].name}</h2>
+            <p class="g-tip">{AI_PRESETS[aiPreset].tip}</p>
             <ol class="g-steps">
-              <li>Entra en <code>opencode.ai/auth</code> y crea una cuenta o inicia sesión.</li>
-              <li>En tu panel abre <strong>API keys</strong> y copia tu clave (hay modelos gratis: <code>big-pickle</code>, <code>kimi-k3</code>…).</li>
-              <li>Pégala en <em>Clave de API</em> del formulario.</li>
-              <li>En <em>Endpoint</em> pon <code>https://opencode.ai/zen/v1</code>.</li>
-              <li>En <em>Modelo</em> pon uno válido, por ejemplo <code>big-pickle</code>.</li>
+              {#each AI_PRESETS[aiPreset].steps as s}
+                <li>{s}</li>
+              {/each}
             </ol>
           </div>
         </aside>
@@ -471,6 +535,22 @@
               El asistente entiende lenguaje natural y prepara planes de estudio, trabajo o
               personales.
             </p>
+
+            <div class="frow">
+              <span class="lbl" id="ob-ai-preset">Proveedor de IA</span>
+              <div class="pills" role="group" aria-labelledby="ob-ai-preset">
+                {#each Object.entries(AI_PRESETS) as [id, p]}
+                  <button
+                    type="button"
+                    class="pill {aiPreset === id ? 'on' : ''}"
+                    onclick={() => pickAiPreset(id as AiPresetId)}
+                    aria-pressed={aiPreset === id}
+                  >
+                    {p.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
 
             <div class="frow">
               <label class="lbl" for="ob-endpoint">Endpoint de la API</label>
