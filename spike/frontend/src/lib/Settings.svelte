@@ -91,7 +91,7 @@
 
   /** Presets de proveedores gratuitos compatibles con OpenAI chat completions. */
   const AI_PRESETS = [
-    { label: "Groq · recomendado", endpoint: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+    { label: "Groq · recomendado", endpoint: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b" },
     { label: "OpenCode Zen", endpoint: "https://opencode.ai/zen/v1", model: "big-pickle" },
     { label: "Gemini (AI Studio)", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-2.5-flash" },
   ];

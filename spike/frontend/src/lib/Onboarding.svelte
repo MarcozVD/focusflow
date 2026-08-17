@@ -79,7 +79,7 @@
     groq: {
       label: "Groq · recomendado",
       endpoint: "https://api.groq.com/openai/v1",
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-120b",
       name: "Groq — gratis y muy rápida",
       tip: "La opción gratuita más rápida (hardware LPU): entiende tus tareas al instante. 1.000 peticiones al día gratis, sin tarjeta. La clave se guarda cifrada en Windows.",
       steps: [
