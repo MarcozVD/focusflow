@@ -310,53 +310,6 @@ pub fn engine_with_calendar(db: &Db) -> ConstraintEngine {
     e
 }
 
-/// Ítem sintetizado para un evento all-day multi-día sin duración: una
-/// sesión por cada ventana libre de cada día del rango (el día de inicio lo
-/// bloquea el propio evento, el día de fin se incluye hasta el cierre).
-fn fill_range_item(engine: &ConstraintEngine, i: &Intent, start: i64, end: i64) -> Option<PlannedItem> {
-    let start_day = local_midnight(start);
-    let end_day = local_midnight(end);
-    let d0 = Local.timestamp_millis_opt(start_day).earliest()?.date_naive();
-    let d1 = Local.timestamp_millis_opt(end_day).earliest()?.date_naive();
-    // fin del día en ms (medianoche del día siguiente)
-    let f_end = |d: chrono::NaiveDate| crate::engine::local_ms((d + chrono::Duration::days(1)).into());
-    let mut sessions: Vec<crate::engine::planner::PlanSession> = Vec::new();
-    let mut total = 0u32;
-    let mut d = d0;
-    while d <= d1 {
-        // `end` es medianoche del día de fin → el día completo entra (hasta el
-        // cierre del horario laboral). Con hora de cierre se recorta.
-        let is_last = d == d1;
-        let day_clip_end = if is_last && end == end_day { f_end(d) } else { end };
-        for f in engine.allowed_on(d) {
-            let s = f.start.max(start);
-            let e = f.end.min(day_clip_end);
-            if e - s < 30 * 60_000 {
-                continue;
-            }
-            sessions.push(crate::engine::planner::PlanSession { start_ms: s, end_ms: e, is_prep: false });
-            total += ((e - s) / 60_000) as u32;
-        }
-        d += chrono::Duration::days(1);
-    }
-    if sessions.is_empty() {
-        return None;
-    }
-    Some(PlannedItem {
-        title: i.title.clone(),
-        intent_type: i.intent_type,
-        priority: i.priority,
-        deadline_bound_ms: Some(end),
-        prep_min: 0,
-        task_min: total,
-        required_min: total,
-        planned_min: total,
-        sessions,
-        complete: true,
-        notes: Vec::new(),
-    })
-}
-
 /// Ítem trivial para compromisos de hora fija ("domingo viaje 7am"): no hay
 /// nada que optimizar — el plan es el propio bloque, tal como lo pidió el
 /// usuario. Sin esto la propuesta salía vacía ("nada que planificar").
@@ -482,25 +435,10 @@ pub fn plan_from_text(
             all.extend(backlog);
         }
     }
-    // Eventos all-day multi-día sin duración: no hay sesiones dimensionables,
-    // pero el usuario espera cubrir el rango. Sintetizar sesiones por día
-    // (todo el horario libre de cada día, día inicio bloqueado por el propio
-    // evento, día fin incluido).
-    for i in intents {
-        if i.intent_type != IntentType::Event || i.duration.is_some() || i.preparation.is_some() {
-            continue;
-        }
-        let (Some(s), Some(en)) = (i.window.start, i.window.end) else { continue };
-        if !i.window.all_day || en - s <= DAY_MS {
-            continue;
-        }
-        if report.items.iter().any(|it| it.title == i.title) {
-            continue;
-        }
-        if let Some(item) = fill_range_item(&engine, i, s, en) {
-            report.items.push(item);
-        }
-    }
+    // Eventos all-day multi-día ("proyecto del lunes al viernes", rangos
+    // "inicia X y finaliza Y"): NO se rellenan los días intermedios con
+    // sesiones. El rango es solo inicio + cierre vinculados; los días de en
+    // medio quedan libres para crear otras tareas sin falsos solapes.
     // Compromisos de hora fija y un solo bloque ("domingo viaje 7am",
     // "cita el martes a las 6pm"): el plan es el propio bloque tal cual.
     for i in intents {
@@ -884,6 +822,7 @@ mod tests {
         assert_eq!(cierre.window_end, Some(day(5) + 18 * hour), "y dura 2 h (16:00–18:00)");
         // aceptar: no falla por el evento intermedio y no duplica el cierre
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
+        assert_eq!(created.len(), 2, "solo banner + cierre; días intermedios libres");
         let cierres: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación (entrega)").collect();
         assert_eq!(cierres.len(), 1, "el cierre se crea una sola vez (evento, no sesión duplicada)");
         let banners: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación").collect();
@@ -943,26 +882,20 @@ mod tests {
     }
 
     #[test]
-    fn multiday_allday_without_duration_fills_range() {
+    fn multiday_allday_without_duration_no_flood() {
+        // Rango multi-día: solo inicio + fin vinculados; los días intermedios
+        // quedan libres (sin sesiones sintetizadas que choquen con las tareas
+        // que el usuario cree en medio del rango).
         let d = clean_db();
         let mut i = intent("Proyecto", IntentType::Event, 0);
         i.window = TimeWindow { start: Some(day(1)), end: Some(day(4)), all_day: true };
         let view = plan_from_text(&d, "proyecto del lunes al jueves", &[i], "local").unwrap();
-        assert_eq!(view.items.len(), 1, "se sintetiza el ítem del rango");
-        let it = &view.items[0];
-        assert_eq!(it.title, "Proyecto");
-        assert_eq!(it.sessions.len(), 3, "día inicio bloqueado por el evento, 3 días libres");
-        for s in &it.sessions {
-            let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
-            let et = Local.timestamp_millis_opt(s.end_ms).earliest().unwrap();
-            assert_eq!(st.hour(), 6, "empiezan a las 06:00");
-            assert_eq!(et.hour(), 22, "terminan a las 22:00");
-        }
-        assert_eq!(it.required_min, 3 * 16 * 60, "3 días x 16 h");
-        assert!(it.complete);
-        // aceptar crea el evento + las sesiones
+        assert!(view.items.is_empty(), "sin relleno de los días intermedios");
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
-        assert_eq!(created.len(), 4, "evento + 3 sesiones");
+        assert_eq!(created.len(), 1, "solo el evento de rango");
+        assert!(created[0].all_day);
+        assert_eq!(created[0].start_at, day(1));
+        assert_eq!(created[0].end_at, day(4));
     }
 
     #[test]
@@ -995,18 +928,9 @@ mod tests {
             assert_ne!(st.date_naive(), d1, "nunca dentro del día 1 (bloqueado por el evento): {s:?}");
             assert!(s.end_ms <= dline.unwrap(), "respeta el vencimiento del miércoles: {s:?}");
         }
-        // el evento multi-día genera su ítem de rango (fill_range_item): las
-        // sesiones cubren los días libres del rango, nunca el día 1 (bloqueado)
-        let vacaciones = view.items.iter().find(|i| i.title == "Vacaciones").expect("rango sintetizado");
-        assert_eq!(vacaciones.sessions.len(), 3, "días libres del rango (lun bloqueado): {view:?}");
-        for s in &vacaciones.sessions {
-            let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
-            assert_ne!(st.date_naive(), d1, "el propio evento no se planifica en su día 1");
-            let sd = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive();
-            let ed = Local.timestamp_millis_opt(s.end_ms).earliest().unwrap().date_naive();
-            let d4 = Local::now().date_naive() + chrono::Duration::days(4);
-            assert!(sd >= d1 && ed <= d4, "sesiones dentro del rango del evento: {s:?}");
-        }
+        // el evento multi-día NO genera sesiones de relleno: los días
+        // intermedios quedan libres para otras tareas
+        assert!(view.items.iter().all(|i| i.title != "Vacaciones"), "sin relleno del rango");
     }
 
     #[test]
