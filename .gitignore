@@ -37,6 +37,7 @@ dist/
 *.out
 logs/
 tmp/
+test-results/
 
 # ---------- SO ----------
 Thumbs.db
@@ -51,3 +52,6 @@ desktop.ini
 # ---------- graphify (output generado) ----------
 graphify-out/
 opencode.jsonc
+
+*.bat
+*.png
