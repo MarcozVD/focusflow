@@ -40,14 +40,15 @@ pub const ASSISTANT_DECISION_SCHEMA: &str = r#"{
     "start_time": "HH:MM|null",
     "duration_minutes": 60 | null
   } | null,
-  "note": "string|null — explicación breve de lo que se hará"
+  "note": "string|null — explicación breve de lo que se hará",
+  "answer": "string|null — si mode=answer, la respuesta COMPLETA aquí (2-4 frases)"
 }"#;
 
 const DECISION_SYSTEM_PROMPT: &str = r#"Eres el asistente de FocusFlow, un planificador de estudio y tiempo.
 Clasificas la petición del usuario y devuelves EXCLUSIVAMENTE un JSON con el esquema dado.
 
 REGLAS:
-1. mode = "answer" cuando la petición SOLO pide información o análisis (tiempo disponible, qué hacer hoy, qué es urgente, si vas atrasado, dudas generales). Nunca muta nada.
+1. mode = "answer" cuando la petición SOLO pide información o análisis (tiempo disponible, qué hacer hoy, qué es urgente, si vas atrasado, dudas generales). Nunca muta nada. En este caso escribe la respuesta COMPLETA en el campo "answer" (2-4 frases, español, concreta, usando SOLO los datos del contexto: para tiempo libre calcula con las horas libres; para "qué hago hoy" prioriza vencimientos; no inventes datos ni propongas mutaciones — si hace falta actuar, dile al usuario que lo pida, ej. "dime 'marca X como hecha'").
 2. mode = "plan" cuando la petición pide planificar/organizar tiempo o añadir estudio ("organiza mi semana", "planifica 4 horas de cálculo", "necesito preparar el examen"). El planificador se encarga: no rellenes action.
 3. mode = "action" SOLO para acciones concretas sobre elementos EXISTENTES o nuevas citas concretas:
    - complete: "marca como hecha/completa X" → task_title.

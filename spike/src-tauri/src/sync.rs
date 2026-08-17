@@ -57,7 +57,7 @@ pub struct SyncProgress {
 
 pub fn with_db<T>(app: &AppHandle, f: impl FnOnce(&Db) -> T) -> T {
     let state = app.state::<Mutex<Db>>();
-    let db = state.lock().unwrap();
+    let db = crate::store::lock_recover(&state);
     f(&db)
 }
 
@@ -83,11 +83,28 @@ pub fn rollback_uid(
 }
 
 /// Acepta una sugerencia: crea la tarea real y marca la sugerencia.
+/// Idempotente: solo una sugerencia `pending` puede aceptarse; re-aceptar
+/// una ya procesada devuelve la tarea existente en vez de duplicarla
+/// (auditoría 17, hallazgo #3). Las tres escrituras van en una transacción
+/// (#5): un fallo a mitad no deja sugerencia pending con tarea ya creada.
 pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, String> {
     let s = db
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sugerencia no encontrada".to_string())?;
+    if s.status != "pending" {
+        // Excepción: el flujo de auto-aprobación inserta la sugerencia ya con
+        // estado "auto_approved" y luego la acepta aquí (sin tarea aún).
+        let auto_pending = s.status == "auto_approved" && s.result_task_id.is_none();
+        if !auto_pending {
+            if let Some(task_id) = s.result_task_id {
+                if let Ok(Some(t)) = db.get_task(task_id) {
+                    return Ok(t);
+                }
+            }
+            return Err(format!("la sugerencia ya fue procesada (estado: {})", s.status));
+        }
+    }
     // Sin hora de inicio → tarea de Todo el día (hoy), nunca una hora inventada.
     let start = match s.start_at {
         Some(ms) => ms,
@@ -105,13 +122,47 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
     // Una ventana de disponibilidad se acepta como UNA tarea de todo el día
     // que abarca el rango completo (nunca una tarea por día).
     let all_day = s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at || s.kind == "availability";
-    let task = db
-        .create(&s.title, &s.category_id, &s.priority, start, end, all_day)
-        .map_err(|e| e.to_string())?;
     let status = if s.status == "auto_approved" { "auto_approved" } else { "accepted" };
-    db.set_suggestion_status(id, status).map_err(|e| e.to_string())?;
-    db.set_suggestion_result_task(id, task.id).map_err(|e| e.to_string())?;
-    Ok(task)
+    db.tx_begin().map_err(|e| e.to_string())?;
+    let result = (|| {
+        let task = db
+            .create(&s.title, &s.category_id, &s.priority, start, end, all_day)
+            .map_err(|e| e.to_string())?;
+        // Contexto de la sugerencia → descripción de la tarea: qué hay que
+        // hacer + procedencia (remitente y asunto del correo).
+        let mut desc = s.description.trim().to_string();
+        let mut src: Vec<String> = Vec::new();
+        if let Some(sender) = s.source_sender.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            src.push(format!("de {sender}"));
+        }
+        if !s.source_subject.trim().is_empty() {
+            src.push(format!("\"{}\"", s.source_subject.trim()));
+        }
+        if !src.is_empty() {
+            if !desc.is_empty() {
+                desc.push_str("\n\n");
+            }
+            desc.push_str(&format!("Correo: {}", src.join(" · ")));
+        }
+        if !desc.is_empty() {
+            db.set_description(task.id, &desc).map_err(|e| e.to_string())?;
+        }
+        db.set_suggestion_status(id, status).map_err(|e| e.to_string())?;
+        db.set_suggestion_result_task(id, task.id).map_err(|e| e.to_string())?;
+        db.get_task(task.id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "tarea no creada".to_string())
+    })();
+    match result {
+        Ok(task) => {
+            db.tx_commit().map_err(|e| e.to_string())?;
+            Ok(task)
+        }
+        Err(e) => {
+            let _ = db.tx_rollback();
+            Err(e)
+        }
+    }
 }
 
 /// Revierte la decisión: vuelve a "pending" y, si había tarea creada, la elimina.

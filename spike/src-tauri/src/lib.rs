@@ -26,12 +26,14 @@ pub mod store;
 pub mod sync;
 
 use ai::{validation::ParsedTask, AiConfig};
-use store::{Db, TaskRow};
+use store::{lock_recover, Db, TaskRow};
 
-pub(crate) fn log_dir() -> PathBuf {
+/// Directorio de log en %TEMP%. Nunca panic: si no se puede crear, el log
+/// se degrada a no-op (auditoría 17, hallazgo #6).
+pub(crate) fn log_dir() -> Option<PathBuf> {
     let d = std::env::temp_dir().join("focusflow-spike");
-    fs::create_dir_all(&d).unwrap();
-    d
+    fs::create_dir_all(&d).ok()?;
+    Some(d)
 }
 
 fn now_ms() -> u128 {
@@ -49,7 +51,7 @@ fn ai_cooldown(cmd: &str) -> Result<(), String> {
         std::sync::OnceLock::new();
     const MIN_GAP_MS: u128 = 800;
     let map = LAST.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    let mut m = map.lock().unwrap();
+    let mut m = lock_recover(map);
     let now = std::time::Instant::now();
     if let Some(prev) = m.get(cmd) {
         if now.duration_since(*prev).as_millis() < MIN_GAP_MS {
@@ -61,10 +63,11 @@ fn ai_cooldown(cmd: &str) -> Result<(), String> {
 }
 
 pub(crate) fn append_log(_app: &AppHandle, line: &str) {
+    let Some(dir) = log_dir() else { return };
     if let Ok(mut f) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_dir().join("spike.log"))
+        .open(dir.join("spike.log"))
     {
         let _ = writeln!(f, "[{}] {}", now_ms(), sanitize_log_line(line));
     }
@@ -91,7 +94,7 @@ fn log_line(app: AppHandle, line: String) {
 
 #[tauri::command]
 fn task_list(state: State<'_, Mutex<Db>>) -> Result<Vec<TaskRow>, String> {
-    state.lock().unwrap().list().map_err(|e| e.to_string())
+    lock_recover(&state).list().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -125,14 +128,14 @@ fn task_create(
 
 #[tauri::command]
 fn task_complete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64, done: bool) -> Result<(), String> {
-    state.lock().unwrap().set_completed(id, done).map_err(|e| e.to_string())?;
+    lock_recover(&state).set_completed(id, done).map_err(|e| e.to_string())?;
     let _ = app.emit("tasks:changed", ());
     Ok(())
 }
 
 #[tauri::command]
 fn task_delete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(), String> {
-    state.lock().unwrap().delete(id).map_err(|e| e.to_string())?;
+    lock_recover(&state).delete(id).map_err(|e| e.to_string())?;
     let _ = app.emit("tasks:changed", ());
     Ok(())
 }
@@ -151,7 +154,7 @@ fn task_move(
     end_at: i64,
     all_day: Option<bool>,
 ) -> Result<TaskMoveResult, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     // validación de conflictos configurables (solapamiento) antes de guardar.
     // Por defecto el movimiento se permite y solo se avisa; si el usuario activa
     // `calendar.conflict_strict` (restricciones), el movimiento conflictivo se bloquea.
@@ -208,7 +211,7 @@ fn task_update(
 
 #[tauri::command]
 fn task_duplicate(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<TaskRow, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let t = db.duplicate(id).map_err(|e| e.to_string())?.ok_or_else(|| "tarea no encontrada".to_string())?;
     drop(db);
     let _ = app.emit("tasks:changed", ());
@@ -255,7 +258,7 @@ async fn task_from_text(
     // bloqueante (hasta 90 s) y se ejecuta en otro hilo, fuera del mutex,
     // para que la app siga respondiendo mientras se interpreta el texto.
     let cfg = {
-        let db = state.lock().unwrap();
+        let db = lock_recover(&state);
         ai_config_from_db(&db)
     };
 
@@ -285,7 +288,7 @@ async fn task_from_text(
     .map_err(|e| e.to_string())??;
 
     let task = {
-        let db = state.lock().unwrap();
+        let db = lock_recover(&state);
         let t = db
             .create(&parsed.title, &parsed.category_id, &parsed.priority, parsed.start_ms, parsed.end_ms, parsed.all_day)
             .map_err(|e| e.to_string())?;
@@ -315,7 +318,7 @@ struct AiConfigView {
 
 #[tauri::command]
 fn ai_config_get(state: State<'_, Mutex<Db>>) -> AiConfigView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let cfg = ai_config_from_db(&db);
     AiConfigView {
         endpoint: cfg.endpoint.clone(),
@@ -350,7 +353,7 @@ fn ai_config_set(state: State<'_, Mutex<Db>>, endpoint: String, model: String) -
     } else {
         model
     };
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.settings_set("ai.endpoint", &endpoint).map_err(|e| e.to_string())?;
     db.settings_set("ai.model", &model).map_err(|e| e.to_string())?;
     Ok(())
@@ -375,38 +378,57 @@ struct AiTestResult {
 }
 
 #[tauri::command]
-fn ai_test(state: State<'_, Mutex<Db>>, app: AppHandle) -> AiTestResult {
+async fn ai_test(state: State<'_, Mutex<Db>>, app: AppHandle) -> Result<AiTestResult, String> {
     ai_cooldown("ai_test").ok(); // prueba manual: cooldown suave, no bloquea
-    let db = state.lock().unwrap();
-    let cfg = ai_config_from_db(&db);
+    // Lock corto solo para leer la config; la llamada de red (hasta ~4,5 min
+    // con reintentos 429) va a otro hilo y fuera del mutex, o congela todos
+    // los comandos IPC que tocan la DB (auditoría 17, hallazgo #1).
+    let cfg = {
+        let db = lock_recover(&state);
+        ai_config_from_db(&db)
+    };
     let t0 = std::time::Instant::now();
-    match ai::provider_from_config(&cfg) {
-        Ok(provider) => {
-            let model = cfg.model.clone();
-            match provider.chat_json("Devuelve exactamente: {\"ok\": true}", "ping", r#"{"ok": true}"#) {
-                Ok(_) => {
-                    append_log(&app, "ai_test_ok");
-                    AiTestResult {
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        match ai::provider_from_config(&cfg) {
+            Ok(provider) => {
+                let model = cfg.model.clone();
+                match provider.chat_json("Devuelve exactamente: {\"ok\": true}", "ping", r#"{"ok": true}"#) {
+                    Ok(_) => AiTestResult {
                         ok: true,
                         latency_ms: t0.elapsed().as_millis() as u64,
                         model,
                         error: String::new(),
-                    }
+                    },
+                    Err(e) => AiTestResult {
+                        ok: false,
+                        latency_ms: t0.elapsed().as_millis() as u64,
+                        model,
+                        error: e.to_string(),
+                    },
                 }
-                Err(e) => AiTestResult {
-                    ok: false,
-                    latency_ms: t0.elapsed().as_millis() as u64,
-                    model,
-                    error: e.to_string(),
-                },
             }
+            Err(e) => AiTestResult {
+                ok: false,
+                latency_ms: 0,
+                model: cfg.model.clone(),
+                error: e.to_string(),
+            },
         }
-        Err(e) => AiTestResult {
+    })
+    .await;
+    match res {
+        Ok(r) => {
+            if r.ok {
+                append_log(&app, "ai_test_ok");
+            }
+            Ok(r)
+        }
+        Err(e) => Ok(AiTestResult {
             ok: false,
             latency_ms: 0,
-            model: cfg.model.clone(),
+            model: String::new(),
             error: e.to_string(),
-        },
+        }),
     }
 }
 
@@ -424,7 +446,7 @@ struct EmailConfigView {
 
 #[tauri::command]
 fn email_config_get(state: State<'_, Mutex<Db>>) -> EmailConfigView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let config = sync::load_email_config(&db);
     EmailConfigView {
         has_password: ai::get_email_credentials(&config.user).is_some(),
@@ -456,7 +478,7 @@ fn email_config_set(
     interval_hours: u64,
     max_age_days: u32,
 ) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
     db.settings_set("email.config", &json).map_err(|e| e.to_string())?;
     db.settings_set("email.enabled", if enabled { "1" } else { "0" }).map_err(|e| e.to_string())?;
@@ -492,7 +514,7 @@ fn email_sync_now(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn email_rescan(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
     {
-        let db = state.lock().unwrap();
+        let db = lock_recover(&state);
         db.settings_set("email.rescan_pending", "1").map_err(|e| e.to_string())?;
     }
     append_log(&app, "email_rescan_requested");
@@ -522,48 +544,64 @@ struct VerifyResult {
 }
 
 /// Prueba ambas conexiones: API de IA (OpenCode Zen) y correo (IMAP).
+/// Async + spawn_blocking: la red (IA + IMAP, potencialmente minutos con
+/// reintentos) no puede correr en el hilo principal o congela la UI
+/// (auditoría 17, hallazgo #1).
 #[tauri::command]
-fn verify_connections(state: State<'_, Mutex<Db>>, app: AppHandle) -> VerifyResult {
+async fn verify_connections(state: State<'_, Mutex<Db>>, app: AppHandle) -> Result<VerifyResult, String> {
     ai_cooldown("verify_connections").ok(); // onboarding: cooldown suave
-    let db = state.lock().unwrap();
-    let ai_cfg = ai_config_from_db(&db);
-    let email_cfg = sync::load_email_config(&db);
-    drop(db);
+    let (ai_cfg, email_cfg) = {
+        let db = lock_recover(&state);
+        (ai_config_from_db(&db), sync::load_email_config(&db))
+    };
 
-    let ai = match ai::provider_from_config(&ai_cfg) {
-        Ok(provider) => {
-            let t0 = std::time::Instant::now();
-            match provider.chat_json("Devuelve exactamente: {\"ok\": true}", "ping", r#"{"ok": true}"#) {
-                Ok(_) => ConnectionCheck {
-                    ok: true,
-                    detail: format!("API OK ({}, {} ms)", ai_cfg.model, t0.elapsed().as_millis()),
-                },
-                Err(e) => ConnectionCheck {
-                    ok: false,
-                    detail: format!("{} ({} ms)", e, t0.elapsed().as_millis()),
-                },
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let ai = match ai::provider_from_config(&ai_cfg) {
+            Ok(provider) => {
+                let t0 = std::time::Instant::now();
+                match provider.chat_json("Devuelve exactamente: {\"ok\": true}", "ping", r#"{"ok": true}"#) {
+                    Ok(_) => ConnectionCheck {
+                        ok: true,
+                        detail: format!("API OK ({}, {} ms)", ai_cfg.model, t0.elapsed().as_millis()),
+                    },
+                    Err(e) => ConnectionCheck {
+                        ok: false,
+                        detail: format!("{} ({} ms)", e, t0.elapsed().as_millis()),
+                    },
+                }
             }
+            Err(e) => ConnectionCheck { ok: false, detail: e.to_string() },
+        };
+
+        let email = match email::test_connection(&email_cfg) {
+            Ok((mailbox, n)) => ConnectionCheck {
+                ok: true,
+                detail: format!("Conectado a {mailbox} ({n} correos)"),
+            },
+            Err(e) => ConnectionCheck { ok: false, detail: e },
+        };
+        (ai, email)
+    })
+    .await;
+
+    let result = match res {
+        Ok((ai, email)) => {
+            append_log(
+                &app,
+                &format!(
+                    "verify ai={} email={}",
+                    if ai.ok { "ok" } else { "fail" },
+                    if email.ok { "ok" } else { "fail" }
+                ),
+            );
+            VerifyResult { ai, email }
         }
-        Err(e) => ConnectionCheck { ok: false, detail: e.to_string() },
-    };
-
-    let email = match email::test_connection(&email_cfg) {
-        Ok((mailbox, n)) => ConnectionCheck {
-            ok: true,
-            detail: format!("Conectado a {mailbox} ({n} correos)"),
+        Err(e) => VerifyResult {
+            ai: ConnectionCheck { ok: false, detail: e.to_string() },
+            email: ConnectionCheck { ok: false, detail: "no ejecutado".into() },
         },
-        Err(e) => ConnectionCheck { ok: false, detail: e },
     };
-
-    append_log(
-        &app,
-        &format!(
-            "verify ai={} email={}",
-            if ai.ok { "ok" } else { "fail" },
-            if email.ok { "ok" } else { "fail" }
-        ),
-    );
-    VerifyResult { ai, email }
+    Ok(result)
 }
 
 #[derive(Serialize)]
@@ -578,7 +616,7 @@ struct SyncStatusView {
 
 #[tauri::command]
 fn sync_status(state: State<'_, Mutex<Db>>) -> SyncStatusView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let now = chrono::Local::now();
     let start_of_day = chrono::Local
         .from_local_datetime(&now.date_naive().and_hms_opt(0, 0, 0).unwrap())
@@ -604,7 +642,7 @@ fn sync_status(state: State<'_, Mutex<Db>>) -> SyncStatusView {
 
 #[tauri::command]
 fn suggestions_list(state: State<'_, Mutex<Db>>, only_pending: bool) -> Result<Vec<store::SuggestionRow>, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let retention_min: i64 = db
         .settings_get("email.suggestion_retention_minutes")
         .ok()
@@ -617,7 +655,7 @@ fn suggestions_list(state: State<'_, Mutex<Db>>, only_pending: bool) -> Result<V
 
 #[tauri::command]
 fn suggestion_accept(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<TaskRow, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let task = sync::accept_suggestion(&db, id)?;
     drop(db);
     append_log(&app, &format!("suggestion_accepted id={id} task={}", task.id));
@@ -640,7 +678,7 @@ fn suggestion_reject(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Re
 
 #[tauri::command]
 fn suggestion_revert(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     sync::revert_suggestion(&db, id)?;
     drop(db);
     append_log(&app, &format!("suggestion_reverted id={id}"));
@@ -653,7 +691,7 @@ fn suggestion_revert(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Re
 /// creada, la borra también. No se puede recuperar.
 #[tauri::command]
 fn suggestion_delete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.delete_suggestion(id).map_err(|e| e.to_string())?;
     drop(db);
     append_log(&app, &format!("suggestion_deleted id={id}"));
@@ -675,7 +713,7 @@ fn suggestion_edit(
     description: String,
     all_day: bool,
 ) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.update_suggestion_data(id, &title, &category_id, &priority, start_at, end_at, &description)
         .map_err(|e| e.to_string())?;
     // si la sugerencia ya fue aceptada, la tarea creada se mantiene en sincronía
@@ -703,7 +741,7 @@ fn suggestion_merge(
     id: i64,
     task_id: i64,
 ) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let s = db
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
@@ -717,11 +755,19 @@ fn suggestion_merge(
     let end = s.end_at.unwrap_or(existing.end_at);
     let priority = if s.priority == "media" { existing.priority.clone() } else { s.priority.clone() };
     // fusionar conserva los campos enriquecidos de la tarea existente
-    // (description/tags/notas/links/recordatorio); la sugerencia solo aporta
-    // título/fechas/prioridad/categoría
+    // (tags/notas/links/recordatorio); la descripción toma el contexto de la
+    // sugerencia cuando la tarea no lo tiene, o lo añade si aporta algo nuevo
+    let sug_desc = s.description.trim();
+    let description = if existing.description.trim().is_empty() {
+        sug_desc.to_string()
+    } else if !sug_desc.is_empty() && !existing.description.contains(sug_desc) {
+        format!("{}\n\n{}", existing.description.trim(), sug_desc)
+    } else {
+        existing.description.clone()
+    };
     db.update_task_full(
         task_id, &title, &s.category_id, &priority, start, end,
-        &existing.description, &existing.tags, &existing.notes, &existing.links,
+        &description, &existing.tags, &existing.notes, &existing.links,
         existing.reminder_minutes, None,
     )
     .map_err(|e| e.to_string())?;
@@ -734,17 +780,17 @@ fn suggestion_merge(
 
 #[tauri::command]
 fn trusted_senders_list(state: State<'_, Mutex<Db>>) -> Result<Vec<String>, String> {
-    state.lock().unwrap().trusted_list().map_err(|e| e.to_string())
+    lock_recover(&state).trusted_list().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn trusted_senders_add(state: State<'_, Mutex<Db>>, sender: String) -> Result<(), String> {
-    state.lock().unwrap().trusted_add(&sender).map_err(|e| e.to_string())
+    lock_recover(&state).trusted_add(&sender).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn trusted_senders_remove(state: State<'_, Mutex<Db>>, sender: String) -> Result<(), String> {
-    state.lock().unwrap().trusted_remove(&sender).map_err(|e| e.to_string())
+    lock_recover(&state).trusted_remove(&sender).map_err(|e| e.to_string())
 }
 
 // ---------------- propuestas de planificación (fase 7) ----------------
@@ -757,7 +803,7 @@ async fn plan_from_text(
 ) -> Result<planning::PlanProposalView, String> {
     ai_cooldown("plan_from_text")?;
     let cfg = {
-        let db = state.lock().unwrap();
+        let db = lock_recover(&state);
         ai_config_from_db(&db)
     };
     let log_app = app.clone();
@@ -781,7 +827,7 @@ async fn plan_from_text(
     .map_err(|e| e.to_string())??;
 
     let view = {
-        let db = state.lock().unwrap();
+        let db = lock_recover(&state);
         planning::plan_from_text(&db, &text, &intents, &source)?
     };
     append_log(&app, &format!("plan_created id={} source={} items={}", view.id, view.source, view.items.len()));
@@ -791,12 +837,12 @@ async fn plan_from_text(
 
 #[tauri::command]
 fn plan_proposal_get(state: State<'_, Mutex<Db>>, id: i64) -> Result<Option<planning::PlanProposalView>, String> {
-    planning::get_plan(&state.lock().unwrap(), id)
+    planning::get_plan(&lock_recover(&state), id)
 }
 
 #[tauri::command]
 fn plan_proposals_list(state: State<'_, Mutex<Db>>, only_pending: bool) -> Result<Vec<store::PlanProposalRow>, String> {
-    state.lock().unwrap().list_plan_proposals(only_pending).map_err(|e| e.to_string())
+    lock_recover(&state).list_plan_proposals(only_pending).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -806,7 +852,7 @@ fn plan_accept(
     id: i64,
     edit: Option<planning::EditedPlan>,
 ) -> Result<Vec<TaskRow>, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let tasks = planning::accept_plan(&db, id, &edit.unwrap_or_default())?;
     drop(db);
     append_log(&app, &format!("plan_accepted id={id} tasks={}", tasks.len()));
@@ -817,7 +863,7 @@ fn plan_accept(
 
 #[tauri::command]
 fn plan_reject(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     planning::reject_plan(&db, id)?;
     drop(db);
     append_log(&app, &format!("plan_rejected id={id}"));
@@ -842,7 +888,7 @@ async fn assistant_turn(
     ai_cooldown("assistant_turn")?;
     // fase 1: config + snapshot de contexto (lock breve, sin red)
     let (cfg, ctx) = {
-        let db = state.lock().unwrap();
+        let db = lock_recover(&state);
         (ai_config_from_db(&db), assistant::context_snapshot(&db))
     };
     let configured = !cfg.endpoint.is_empty() && !cfg.model.is_empty() && cfg.provider_name() != "local";
@@ -855,7 +901,7 @@ async fn assistant_turn(
     let log_app = app.clone();
     let text_ai = text.clone();
     // la IA es bloqueante: fuera del mutex
-    let turn = tauri::async_runtime::spawn_blocking(move || {
+    let spawn_result = tauri::async_runtime::spawn_blocking(move || {
         let provider = match ai::provider_from_config(&cfg) {
             Ok(p) => p,
             Err(e) => return Err(format!("ia_fail {e}")),
@@ -872,23 +918,46 @@ async fn assistant_turn(
                 let batch = crate::ai::intent_parser::parse_intent(&text_ai, Some(provider.as_ref()), true)
                     .map_err(|e| e.to_string())?;
                 // fase 3: persistir/leer con lock breve
-                let db = state.lock().unwrap();
+                let db = lock_recover(&state);
                 assistant::plan_from_intents(&db, &text_ai, &batch.intents, note)
             }
             "action" => {
                 // fase 3: persistir/leer con lock breve
-                let db = state.lock().unwrap();
+                let db = lock_recover(&state);
                 assistant::action_mode(&db, &decision, &note)
             }
             _ => {
-                // fase 3: refs estructuradas reales (deterministas) para el frontend
-                let db = state.lock().unwrap();
-                assistant::answer_text(provider.as_ref(), &user, assistant::task_refs(&db, crate::email::now_ms()))
+                // Respuesta inline en la decisión (1 sola llamada a la IA:
+                // evita la segunda petición, que doblaba la exposición a 429
+                // y dejaba al usuario esperando sin respuesta). Si el modelo
+                // no la incluye, se recurre a la llamada dedicada de siempre.
+                let inline = decision
+                    .get("answer")
+                    .and_then(|a| a.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let db = lock_recover(&state);
+                let refs = assistant::task_refs(&db, crate::email::now_ms());
+                drop(db);
+                match inline {
+                    Some(t) => Ok(assistant::AssistantTurnView::Answer { text: t, tasks: refs }),
+                    None => assistant::answer_text(provider.as_ref(), &user, refs),
+                }
             }
         }
     })
-    .await
-    .map_err(|e| e.to_string())??;
+    .await;
+    let turn = match spawn_result {
+        Ok(Ok(t)) => t,
+        Ok(Err(e)) => {
+            append_log(&app, &format!("assistant_turn_error: {e}"));
+            return Err(e);
+        }
+        Err(e) => {
+            append_log(&app, &format!("assistant_turn_join_error: {e}"));
+            return Err(e.to_string());
+        }
+    };
 
     append_log(
         &app,
@@ -912,7 +981,7 @@ fn assistant_actions_list(
     state: State<'_, Mutex<Db>>,
     only_pending: bool,
 ) -> Result<Vec<store::AssistantActionRow>, String> {
-    state.lock().unwrap().list_assistant_actions(only_pending).map_err(|e| e.to_string())
+    lock_recover(&state).list_assistant_actions(only_pending).map_err(|e| e.to_string())
 }
 
 /// Aprueba una acción propuesta: la aplica vía los servicios existentes del
@@ -923,7 +992,7 @@ fn assistant_action_accept(
     state: State<'_, Mutex<Db>>,
     id: i64,
 ) -> Result<String, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let (_, action) = assistant::get_action(&db, id)?.ok_or_else(|| "acción no encontrada".to_string())?;
     let row = db
         .get_assistant_action(id)
@@ -947,7 +1016,7 @@ fn assistant_action_reject(
     state: State<'_, Mutex<Db>>,
     id: i64,
 ) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.set_assistant_action_status(id, "rejected").map_err(|e| e.to_string())?;
     drop(db);
     append_log(&app, &format!("assistant_action_rejected id={id}"));
@@ -1071,7 +1140,7 @@ struct GeneralSettingsView {
 
 #[tauri::command]
 fn general_settings_get(state: State<'_, Mutex<Db>>) -> GeneralSettingsView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     GeneralSettingsView {
         start_with_windows: setting_bool(&db, "general.start_with_windows", false),
         start_minimized: setting_bool(&db, "general.start_minimized", false),
@@ -1090,7 +1159,7 @@ fn general_settings_set(
     close_to_tray_widget: bool,
     conflict_strict: bool,
 ) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.settings_set("general.start_with_windows", if start_with_windows { "1" } else { "0" })
         .map_err(|e| e.to_string())?;
     db.settings_set("general.start_minimized", if start_minimized { "1" } else { "0" })
@@ -1133,7 +1202,7 @@ struct OnboardingStatusView {
 
 #[tauri::command]
 fn onboarding_status(state: State<'_, Mutex<Db>>) -> OnboardingStatusView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let completed = setting_bool(&db, SETTINGS_ONBOARDING_COMPLETED, false);
     let ai_cfg = ai_config_from_db(&db);
     let email_cfg = sync::load_email_config(&db);
@@ -1165,7 +1234,7 @@ fn onboarding_status(state: State<'_, Mutex<Db>>) -> OnboardingStatusView {
 
 #[tauri::command]
 fn onboarding_complete(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "1")
         .map_err(|e| e.to_string())?;
     append_log(&app, "onboarding_completed");
@@ -1174,7 +1243,7 @@ fn onboarding_complete(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<()
 
 #[tauri::command]
 fn onboarding_reset(state: State<'_, Mutex<Db>>) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.settings_set(SETTINGS_ONBOARDING_COMPLETED, "0")
         .map_err(|e| e.to_string())
 }
@@ -1184,7 +1253,7 @@ fn onboarding_reset(state: State<'_, Mutex<Db>>) -> Result<(), String> {
 // ---------------- notificaciones contextuales (fase 11) ----------------
 #[tauri::command]
 fn notif_prefs_get(state: State<'_, Mutex<Db>>) -> notify::NotifPrefsView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     notify::prefs_view(&db)
 }
 
@@ -1198,18 +1267,21 @@ fn notif_prefs_set(
     daily_cap: i64,
     free_minutes: i64,
 ) -> Result<(), String> {
-    // valida formato HH:MM de la ventana de silencio
+    // valida formato y rango HH:MM de la ventana de silencio
     let check = |s: &str| -> Result<(), String> {
         let (h, m) = s.split_once(':').ok_or_else(|| format!("formato inválido: {s} (espera HH:MM)"))?;
-        h.parse::<u32>().map_err(|_| format!("hora inválida: {h}"))?;
-        m.parse::<u32>().map_err(|_| format!("minuto inválido: {m}"))?;
+        let h: u32 = h.parse().map_err(|_| format!("hora inválida: {h}"))?;
+        let m: u32 = m.parse().map_err(|_| format!("minuto inválido: {m}"))?;
+        if h > 23 || m > 59 {
+            return Err(format!("hora fuera de rango: {s} (espera 00:00–23:59)"));
+        }
         Ok(())
     };
     check(&quiet_start)?;
     check(&quiet_end)?;
     let cap = daily_cap.clamp(1, 20);
     let free = free_minutes.clamp(30, 600);
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.settings_set("notif.enabled", if enabled { "1" } else { "0" }).map_err(|e| e.to_string())?;
     db.settings_set("notif.quiet_start", &quiet_start).map_err(|e| e.to_string())?;
     db.settings_set("notif.quiet_end", &quiet_end).map_err(|e| e.to_string())?;
@@ -1224,7 +1296,7 @@ fn notif_prefs_set(
 
 #[tauri::command]
 fn notif_respond(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64, status: String) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     db.set_notif_status(id, &status).map_err(|e| e.to_string())?;
     append_log(&app, &format!("notif_respond id={id} status={status}"));
     Ok(())
@@ -1237,7 +1309,7 @@ struct UiPrefsView {
 
 #[tauri::command]
 fn ui_prefs_get(state: State<'_, Mutex<Db>>) -> UiPrefsView {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     UiPrefsView {
         theme: db.settings_get("ui.theme").ok().flatten().unwrap_or_default(),
         accent: db
@@ -1251,7 +1323,7 @@ fn ui_prefs_get(state: State<'_, Mutex<Db>>) -> UiPrefsView {
 
 #[tauri::command]
 fn ui_prefs_set(app: AppHandle, state: State<'_, Mutex<Db>>, theme: String, accent: String) -> Result<(), String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let theme = if theme == "light" || theme == "dark" { theme } else { String::new() };
     let accent = if accent.starts_with('#') && accent.len() == 7 {
         accent
@@ -1282,7 +1354,7 @@ fn open_app(app: AppHandle) -> Result<(), String> {
 /// contraseñas, que viven solo en el Credential Manager del SO).
 #[tauri::command]
 fn data_export(state: State<'_, Mutex<Db>>) -> Result<String, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let v = db.export_data().map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
@@ -1298,7 +1370,7 @@ fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>, confirmation: String) 
         append_log(&app, "data_wipe canceled (sin confirmación)");
         return Err("borrado cancelado: falta confirmación".into());
     }
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     // el usuario de correo se lee ANTES de limpiar settings (se borraría)
     let email_user = db
         .settings_get("email.config")
@@ -1313,7 +1385,9 @@ fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>, confirmation: String) 
         let _ = ai::keyring_delete(&format!("email:{email_user}"));
     }
     drop(db);
-    let _ = std::fs::write(log_dir().join("spike.log"), "");
+    if let Some(dir) = log_dir() {
+        let _ = std::fs::write(dir.join("spike.log"), "");
+    }
     let _ = app.emit("data:wipe", ());
     let _ = app.emit("tasks:changed", ());
     let _ = app.emit("suggestions:changed", ());
@@ -1378,7 +1452,7 @@ fn widget_action(
     id: i64,
     action: String,
 ) -> Result<String, String> {
-    let db = state.lock().unwrap();
+    let db = lock_recover(&state);
     let t = db
         .get_task(id)
         .map_err(|e| e.to_string())?
@@ -1429,7 +1503,7 @@ fn test_hooks(handle: AppHandle) {
                 tokio::time::sleep(std::time::Duration::from_secs(4)).await;
             let _ = tauri::async_runtime::spawn_blocking(move || {
                 let state = h.state::<Mutex<Db>>();
-                let db = state.lock().unwrap();
+                let db = lock_recover(&state);
                 let cfg = ai_config_from_db(&db);
                 drop(db);
                     let parsed = ai::provider_from_config(&cfg)
@@ -1444,7 +1518,7 @@ fn test_hooks(handle: AppHandle) {
                             append_log(&h, &format!("NL_TEST source={src} title={} start={} end={} cat={} prio={}", t.title, t.start_ms, t.end_ms, t.category_id, t.priority));
                             if std::env::var("FF_NL_INSERT").is_ok() {
                                 let db = h.state::<Mutex<Db>>();
-                                let db = db.lock().unwrap();
+                                let db = lock_recover(&db);
                                 match db.create(&t.title, &t.category_id, &t.priority, t.start_ms, t.end_ms, t.all_day) {
                                     Ok(r) => append_log(&h, &format!("NL_INSERTED id={} title={}", r.id, t.title)),
                                     Err(e) => append_log(&h, &format!("NL_INSERT_ERROR {e}")),
@@ -1475,7 +1549,7 @@ fn test_hooks(handle: AppHandle) {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let state = h.state::<Mutex<Db>>();
-                let db = state.lock().unwrap();
+                let db = lock_recover(&state);
                 let _ = db.settings_set("email.config", &json);
                 let _ = db.settings_set("email.enabled", "1");
                 let _ = db.settings_set("email.interval_hours", "8");
@@ -1489,7 +1563,7 @@ fn test_hooks(handle: AppHandle) {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let state = h.state::<Mutex<Db>>();
-                let db = state.lock().unwrap();
+                let db = lock_recover(&state);
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
                     if let Some(e) = v.get("endpoint").and_then(|x| x.as_str()) {
                         let _ = db.settings_set("ai.endpoint", e);
@@ -1512,7 +1586,7 @@ fn test_hooks(handle: AppHandle) {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let state = h.state::<Mutex<Db>>();
-                let db = state.lock().unwrap();
+                let db = lock_recover(&state);
                 for s in senders.split(',') {
                     let _ = db.trusted_add(s.trim());
                     append_log(&h, &format!("TRUSTED_ADD {s}"));
@@ -1619,8 +1693,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let quit = MenuItem::with_id(&handle, "quit", "Salir", true, None::<&str>)?;
             let menu = Menu::with_items(&handle, &[&show, &quit])?;
 
-            TrayIconBuilder::with_id("tray")
-                .icon(app.default_window_icon().unwrap().clone())
+            let mut tray = TrayIconBuilder::with_id("tray")
                 .tooltip("FocusFlow")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -1636,8 +1709,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         app.exit(0);
                     }
                     _ => {}
-                })
-                .build(app)?;
+                });
+            // Sin icono embebido el tray se degrada a sin-icono en vez de
+            // abortar el arranque (auditoría 17, hallazgo #6).
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
 
             let candidates = [
                 (Modifiers::CONTROL | Modifiers::SHIFT, Code::Space),
@@ -1692,7 +1770,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // prune inicial al arrancar: limpiar resoluciones viejas pendientes de archivar
             {
                 let db = app.state::<Mutex<Db>>();
-                let db = db.lock().unwrap();
+                let db = lock_recover(&db);
                 let retention_min: i64 = db
                     .settings_get("email.suggestion_retention_minutes")
                     .ok()
@@ -1710,7 +1788,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             {
                 let db = app.state::<Mutex<Db>>();
-                auto_start_behavior(&handle, &db.lock().unwrap());
+                auto_start_behavior(&handle, &lock_recover(&db));
             }
 
             Ok(())
@@ -1720,7 +1798,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if window.label() == "main" {
                     let app = window.app_handle();
                     let db = app.state::<Mutex<Db>>();
-                    let to_tray = setting_bool(&db.lock().unwrap(), "general.close_to_tray_widget", true);
+                    let to_tray = setting_bool(&lock_recover(&db), "general.close_to_tray_widget", true);
                     if !to_tray {
                         append_log(app, "main_close_exits");
                         return;

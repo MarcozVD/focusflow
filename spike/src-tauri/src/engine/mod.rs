@@ -36,12 +36,15 @@ pub const DAY_MS: i64 = 24 * HOUR_MS;
 pub const DEFAULT_WORK_START_MIN: u32 = 6 * 60;
 
 /// ms epoch local para un NaiveDateTime (mismo convenio que `ai::nl`).
+/// Gap/solape DST: `earliest()` resuelve de forma determinista; si la hora
+/// local no existe (p. ej. medianoche en el salto), se interpreta como UTC
+/// en vez de devolver 0 (epoch 1970) — auditoría 17, hallazgo #9.
 pub fn local_ms(dt: NaiveDateTime) -> i64 {
-    Local
-        .from_local_datetime(&dt)
-        .single()
-        .map(|d| d.timestamp_millis())
-        .unwrap_or(0)
+    match Local.from_local_datetime(&dt) {
+        chrono::LocalResult::Single(d) => d.timestamp_millis(),
+        chrono::LocalResult::Ambiguous(d, _) => d.timestamp_millis(),
+        chrono::LocalResult::None => dt.and_utc().timestamp_millis(),
+    }
 }
 
 /// Medianoche local (ms) del día que contiene `ms`.

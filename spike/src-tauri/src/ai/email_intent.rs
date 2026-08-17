@@ -34,12 +34,13 @@ REGLAS:
 6. PREPARACIÓN ADJUNTA: si el correo dice cuántas horas requiere el compromiso ("necesito 4 horas para preparar", "se necesitan 2 horas"), pon N*60 en preparation_minutes del intent.
 7. confidence: 0.0 (ambiguo) a 1.0 (explícito). Si la fecha o la hora están implícitas o hay ambigüedad, baja la confianza (≤ 0.5) y explica en reason.
 8. PRIVACIDAD: jamás incluyas información personal sensible (saludos, direcciones, teléfonos) en títulos ni descripciones. Solo el compromiso.
-9. Títulos en español, específicos, sin artículos ni prefijos.
+9. Títulos en español, específicos, sin artículos ni prefijos. PRIORIDAD MATERIA + ACCIÓN: si se menciona una materia/asignatura, el título empieza por ella seguida de lo que hay que hacer ("Cálculo: quiz de derivadas", "Arquitectura: entrega de maqueta"). Nunca un título genérico ("Tarea", "Entrega") habiendo materia.
 10. Un correo puede producir VARIOS intents (varias fechas/compromisos).
 11. Si el correo NO contiene compromisos accionables, devuelve {"intents": []}.
 12. reason: breve justificación en español, o null.
 13. HILOS: si el correo es una RESPUESTA dentro de una conversación y corrige/actualiza un compromiso mencionado antes ("corrección: la entrega es el lunes", "se pospone al viernes"), usa la fecha NUEVA en el intent. NO generes dos intents por el mismo compromiso: el correo nuevo es la versión vigente.
 14. CONTEXTO ACADÉMICO: extrae materia/asignatura y profesor cuando se mencionen ("para la materia de Arquitectura", "Profesor: X"). Pon la materia como category si es académica, y el profesor en la descripción (description) del intent si es necesario para identificarlo.
+15. DESCRIPTION: pon en description el QUÉ HAY QUE HACER en una frase corta y útil (temas del quiz, qué entregar, dónde, plataforma, link si aparece). El contexto que ayude a ejecutar la tarea; nunca cortesías.
 
 Ejemplos:
 Correo: "Hola, te escribo para recordarte que el informe del proyecto se entrega el lunes 10 a las 23:59. También necesitamos verte el martes 11 a las 10:00. Un saludo."

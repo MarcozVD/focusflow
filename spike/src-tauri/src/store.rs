@@ -82,8 +82,25 @@ fn sanitize_category(id: &str) -> &str {
     }
 }
 
+/// Recordatorio máximo: 4 semanas en minutos. Clampa entradas de IPC/IA para
+/// evitar valores negativos (disparo tras el inicio) u overflow en
+/// `start_at - reminder_minutes * 60000` (auditoría 17, hallazgo #13).
+const MAX_REMINDER_MINUTES: i64 = 4 * 7 * 24 * 60;
+
+fn sanitize_reminder(minutes: Option<i64>) -> Option<i64> {
+    minutes.map(|m| m.clamp(0, MAX_REMINDER_MINUTES))
+}
+
 pub struct Db {
     conn: Connection,
+}
+
+/// Lock con recuperación de poison: un pánico previo envenena el mutex y, con
+/// `panic = "abort"` en release, cada `.lock().unwrap()` posterior abortaría
+/// el proceso entero (auditoría 17, hallazgo #6). El estado interno sigue
+/// siendo usable en la práctica; abortar la app es peor que continuar.
+pub fn lock_recover<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Recordatorio por disparar (ventana vencida y sin marca de disparo).
@@ -105,11 +122,30 @@ impl Db {
         conn.pragma_update(None, "busy_timeout", 2000)?;
         let db = Db { conn };
         db.migrate()?;
+        db.backup_rotating(data_dir);
         // datos de demostración SOLO en builds de desarrollo: una app real
         // nunca mezcla datos falsos con los del usuario
         #[cfg(debug_assertions)]
         db.seed_if_empty()?;
         Ok(db)
+    }
+
+    /// Copia de seguridad rotativa al arrancar: mantiene dos generaciones
+    /// (`focusflow.db.bak`, `.bak.1`) junto a la DB. Sin esto, un SQLite
+    /// corrupto = pérdida total (auditoría 17, hallazgo #2). Nunca impide
+    /// el arranque: un error de backup se ignora silenciosamente.
+    fn backup_rotating(&self, data_dir: &PathBuf) {
+        if !data_dir.join("focusflow.db").exists() {
+            return;
+        }
+        let bak = data_dir.join("focusflow.db.bak");
+        let bak1 = data_dir.join("focusflow.db.bak.1");
+        if bak.exists() {
+            let _ = std::fs::copy(&bak, &bak1);
+        }
+        // VACUUM INTO: copia consistente aunque haya WAL sin checkpoint.
+        let path = bak.display().to_string().replace('\'', "''");
+        let _ = self.conn.execute_batch(&format!("VACUUM INTO '{path}'"));
     }
 
     #[cfg(test)]
@@ -143,16 +179,47 @@ impl Db {
         Ok(db)
     }
 
+    /// Versión del esquema = nº de migraciones. `PRAGMA user_version` ancla
+    /// qué migraciones ya corrieron: los guards por columna no distinguen
+    /// "migración aplicada" de "columna preexistente", y una futura migración
+    /// con transformación de datos necesita ese punto de anclaje
+    /// (auditoría 17, hallazgo #7).
+    const SCHEMA_VERSION: i64 = 9;
+
     fn migrate(&self) -> rusqlite::Result<()> {
-        self.migrate_0001()?;
-        self.migrate_0002()?;
-        self.migrate_0003()?;
-        self.migrate_0004()?;
-        self.migrate_0005()?;
-        self.migrate_0006()?;
-        self.migrate_0007()?;
-        self.migrate_0008()?;
-        self.migrate_0009()
+        let v: i64 = self
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if v < 1 {
+            self.migrate_0001()?;
+        }
+        if v < 2 {
+            self.migrate_0002()?;
+        }
+        if v < 3 {
+            self.migrate_0003()?;
+        }
+        if v < 4 {
+            self.migrate_0004()?;
+        }
+        if v < 5 {
+            self.migrate_0005()?;
+        }
+        if v < 6 {
+            self.migrate_0006()?;
+        }
+        if v < 7 {
+            self.migrate_0007()?;
+        }
+        if v < 8 {
+            self.migrate_0008()?;
+        }
+        if v < 9 {
+            self.migrate_0009()?;
+        }
+        self.conn
+            .pragma_update(None, "user_version", Self::SCHEMA_VERSION)?;
+        Ok(())
     }
 
     /// Notificaciones contextuales (fase 11): registro de disparos para
@@ -578,6 +645,15 @@ impl Db {
         )
     }
 
+    /// Actualiza solo la descripción (contexto) de una tarea.
+    pub fn set_description(&self, id: i64, description: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE tasks SET description = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, description, now_ms()],
+        )?;
+        Ok(())
+    }
+
     pub fn set_completed(&self, id: i64, done: bool) -> rusqlite::Result<()> {
         let now = now_ms();
         self.conn.execute(
@@ -637,6 +713,7 @@ impl Db {
         reminder_minutes: Option<i64>,
         all_day: Option<bool>,
     ) -> rusqlite::Result<()> {
+        let reminder_minutes = sanitize_reminder(reminder_minutes);
         let prev: Option<i64> = self
             .conn
             .query_row(
@@ -706,6 +783,7 @@ impl Db {
     }
 
     pub fn set_task_reminder(&self, id: i64, minutes: i64) -> rusqlite::Result<()> {
+        let minutes = sanitize_reminder(Some(minutes)).unwrap_or(0);
         self.conn.execute(
             "UPDATE tasks SET reminder_minutes = ?2, reminder_fired_at = NULL, updated_at = ?3
              WHERE id = ?1 AND deleted_at IS NULL",
@@ -951,7 +1029,7 @@ impl Db {
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?21)",
             rusqlite::params![
                 source, email_id, sender, subject, kind, title, description,
-                category_id, priority, start_at, end_at, deadline_at, prep_min as i64,
+                sanitize_category(category_id), priority, start_at, end_at, deadline_at, prep_min as i64,
                 location, tags, confidence, reason, status, dedupe_task_id, dedupe_note, now
             ],
         )?;
@@ -1038,6 +1116,21 @@ impl Db {
         Ok(())
     }
 
+    /// Transacción sobre la conexión compartida: BEGIN IMMEDIATE/COMMIT/
+    /// ROLLBACK manual porque los métodos de `Db` toman `&self` y una
+    /// `rusqlite::Transaction` necesitaría `&mut` (auditoría 17, hallazgo #5).
+    pub fn tx_begin(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")
+    }
+
+    pub fn tx_commit(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("COMMIT")
+    }
+
+    pub fn tx_rollback(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("ROLLBACK")
+    }
+
     /// Auto-archiva (borra) sugerencias resueltas más antiguas que el corte.
     pub fn prune_suggestions(&self, cutoff_ms: i64) -> rusqlite::Result<usize> {
         let n = self.conn.execute(
@@ -1069,7 +1162,7 @@ impl Db {
             "UPDATE suggested_events SET title = ?2, category_id = ?3, priority = ?4,
                     start_at = ?5, end_at = ?6, description = ?7, updated_at = ?8
              WHERE id = ?1",
-            rusqlite::params![id, title, category_id, priority, start_at, end_at, description, now_ms()],
+            rusqlite::params![id, title, sanitize_category(category_id), priority, start_at, end_at, description, now_ms()],
         )?;
         Ok(())
     }
@@ -1426,6 +1519,38 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert!(cols.iter().any(|c| c == "reminder_fired_at"));
+    }
+
+    #[test]
+    fn backup_rotating_creates_copy_on_reopen() {
+        let dir = std::env::temp_dir().join(format!("ff-backup-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let db = Db::open(&dir).unwrap();
+            db.create("x", "uni", "alta", 1, 2, false).unwrap();
+        }
+        // segundo arranque: rota y genera focusflow.db.bak
+        let db = Db::open(&dir).unwrap();
+        assert!(dir.join("focusflow.db.bak").exists());
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reminder_minutes_are_clamped() {
+        let db = db();
+        let now = now_ms();
+        let t = db
+            .create("clamp", "uni", "media", now + 3_600_000, now + 7_200_000, false)
+            .unwrap();
+        // negativo → 0 (dispara al inicio, nunca después); gigante → 4 semanas
+        db.set_task_reminder(t.id, -30).unwrap();
+        assert_eq!(db.get_task(t.id).unwrap().unwrap().reminder_minutes, Some(0));
+        db.set_task_reminder(t.id, i64::MAX).unwrap();
+        assert_eq!(
+            db.get_task(t.id).unwrap().unwrap().reminder_minutes,
+            Some(MAX_REMINDER_MINUTES)
+        );
     }
 
     #[test]

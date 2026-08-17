@@ -132,6 +132,26 @@ fn email_becomes_suggestion_then_calendar_task() {
 }
 
 #[test]
+fn accept_suggestion_is_idempotent() {
+    // Auditoría 17, hallazgo #3: re-aceptar una sugerencia ya procesada no
+    // puede crear una segunda tarea; devuelve la existente.
+    let d = db();
+    let sid = d
+        .insert_suggestion(
+            "email", Some("msg-idem"), Some("x@y.com"), "Reunión", "event",
+            "Reunión de equipo", "", "trab", "media",
+            Some(1_800_000_000_000), Some(1_800_000_003_600_000), None, 0, "", "[]",
+            0.9, "test", None, "", "pending",
+        )
+        .unwrap();
+    let t1 = accept_suggestion(&d, sid).unwrap();
+    let before = d.count().unwrap();
+    let t2 = accept_suggestion(&d, sid).unwrap();
+    assert_eq!(t1.id, t2.id, "re-aceptar devuelve la misma tarea");
+    assert_eq!(d.count().unwrap(), before, "no crea duplicados");
+}
+
+#[test]
 fn email_without_commitments_yields_nothing() {
     let d = db();
     let raw = RawEmail {

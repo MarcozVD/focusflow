@@ -12,7 +12,7 @@
 use chrono::{Datelike, Local, TimeZone, Timelike, Weekday};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::intent::{Duration, Intent, IntentType, Priority, TimeWindow};
+use crate::ai::intent::{Duration, Intent, IntentType, Preparation, Priority, TimeWindow};
 use crate::engine::planner::{PlannedItem, Planner};
 use crate::engine::{ConstraintEngine, DAY_MS, local_midnight};
 use crate::store::{Db, TaskRow};
@@ -188,6 +188,45 @@ fn flexible_backlog(db: &Db, week: Option<(i64, i64)>) -> Vec<Intent> {
         .collect()
 }
 
+/// Preparación por defecto (min) para evaluaciones sin horas declaradas:
+/// "el martes tengo quiz de cálculo" debe proponer sesiones de estudio, no
+/// quedarse sin plan.
+pub const DEFAULT_ASSESSMENT_PREP_MIN: u32 = 120;
+
+/// ¿El título suena a evaluación? (quiz, examen, parcial, …)
+fn is_assessment(title: &str) -> bool {
+    let t = title.to_lowercase();
+    ["quiz", "examen", "parcial", "prueba", "test", "cuestionario", "sustentación", "sustentacion", "final"]
+        .iter()
+        .any(|k| t.contains(k))
+}
+
+/// Enriquece intents de evaluación que llegan sin preparación ni duración:
+/// les asigna estudio por defecto y fecha límite = inicio del evento, de modo
+/// que el planificador proponga sesiones de repaso antes de la fecha.
+fn with_default_prep(intents: &[Intent]) -> Vec<Intent> {
+    intents
+        .iter()
+        .map(|i| {
+            let mut i = i.clone();
+            if i.intent_type == IntentType::Event
+                && i.preparation.is_none()
+                && i.duration.is_none()
+                && is_assessment(&i.title)
+            {
+                i.preparation = Some(Preparation {
+                    minutes: DEFAULT_ASSESSMENT_PREP_MIN,
+                    note: "estudio sugerido por defecto".into(),
+                });
+                if i.deadline.is_none() {
+                    i.deadline = i.window.start;
+                }
+            }
+            i
+        })
+        .collect()
+}
+
 fn day_name(d: &chrono::DateTime<Local>) -> &'static str {
     match d.weekday() {
         Weekday::Mon => "lunes",
@@ -224,7 +263,10 @@ fn understanding(intents: &[Intent]) -> Vec<UnderstoodView> {
             let when_label = match i.intent_type {
                 IntentType::Event | IntentType::Task => match (i.window.start, i.window.end) {
                     (Some(s), Some(e)) => fmt_when(s, e),
-                    (Some(s), None) => format!("{} {}", day_name(&Local.timestamp_millis_opt(s).earliest().unwrap_or_else(Local::now)), s),
+                    (Some(s), None) => {
+                        let dt = Local.timestamp_millis_opt(s).earliest().unwrap_or_else(Local::now);
+                        format!("{} {}", day_name(&dt), dt.format("%d/%m %H:%M"))
+                    }
                     _ => "sin horario fijo".into(),
                 },
                 _ => match i.window.start {
@@ -338,6 +380,8 @@ pub fn plan_from_text(
     intents: &[Intent],
     source: &str,
 ) -> Result<PlanProposalView, String> {
+    let enriched = with_default_prep(intents);
+    let intents = enriched.as_slice();
     let mut engine = engine_with_calendar(db);
     apply_intents(&mut engine, intents);
     // "organiza mi semana": el horizonte se limita al domingo de la semana
