@@ -56,14 +56,12 @@
   }
 
   function startMerge(s: Suggestion) {
-    // el aviso marca una tarea existente → fusionar directo con ella
-    if (s.dedupe_task_id && (s.dedupe_note?.includes("duplicado de") ?? false)) {
-      void suggestionMerge(s.id, s.dedupe_task_id);
-      return;
-    }
-    // sin tarea en el aviso → elige manualmente
+    // siempre se elige la tarea destino; si el aviso ya marca una (duplicado
+    // detectado), queda preseleccionada y se puede cambiar por cualquier otra
     mergeFor = s.id;
-    mergeTask = "";
+    const suggested = s.dedupe_task_id;
+    mergeTask =
+      suggested != null && tasks.some((t) => t.id === suggested) ? String(suggested) : "";
   }
 
   async function saveEdit() {
@@ -171,12 +169,12 @@
       </div>
     {:else if mergeFor === s.id}
       <div class="card edit">
-        <p class="mt">Fusionar con una tarea existente:</p>
+        <p class="mt">Fusionar <strong>{s.title}</strong> con una tarea existente:</p>
         <select class="t" bind:value={mergeTask}>
           <option value="">Selecciona la tarea…</option>
           {#each tasks as t (t.id)}
             <option value={t.id}>
-              {t.title}{t.start_at ? ` · ${fmtDate(t.start_at)}` : ""}
+              {t.title}{t.start_at ? ` · ${fmtDate(t.start_at)}` : ""}{s.dedupe_task_id === t.id ? " (sugerida)" : ""}
             </option>
           {/each}
         </select>
@@ -281,11 +279,10 @@
     margin: 0;
   }
   .empty {
-    background: var(--surface-3);
+    background: var(--surface-2);
     border-radius: var(--r-lg);
     padding: var(--s-8);
     text-align: center;
-    box-shadow: var(--shadow-inset);
   }
   .empty p:first-child {
     font-weight: 600;
@@ -293,15 +290,15 @@
   .card {
     background: var(--surface);
     border-radius: var(--r-lg);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-raised);
     padding: var(--s-5);
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
   .card.edit {
-    box-shadow: var(--e2);
-    border: 1px solid var(--primary-soft);
+    box-shadow: var(--shadow-raised), inset 0 0 0 2px var(--primary-soft-2);
+    border: none;
   }
   .top {
     display: flex;
@@ -374,7 +371,11 @@
   .btn.ghost {
     background: transparent;
     box-shadow: none;
-    border: 1px solid var(--border);
+    border: none;
+  }
+  .btn.ghost:hover {
+    background: var(--surface-2);
+    transform: none;
   }
   .conf {
     margin-left: auto;
@@ -431,7 +432,7 @@
   }
   .btn {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface-2);
     color: var(--text-1);
     border-radius: 12px;
     padding: 8px 16px;
@@ -441,15 +442,23 @@
     transition: all var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--e1);
+    background: var(--surface-3);
+  }
+  .btn:active {
+    transform: scale(0.98);
   }
   .btn.primary {
     background: var(--primary);
     color: #fff;
   }
+  .btn.primary:hover {
+    background: var(--primary-hover);
+  }
   .btn.danger {
     color: var(--danger);
+  }
+  .btn.danger:hover {
+    background: var(--danger-bg);
   }
   .btn:disabled {
     opacity: 0.5;
@@ -457,17 +466,19 @@
   }
   .t {
     width: 100%;
-    border: 1px solid var(--border);
+    border: none;
     background: var(--surface-3);
+    box-shadow: var(--shadow-inset-sm);
     border-radius: 12px;
     padding: 10px 14px;
     font-size: 14px;
     color: var(--text-1);
     font-family: inherit;
     outline: none;
+    transition: box-shadow var(--dur-fast) var(--ease-out);
   }
   .t:focus {
-    border-color: var(--primary);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
   textarea {
     resize: vertical;
@@ -488,13 +499,19 @@
   }
   .grid input,
   .grid select {
-    border: 1px solid var(--border);
+    border: none;
     background: var(--surface-3);
+    box-shadow: var(--shadow-inset-sm);
     border-radius: 10px;
     padding: 8px 10px;
     color: var(--text-1);
     font-family: inherit;
     outline: none;
+    transition: box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .grid input:focus,
+  .grid select:focus {
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
   .mt {
     margin: 0;

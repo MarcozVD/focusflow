@@ -560,9 +560,9 @@
         <div class="progress-track">
           <div
             class="progress-bar"
-            style="width: {syncProgress() && syncProgress()!.total > 0
-              ? Math.max(6, (syncProgress()!.processed / syncProgress()!.total) * 100)
-              : 8}%"
+            style="transform: scaleX({syncProgress() && syncProgress()!.total > 0
+              ? Math.max(0.06, syncProgress()!.processed / syncProgress()!.total)
+              : 0.08})"
           ></div>
         </div>
         <p class="hint">
@@ -794,7 +794,7 @@
   section {
     background: var(--surface);
     border-radius: var(--r-lg);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-raised);
     padding: var(--s-6);
     display: flex;
     flex-direction: column;
@@ -816,10 +816,10 @@
   }
   .guide {
     margin: 6px 0 4px;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--r-md);
     background: var(--surface-2);
-    padding: 8px 12px;
+    padding: 10px 14px;
     font-size: 12.5px;
   }
   .guide summary {
@@ -832,18 +832,18 @@
     color: var(--primary);
   }
   .steps {
-    margin: 8px 0 4px;
-    padding-left: 18px;
+    margin: 10px 0 4px;
+    padding-left: 20px;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 9px;
     color: var(--text-1);
-    line-height: 1.45;
+    line-height: 1.55;
   }
   .steps code {
     background: var(--surface-3);
     border-radius: 4px;
-    padding: 1px 5px;
+    padding: 2px 6px;
     font-size: 11.5px;
   }
   .grid {
@@ -867,19 +867,21 @@
   input,
   select,
   textarea {
-    border: 1px solid var(--border);
+    border: none;
     background: var(--surface-3);
+    box-shadow: var(--shadow-inset-sm);
     border-radius: 10px;
     padding: 9px 12px;
     font-size: 13.5px;
     color: var(--text-1);
     font-family: inherit;
     outline: none;
+    transition: box-shadow var(--dur-fast) var(--ease-out);
   }
   input:focus,
   select:focus,
   textarea:focus {
-    border-color: var(--primary);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
   textarea {
     resize: vertical;
@@ -913,7 +915,6 @@
     color: #fff;
     cursor: pointer;
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
-    box-shadow: 0 2px 6px -2px color-mix(in srgb, var(--sw) 55%, transparent);
   }
   .swatch:hover {
     transform: scale(1.12);
@@ -924,7 +925,7 @@
   }
   .btn {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface-2);
     color: var(--text-1);
     border-radius: 12px;
     padding: 9px 18px;
@@ -934,17 +935,21 @@
     transition: all var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--e1);
+    background: var(--surface-3);
+  }
+  .btn:active {
+    transform: scale(0.98);
   }
   .btn.primary {
     background: var(--primary);
     color: #fff;
   }
+  .btn.primary:hover {
+    background: var(--primary-hover);
+  }
   .btn.primary-solid {
     background: var(--primary);
     color: #fff;
-    box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--primary) 50%, transparent);
   }
   .btn.primary-solid:hover {
     background: var(--primary-hover);
@@ -952,12 +957,15 @@
   .btn.danger {
     color: var(--danger);
   }
+  .btn.danger:hover {
+    background: var(--danger-bg);
+  }
   .btn:disabled {
     opacity: 0.5;
     pointer-events: none;
   }
   .sync-run {
-    background: var(--surface-3);
+    background: var(--surface-2);
     border-radius: var(--r-md);
     padding: var(--s-4);
     display: flex;
@@ -973,13 +981,15 @@
   }
   .progress-bar {
     height: 100%;
+    width: 100%;
+    transform-origin: left center;
     border-radius: var(--r-full);
     background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 60%, var(--success)));
-    transition: width var(--dur-base) var(--ease-out);
+    transition: transform var(--dur-base) var(--ease-out);
   }
   .sync-summary {
     background: color-mix(in srgb, var(--success) 8%, var(--surface));
-    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+    border: none;
     border-radius: var(--r-md);
     padding: var(--s-4);
     display: flex;
@@ -992,14 +1002,13 @@
     gap: 10px;
   }
   .sum-item {
-    background: var(--surface);
+    background: var(--surface-2);
     border-radius: 12px;
     padding: var(--s-3);
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    box-shadow: var(--e1);
   }
   .sum-item strong {
     font-size: 22px;
@@ -1120,7 +1129,7 @@
   }
   .errbox {
     background: var(--danger-bg);
-    border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+    border: none;
     border-radius: var(--r-md);
     padding: 10px 14px;
   }

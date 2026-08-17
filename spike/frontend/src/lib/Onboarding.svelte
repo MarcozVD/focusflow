@@ -563,16 +563,8 @@
     padding: var(--s-8);
     position: relative;
     isolation: isolate;
-  }
-  .stage::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background:
-      radial-gradient(720px 420px at 18% -8%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 62%),
-      radial-gradient(640px 400px at 92% 110%, color-mix(in srgb, #8b5cf6 12%, transparent), transparent 60%);
+    /* fondo limpio: el neumorfismo vive en las superficies, sin degradados de color */
+    background: var(--bg);
   }
 
   .hero {
@@ -582,22 +574,25 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--s-5);
+    gap: var(--s-6);
   }
   .logo {
-    width: 76px;
-    height: 76px;
+    width: 88px;
+    height: 88px;
     display: grid;
     place-items: center;
-    border-radius: 20px;
+    border-radius: 24px;
     background: var(--surface);
-    box-shadow: var(--e2);
-    border: 1px solid var(--border);
+    box-shadow: var(--shadow-raised-lg);
+  }
+  .logo img {
+    width: 56px;
+    height: 56px;
   }
   h1 {
     margin: 0;
-    font-size: 34px;
-    line-height: 1.16;
+    font-size: 38px;
+    line-height: 1.14;
     letter-spacing: -0.03em;
     font-weight: 800;
     color: var(--text-1);
@@ -608,10 +603,10 @@
   }
   .lead {
     margin: 0;
-    font-size: 15.5px;
-    line-height: 1.6;
+    font-size: 16px;
+    line-height: 1.65;
     color: var(--text-2);
-    max-width: 52ch;
+    max-width: 54ch;
   }
   .values {
     list-style: none;
@@ -619,9 +614,9 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--s-3);
+    gap: 12px;
     width: 100%;
-    max-width: 460px;
+    max-width: 480px;
     text-align: left;
   }
   .values li {
@@ -629,14 +624,19 @@
     gap: 14px;
     align-items: flex-start;
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--r-md);
-    padding: 14px 16px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow-raised);
+    transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .values li:hover {
+    transform: translateY(-1px);
     box-shadow: var(--e1);
   }
   .vi {
-    width: 34px;
-    height: 34px;
+    width: 36px;
+    height: 36px;
     flex-shrink: 0;
     display: grid;
     place-items: center;
@@ -650,16 +650,16 @@
     color: var(--text-1);
   }
   .values p {
-    margin: 2px 0 0;
+    margin: 3px 0 0;
     font-size: 12.5px;
     color: var(--text-3);
-    line-height: 1.45;
+    line-height: 1.55;
   }
   .actions {
     display: flex;
     gap: 12px;
     align-items: center;
-    margin-top: var(--s-2);
+    margin-top: var(--s-3);
   }
   .arrow {
     font-size: 15px;
@@ -687,8 +687,8 @@
     width: 38px;
     height: 38px;
     border-radius: var(--r-full);
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border: none;
+    background: var(--surface-2);
     color: var(--text-2);
     font-size: 16px;
     cursor: pointer;
@@ -696,7 +696,10 @@
   }
   .back:hover {
     color: var(--primary);
-    border-color: var(--primary);
+    background: var(--surface-3);
+  }
+  .back:active {
+    transform: scale(0.96);
   }
   .back:focus-visible {
     outline: 2px solid var(--primary);
@@ -720,41 +723,51 @@
     gap: var(--s-6);
     align-items: start;
   }
-  .guide .g-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--e1);
-    padding: var(--s-6);
+  .guide {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--s-5);
+    min-width: 0;
+  }
+  .guide .g-card {
+    background: var(--surface);
+    border: none;
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-raised);
+    padding: 24px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     /* altura mínima compartida CORREO/IA: sin salto al cargar la configuración */
     min-height: 300px;
   }
   .g-card h2 {
     margin: 0;
-    font-size: 17px;
+    font-size: 18px;
+    letter-spacing: -0.01em;
     color: var(--text-1);
   }
   .g-tip {
     margin: 0;
     font-size: 13px;
-    line-height: 1.55;
+    line-height: 1.65;
     color: var(--text-2);
     background: var(--primary-soft);
     border-radius: var(--r-sm);
-    padding: 10px 12px;
+    padding: 12px 14px;
   }
   .g-steps {
-    margin: 4px 0 0;
-    padding-left: 20px;
+    margin: 2px 0 0;
+    padding-left: 22px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.6;
     color: var(--text-2);
+  }
+  .g-steps li {
+    padding-left: 4px;
   }
   .g-steps li::marker {
     color: var(--primary);
@@ -763,7 +776,7 @@
   .g-steps code {
     background: var(--surface-3);
     border-radius: 4px;
-    padding: 1px 5px;
+    padding: 2px 6px;
     font-size: 12px;
   }
 
@@ -773,10 +786,10 @@
     gap: var(--s-5);
   }
   fieldset {
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--r-lg);
     background: var(--surface);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-raised);
     padding: var(--s-6);
     display: flex;
     flex-direction: column;
@@ -806,7 +819,7 @@
     color: var(--text-2);
   }
   .inp {
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     background: var(--surface-3);
     border-radius: 10px;
     padding: 10px 12px;
@@ -814,11 +827,12 @@
     color: var(--text-1);
     font-family: inherit;
     outline: none;
+    box-shadow: var(--shadow-inset-sm);
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .inp:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
   .inp.filled {
     border-color: color-mix(in srgb, var(--text-3) 55%, var(--border));
@@ -827,13 +841,13 @@
     border-color: var(--success);
   }
   .inp.ok:focus {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px color-mix(in srgb, var(--success) 45%, transparent);
   }
   .inp.err {
     border-color: var(--danger);
   }
   .inp.err:focus {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px color-mix(in srgb, var(--danger) 45%, transparent);
   }
   .inp.disabled {
     opacity: 0.55;
@@ -853,8 +867,8 @@
     flex-wrap: wrap;
   }
   .pill {
-    border: 1px solid var(--border);
-    background: var(--surface-3);
+    border: none;
+    background: var(--surface-2);
     color: var(--text-2);
     border-radius: var(--r-full);
     padding: 6px 14px;
@@ -866,11 +880,11 @@
   }
   .pill:hover {
     color: var(--primary);
-    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    background: var(--surface-3);
   }
   .pill.on {
     background: var(--primary-soft);
-    border-color: var(--primary);
+    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
     color: var(--primary);
   }
   .pill:focus-visible {
@@ -985,8 +999,8 @@
     flex-wrap: wrap;
   }
   .btn {
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border: none;
+    background: var(--surface-2);
     color: var(--text-1);
     border-radius: var(--r-full);
     padding: 9px 22px;
@@ -997,22 +1011,26 @@
     transition: all var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
     color: var(--primary);
+    background: var(--surface-3);
+  }
+  .btn:active {
+    transform: scale(0.98);
   }
   .btn.primary {
     background: var(--primary);
-    border-color: var(--primary);
     color: #fff;
   }
   .btn.primary:hover {
     background: var(--primary-hover);
+    color: #fff;
   }
   .btn.primary:active {
     background: var(--primary-active);
   }
   .btn.ghost {
     background: transparent;
+    box-shadow: none;
   }
   .btn.big {
     padding: 11px 30px;

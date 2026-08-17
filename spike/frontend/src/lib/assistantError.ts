@@ -18,5 +18,5 @@ export function friendlyAssistantError(e: unknown): FriendlyAssistantError {
   if (s.startsWith("Error: ia_429") || s.includes("saturado por el límite de peticiones")) {
     return { text: "El proveedor de IA está temporalmente saturado (límite de peticiones). Inténtalo de nuevo en un momento.", retryable: true };
   }
-  return { text: s, retryable: false };
+  return { text: s.trim() && s !== "undefined" && s !== "Error: " ? s : "Error inesperado al hablar con la IA. Inténtalo de nuevo.", retryable: false };
 }

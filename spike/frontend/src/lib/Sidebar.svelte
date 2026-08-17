@@ -112,7 +112,6 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 6px 14px -4px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .brand {
     font-size: 17px;

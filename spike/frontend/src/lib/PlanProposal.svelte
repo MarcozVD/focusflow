@@ -47,6 +47,12 @@
     return p.items.reduce((n, i) => n + i.sessions.length, 0);
   }
 
+  // Evento entendido con fecha: aunque no haya sesiones que planificar,
+  // aceptar registra el evento en el calendario (el botón no debe bloquearse).
+  function hasRegisterableEvent(p: PlanProposalView): boolean {
+    return p.understanding.some((u) => u.intent_type === "Event" && u.window_start != null);
+  }
+
   function iso(ms: number): string {
     const d = new Date(ms);
     return d.toISOString().slice(0, 10);
@@ -246,7 +252,7 @@
           <button class="btn" onclick={startEdit} disabled={planBusy() || proposal.items.length === 0}>Editar</button>
         {/if}
         <button class="btn ghost" onclick={cancel} disabled={planBusy()}>Cancelar</button>
-        <button class="btn primary" onclick={accept} disabled={planBusy() || proposal.items.length === 0}>
+        <button class="btn primary" onclick={accept} disabled={planBusy() || (proposal.items.length === 0 && !hasRegisterableEvent(proposal))}>
           {planBusy() ? "Procesando…" : "Aceptar plan"}
         </button>
       </div>
@@ -391,15 +397,15 @@
     background: color-mix(in srgb, var(--c, var(--primary)) 13%, var(--surface));
     border-radius: var(--r-full);
     padding: 3px 9px;
-    border: 1px solid color-mix(in srgb, var(--c, var(--primary)) 30%, transparent);
   }
   .chip.src {
     --c: var(--primary);
     flex-shrink: 0;
   }
   .plan-item {
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--r-md);
+    background: var(--surface-2);
     padding: 10px 12px;
     margin-bottom: 8px;
     display: flex;
@@ -485,7 +491,7 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--warning);
-    border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    background: var(--warning-bg);
     border-radius: 6px;
     padding: 1px 6px;
   }
@@ -495,8 +501,9 @@
     gap: 6px;
   }
   .edit-row input {
-    border: 1px solid var(--border);
+    border: none;
     background: var(--surface-3);
+    box-shadow: var(--shadow-inset-sm);
     border-radius: 10px;
     padding: 6px 8px;
     color: var(--text-1);
@@ -505,7 +512,7 @@
     outline: none;
   }
   .edit-row input:focus {
-    border-color: var(--primary);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
   .arr {
     color: var(--text-3);
@@ -572,7 +579,7 @@
   }
   .btn {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface-2);
     color: var(--text-1);
     border-radius: 12px;
     padding: 8px 16px;
@@ -583,17 +590,24 @@
     transition: all var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--e1);
+    background: var(--surface-3);
+  }
+  .btn:active {
+    transform: scale(0.98);
   }
   .btn.primary {
     background: var(--primary);
     color: #fff;
   }
+  .btn.primary:hover {
+    background: var(--primary-hover);
+  }
   .btn.ghost {
     background: transparent;
     box-shadow: none;
-    border: 1px solid var(--border);
+  }
+  .btn.ghost:hover {
+    background: var(--surface-2);
   }
   .btn:disabled {
     opacity: 0.5;

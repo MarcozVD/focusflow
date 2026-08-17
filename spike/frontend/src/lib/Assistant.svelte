@@ -235,6 +235,8 @@
             {/if}
           {:else if m.turn?.type === "Nothing"}
             <p class="answer muted">{m.turn.text}</p>
+          {:else if !m.turn}
+            <p class="answer muted">{m.text || "No pude generar respuesta. Inténtalo de nuevo."}</p>
           {:else if m.turn?.type === "Plan"}
             {@const r = planResult(m.turn.proposal.id)}
             {#if r?.ok}
@@ -354,8 +356,8 @@
     margin: var(--s-3) 0 var(--s-4);
   }
   .chip {
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border: none;
+    background: var(--surface-2);
     color: var(--text-2);
     border-radius: var(--r-full);
     padding: 6px 14px;
@@ -365,8 +367,11 @@
     transition: all var(--dur-fast) var(--ease-out);
   }
   .chip:hover {
-    border-color: var(--primary);
     color: var(--primary);
+    background: var(--surface-3);
+  }
+  .chip:active {
+    transform: scale(0.98);
   }
   .chip:disabled {
     opacity: 0.5;
@@ -397,7 +402,7 @@
   .msg.ai {
     align-self: flex-start;
     background: var(--surface);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-raised);
     border-bottom-left-radius: 4px;
   }
   .msg.ai.typing {
@@ -406,7 +411,7 @@
   .goto-last {
     align-self: center;
     margin: 10px auto 0;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--r-full);
     background: var(--surface-2);
     color: var(--text-2);
@@ -414,12 +419,11 @@
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: var(--e1);
     transition: all var(--dur-fast) var(--ease-out);
   }
   .goto-last:hover {
-    border-color: var(--primary);
     color: var(--primary);
+    background: var(--surface-3);
   }
   .task-refs {
     margin-top: 8px;
@@ -457,21 +461,14 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    border: 1px solid var(--border);
-    border-left-width: 3px;
+    border: none;
     border-radius: var(--r-md);
     padding: 8px 12px;
     background: var(--surface-2);
-    transition: border-color var(--dur-fast) var(--ease-out);
+    transition: background var(--dur-fast) var(--ease-out);
   }
-  .task-ref.urgent {
-    border-left-color: var(--danger);
-  }
-  .task-ref.important {
-    border-left-color: var(--warning);
-  }
-  .task-ref.normal {
-    border-left-color: var(--border);
+  .task-ref:hover {
+    background: var(--surface-3);
   }
   .task-ref-body {
     flex: 1;
@@ -575,9 +572,13 @@
     border-radius: 10px;
     cursor: pointer;
     margin-top: 8px;
+    transition: all var(--dur-fast) var(--ease-out);
   }
   .retry:hover {
-    filter: brightness(1.08);
+    background: var(--primary-hover);
+  }
+  .retry:active {
+    transform: scale(0.98);
   }
   .row {
     display: flex;
@@ -587,7 +588,7 @@
   }
   .btn {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface-2);
     color: var(--text-1);
     border-radius: 12px;
     padding: 8px 16px;
@@ -597,17 +598,24 @@
     transition: all var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--e1);
+    background: var(--surface-3);
+  }
+  .btn:active {
+    transform: scale(0.98);
   }
   .btn.primary {
     background: var(--primary);
     color: #fff;
   }
+  .btn.primary:hover {
+    background: var(--primary-hover);
+  }
   .btn.ghost {
     background: transparent;
     box-shadow: none;
-    border: 1px solid var(--border);
+  }
+  .btn.ghost:hover {
+    background: var(--surface-2);
   }
   .btn:disabled {
     opacity: 0.5;
@@ -621,17 +629,19 @@
   }
   .t {
     flex: 1;
-    border: 1px solid var(--border);
+    border: none;
     background: var(--surface-3);
+    box-shadow: var(--shadow-inset-sm);
     border-radius: 14px;
     padding: 10px 14px;
     font-size: 14px;
     color: var(--text-1);
     font-family: inherit;
     outline: none;
+    transition: box-shadow var(--dur-fast) var(--ease-out);
   }
   .t:focus {
-    border-color: var(--primary);
+    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
   .foot {
     text-align: center;
