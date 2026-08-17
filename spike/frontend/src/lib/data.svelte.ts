@@ -261,6 +261,8 @@ export async function planFromText(text: string): Promise<{ ok: boolean; source:
     store.planProposal = null;
     return { ok: false, source: "stale", error: "sin Tauri" };
   }
+  // una petición a la vez: llamadas concurrentes duplicaban la propuesta
+  if (store.planBusy) return { ok: false, source: "stale", error: "ya hay una propuesta en curso" };
   store.planBusy = true;
   store.planError = "";
   try {
@@ -1049,6 +1051,9 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
     });
     return { ok: true, source: "local" };
   }
+  // una creación a la vez: la tarea se crea en backend antes de cualquier
+  // chequeo; sin esta guardia, Enter repetido la duplicaba
+  if (store.nlBusy) return { ok: false, source: "stale", error: "creación en curso" };
   store.nlBusy = true;
   try {
     const r = await invoke<TaskFromTextResult>("task_from_text", { text });

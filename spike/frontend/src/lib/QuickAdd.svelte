@@ -56,7 +56,9 @@
   }
 
   async function confirm() {
-    if (!text.trim()) return;
+    // guardia anti-doble-envío: Enter repetido mientras procesa no debe
+    // lanzar peticiones concurrentes (duplicaba la tarea)
+    if (!text.trim() || planBusy() || nlBusy()) return;
     const input = text;
     // flujo fase 7: el texto se convierte en propuesta; el usuario la
     // revisa y aprueba antes de tocar el calendario
@@ -100,16 +102,10 @@
       bind:value={text}
       placeholder="Escribe tu tarea…  “Mañana estudiar cálculo de 3pm a 5pm”"
       onkeydown={(e) => {
-        if (e.key === "Enter") {
-          if (showPreview) {
-            confirm();
-          } else if (text.trim()) {
-            showPreview = true;
-          }
-        }
+        if (e.key === "Enter") confirm();
         if (e.key === "Escape") showPreview = false;
       }}
-      oninput={() => (showPreview = showPreview && detected().length > 0)}
+      oninput={() => (showPreview = detected().length > 0)}
     />
     <kbd>Ctrl⇧Espacio</kbd>
   </div>

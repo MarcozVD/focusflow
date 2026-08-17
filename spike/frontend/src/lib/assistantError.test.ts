@@ -26,9 +26,9 @@ describe("friendlyAssistantError", () => {
     expect(r.text).toBe("network reset");
   });
 
-  it("null y vacío se tratan como genéricos", () => {
+  it("null y vacío caen en el mensaje genérico", () => {
     expect(friendlyAssistantError(null).retryable).toBe(false);
-    expect(friendlyAssistantError("").text).toBe("");
+    expect(friendlyAssistantError("").text).toBe("Error inesperado al hablar con la IA. Inténtalo de nuevo.");
   });
 
   it("segundos con decimales se redondean", () => {
