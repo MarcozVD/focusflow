@@ -207,9 +207,6 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
         return None;
     }
 
-    if lower.contains("pasado mañana") || lower.contains("pasado manana") || lower.contains("day after tomorrow") {
-        return Some(local_ms((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap()));
-    }
     // "mañana" como fecha, no como parte del día ("de la mañana", "por la mañana").
     let manana_es_manana = lower.contains("de la mañana")
         || lower.contains("por la mañana")
@@ -217,6 +214,42 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
         || lower.contains("de la manana")
         || lower.contains("por la manana")
         || lower.contains("en la manana");
+
+    // Rango con verbos de inicio/fin ("inicia hoy y finaliza el lunes…"): hay
+    // DOS días distintos; corregir a uno solo destruiría el rango.
+    let start_verb = ["inicia", "empieza", "comienza", "starts", "start"]
+        .iter()
+        .any(|v| lower.contains(v));
+    let end_verb = ["finaliza", "termina", "acaba", "vence", "ends", "finishes", "finish"]
+        .iter()
+        .any(|v| lower.contains(v));
+    if start_verb && end_verb {
+        return None;
+    }
+
+    // Día relativo Y nombre de día de la semana a la vez ("hoy tengo clase y
+    // el viernes examen"): hay varios días, manda la IA.
+    let mentions_weekday = lower.split(|c: char| !c.is_alphabetic()).any(|tok| {
+        matches!(
+            tok,
+            "lunes" | "martes" | "miércoles" | "miercoles" | "jueves" | "viernes"
+                | "sábado" | "sabado" | "domingo" | "monday" | "tuesday" | "wednesday"
+                | "thursday" | "friday" | "saturday" | "sunday"
+        )
+    });
+    let mentions_relative = lower.contains("hoy")
+        || lower.contains("today")
+        || lower.contains("pasado mañana")
+        || lower.contains("pasado manana")
+        || lower.contains("day after tomorrow")
+        || (!manana_es_manana && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow")));
+    if mentions_relative && mentions_weekday {
+        return None;
+    }
+
+    if lower.contains("pasado mañana") || lower.contains("pasado manana") || lower.contains("day after tomorrow") {
+        return Some(local_ms((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap()));
+    }
     if !manana_es_manana && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow")) {
         return Some(local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap()));
     }
@@ -584,6 +617,16 @@ mod tests {
         assert_eq!(relative_day_ms("el 15 de agosto presentar informe"), None);
         // sin día → None
         assert_eq!(relative_day_ms("comprar leche"), None);
+        // rango inicia/finaliza: dos días distintos, corregir a uno rompe el rango
+        assert_eq!(
+            relative_day_ms("proyecto de programacion, inicia hoy y finaliza el lunes del siguiente mes a las 4pm"),
+            None
+        );
+        assert_eq!(relative_day_ms("empieza mañana y termina el viernes"), None);
+        // día relativo + día de la semana: varios días, manda la IA
+        assert_eq!(relative_day_ms("hoy tengo clase y el viernes examen"), None);
+        // verbo de fin sin verbo de inicio: un solo día, se corrige igual
+        assert_eq!(relative_day_ms("la clase termina a las 6pm el viernes"), Some(fri));
     }
 
     #[test]

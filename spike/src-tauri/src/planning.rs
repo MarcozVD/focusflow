@@ -377,6 +377,59 @@ fn fill_fixed_item(i: &Intent, start: i64, end: i64) -> PlannedItem {
     }
 }
 
+/// Normaliza ventanas de evento mal formadas por la IA antes de planificar:
+///
+/// - **Multi-día con hora de cierre** ("inicia hoy y finaliza el lunes del
+///   siguiente mes a las 4pm"): la IA devuelve start=hoy 00:00, end=lunes
+///   16:00 y `all_day=false` (hay hora de fin), lo que produce un bloque crudo
+///   que se solapa con todo lo intermedio. Se convierte en:
+///   1. un evento de rango todo el día (medianoche de inicio → medianoche del
+///      día de cierre), y
+///   2. un evento de cierre "<título> (entrega)" de 2 h que EMPIEZA a la hora
+///      dicha (16:00–18:00): "finaliza a las 4pm" significa que el último día
+///      se trabaja de 16:00 a 18:00, nunca de 00:00 a 16:00.
+/// - **Multi-día que termina a medianoche**: rango puro → `all_day=true`.
+/// - **Un solo día 00:00–HH:MM** ("lunes 00:00–16:00"): la IA quiso decir
+///   "termina a las HH:MM" → bloque de cierre HH:MM–HH:MM+2h.
+fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
+    const HOUR: i64 = 3_600_000;
+    let mut out: Vec<Intent> = Vec::with_capacity(intents.len());
+    for i in intents {
+        let mut i = i.clone();
+        if i.intent_type == IntentType::Event && !i.window.all_day {
+            if let (Some(s), Some(e)) = (i.window.start, i.window.end) {
+                if e > s {
+                    let s_day = local_midnight(s);
+                    let e_day = local_midnight(e);
+                    if e_day > s_day {
+                        // multi-día: banner todo el día + cierre con hora
+                        let closing = if e > e_day {
+                            let mut c = i.clone();
+                            c.title = format!("{} (entrega)", i.title);
+                            c.window = TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false };
+                            Some(c)
+                        } else {
+                            None
+                        };
+                        i.window = TimeWindow { start: Some(s_day), end: Some(e_day), all_day: true };
+                        out.push(i);
+                        if let Some(c) = closing {
+                            out.push(c);
+                        }
+                        continue;
+                    }
+                    if s == s_day {
+                        // "00:00–16:00" del mismo día: es un cierre, no un bloque
+                        i.window = TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false };
+                    }
+                }
+            }
+        }
+        out.push(i);
+    }
+    out
+}
+
 fn apply_intents(base: &mut ConstraintEngine, intents: &[Intent]) {
     let ie = ConstraintEngine::from_intents(intents);
     base.commitments.extend(ie.commitments);
@@ -400,7 +453,8 @@ pub fn plan_from_text(
     intents: &[Intent],
     source: &str,
 ) -> Result<PlanProposalView, String> {
-    let enriched = with_default_prep(intents);
+    let normalized = normalize_event_windows(intents);
+    let enriched = with_default_prep(&normalized);
     let intents = enriched.as_slice();
     let mut engine = engine_with_calendar(db);
     apply_intents(&mut engine, intents);
@@ -573,16 +627,28 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
 
     let mut created: Vec<TaskRow> = Vec::new();
 
-    // 1. validar los eventos del texto contra el calendario y entre sí
-    let mut event_spans: Vec<(i64, i64, String)> = plan
+    // 1. validar los eventos del texto contra el calendario y entre sí.
+    // Los eventos de rango "todo el día" multi-día son banners: no ocupan los
+    // días intermedios, así que no se validan por solape crudo (el motor solo
+    // reserva el día inicial y el cierre).
+    let event_spans: Vec<(i64, i64, String, bool)> = plan
         .understanding
         .iter()
         .filter(|u| u.intent_type == IntentType::Event)
-        .filter_map(|u| u.window_start.map(|s| (s, u.window_end.unwrap_or(s + 3_600_000), u.title.clone())))
-        .filter(|(s, e, _)| e > s)
+        .filter_map(|u| {
+            u.window_start
+                .map(|s| (s, u.window_end.unwrap_or(s + 3_600_000), u.title.clone(), u.all_day))
+        })
+        .filter(|(s, e, _, _)| e > s)
         .collect();
-    event_spans.sort_by_key(|(s, _, _)| *s);
-    for w in event_spans.windows(2) {
+    let is_banner = |s: i64, e: i64, all_day: bool| all_day && local_midnight(e) > local_midnight(s);
+    let mut check_spans: Vec<(i64, i64, String)> = event_spans
+        .iter()
+        .filter(|(s, e, _, ad)| !is_banner(*s, *e, *ad))
+        .map(|(s, e, t, _)| (*s, *e, t.clone()))
+        .collect();
+    check_spans.sort_by_key(|(s, _, _)| *s);
+    for w in check_spans.windows(2) {
         if w[1].0 < w[0].1 {
             return Err(format!(
                 "los eventos '{}' y '{}' del texto se solapan",
@@ -590,7 +656,7 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
             ));
         }
     }
-    for (s, e, title) in &event_spans {
+    for (s, e, title) in &check_spans {
         if let Some((_, other)) = db.find_overlap(-1, *s, *e).map_err(|e2| e2.to_string())? {
             return Err(format!(
                 "'{}' ({}) se solapa con '{}'. Edita o cancela.",
@@ -604,7 +670,7 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     // 2. crear eventos fijos — primero, para que la validación de sesiones
     // los conozca (los excluimos: las sesiones del plan ya los rodean)
     let mut event_ids: Vec<i64> = Vec::new();
-    for (start, end, title) in &event_spans {
+    for (start, end, title, _) in &event_spans {
         let u = plan.understanding.iter().find(|u| u.title == *title).expect("evento");
         let t = db
             .create(title, &u.category_id, priority_str(u.priority), *start, *end, u.all_day)
@@ -633,6 +699,14 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         // 2. sesiones de trabajo/preparación
         for (item_idx, s) in &sessions {
             let item = &plan.items[*item_idx];
+            // el bloque de un compromiso de hora fija ya se creó como evento
+            // (mismo título y mismo span): no duplicarlo como sesión
+            if event_spans
+                .iter()
+                .any(|(es, ee, t, _)| t == &item.title && *es == s.start_ms && *ee == s.end_ms)
+            {
+                continue;
+            }
             let t = db
                 .create(&item.title, &item.category_id, priority_str(item.priority), s.start_ms, s.end_ms, false)
                 .map_err(|e| e.to_string())?;
@@ -779,6 +853,74 @@ mod tests {
             .find(|x| x.label == "Proyecto")
             .expect("deadline del día de fin");
         assert_eq!(dl.at_ms, day(4) + 22 * hour, "fecha límite al final del día (22:00)");
+    }
+
+    #[test]
+    fn multiday_with_closing_hour_becomes_banner_plus_closing_block() {
+        // "proyecto de programacion, inicia hoy y finaliza el lunes a las 4pm":
+        // la IA devuelve start=hoy 00:00, end=lunes 16:00, all_day=false.
+        // Se normaliza a banner todo el día + cierre 16:00–18:00 el último día.
+        let d = clean_db();
+        let hour = crate::engine::HOUR_MS;
+        // algo a mitad del rango: el banner NO debe chocar con ello
+        d.create("Otra cosa", "otr", "media", day(2) + 10 * hour, day(2) + 11 * hour, false).unwrap();
+        let mut i = intent("Proyecto de programación", IntentType::Event, 0);
+        i.window = TimeWindow { start: Some(day(0)), end: Some(day(5) + 16 * hour), all_day: false };
+        let view = plan_from_text(&d, "proyecto, inicia hoy y finaliza el lunes a las 4pm", &[i], "ai").unwrap();
+        let banner = view
+            .understanding
+            .iter()
+            .find(|u| u.title == "Proyecto de programación")
+            .expect("banner del rango");
+        assert!(banner.all_day, "el rango queda todo el día");
+        assert_eq!(banner.window_start, Some(day(0)));
+        assert_eq!(banner.window_end, Some(day(5)), "banner hasta medianoche del día de cierre");
+        let cierre = view
+            .understanding
+            .iter()
+            .find(|u| u.title == "Proyecto de programación (entrega)")
+            .expect("bloque de cierre");
+        assert_eq!(cierre.window_start, Some(day(5) + 16 * hour), "el cierre empieza a la hora dicha");
+        assert_eq!(cierre.window_end, Some(day(5) + 18 * hour), "y dura 2 h (16:00–18:00)");
+        // aceptar: no falla por el evento intermedio y no duplica el cierre
+        let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
+        let cierres: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación (entrega)").collect();
+        assert_eq!(cierres.len(), 1, "el cierre se crea una sola vez (evento, no sesión duplicada)");
+        let banners: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación").collect();
+        assert!(banners.iter().any(|t| t.all_day), "banner todo el día creado");
+    }
+
+    #[test]
+    fn same_day_midnight_to_hour_means_closing_block() {
+        // "lunes 00:00–16:00" (patrón roto de la IA) = "termina a las 16:00"
+        // → bloque 16:00–18:00, y el plan propone ese bloque (no vacío).
+        let d = clean_db();
+        let hour = crate::engine::HOUR_MS;
+        let mut i = intent("Entrega", IntentType::Event, 0);
+        i.window = TimeWindow { start: Some(day(3)), end: Some(day(3) + 16 * hour), all_day: false };
+        let view = plan_from_text(&d, "entrega el lunes hasta las 4pm", &[i], "ai").unwrap();
+        let u = &view.understanding[0];
+        assert_eq!(u.window_start, Some(day(3) + 16 * hour));
+        assert_eq!(u.window_end, Some(day(3) + 18 * hour));
+        assert!(!u.all_day);
+        assert_eq!(view.items.len(), 1, "el plan propone el bloque de cierre");
+        let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
+        assert_eq!(created.len(), 1, "solo el evento; la sesión del ítem no se duplica");
+        assert_eq!(created[0].start_at, day(3) + 16 * hour);
+    }
+
+    #[test]
+    fn closing_block_overlap_is_still_rejected() {
+        // el banner no valida solapes intermedios, pero el bloque de cierre SÍ
+        let d = clean_db();
+        let hour = crate::engine::HOUR_MS;
+        d.create("Primer encuentro virtual sincrónico", "uni", "alta", day(5) + 16 * hour, day(5) + 17 * hour, false).unwrap();
+        let mut i = intent("Proyecto de programación", IntentType::Event, 0);
+        i.window = TimeWindow { start: Some(day(0)), end: Some(day(5) + 16 * hour), all_day: false };
+        let view = plan_from_text(&d, "proyecto, inicia hoy y finaliza el viernes a las 4pm", &[i], "ai").unwrap();
+        let err = accept_plan(&d, view.id, &EditedPlan::default()).unwrap_err();
+        assert!(err.contains("se solapa"), "el cierre 16:00–18:00 choca con el encuentro: {err}");
+        assert!(err.contains("(entrega)"));
     }
 
     #[test]

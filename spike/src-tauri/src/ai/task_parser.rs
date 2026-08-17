@@ -28,7 +28,12 @@ RANGOS DE FECHAS (importante):
 - Horas del rango: start_time solo si el texto da hora de inicio explícita ("desde el 5 a las
   10 AM"), end_time solo si da hora final explícita ("hasta el 23 a las 6 PM", "termina a las
   18:00"). Si solo hay hora de fin → start_time vacío (inicio Todo el día) y end_time con la
-  hora. Nunca inventar horas ni fechas que no estén en el texto."#;
+  hora. Nunca inventar horas ni fechas que no estén en el texto.
+- "inicia X y finaliza/termina Y" → start_date = X (si no se menciona inicio → hoy), end_date = Y.
+  Si el fin lleva hora ("finaliza el lunes a las 4pm") → end_time = "16:00": esa hora es el
+  CIERRE del último día (la actividad de ese día empieza a esa hora, 16:00–18:00), NUNCA un
+  bloque 00:00–16:00. start_time vacío salvo hora de inicio explícita.
+- "el lunes del siguiente mes" = ese lunes del mes siguiente al actual (fecha exacta YYYY-MM-DD)."#;
 
 pub fn system_prompt_now() -> String {
     let now = chrono::Local::now();

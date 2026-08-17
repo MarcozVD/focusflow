@@ -61,6 +61,7 @@ REGLAS:
    - reminder: solo aviso ("recuérdame el sábado", "avísame 1 hora antes").
    - constraint: restricción entre elementos ("no puedo el martes por la mañana porque trabajo", "no se superponga con X").
 3. Desambiguación: si el input menciona UNA actividad con fecha, es event. Un RANGO de fechas que describe una ACTIVIDAD ("proyecto del lunes al viernes", "reunión del 10 al 15 de agosto", "informe de septiembre a octubre") es event multi-día: pon start_date Y end_date (fecha del último día mencionado), end_time: null (todo el día). availability SOLO cuando el texto declara disponibilidad explícita ("disponible/available/estaré libre del 5 al 23").
+   RANGO CON INICIO Y FIN ("inicia hoy y finaliza el lunes del siguiente mes a las 4pm", "empieza mañana y termina el viernes"): start_date = inicio indicado (si no se menciona inicio, start_date = HOY), end_date = fin. Si el fin lleva hora ("a las 4pm") → end_time = esa hora ("16:00"): es el CIERRE del último día — la actividad de ese día ocupa 2 horas DESDE esa hora (16:00–18:00), NUNCA de 00:00 a 16:00. start_time: null salvo hora de inicio explícita. "El lunes del siguiente mes" = ese lunes del mes siguiente al actual (fecha exacta YYYY-MM-DD).
 4. COMPUESTOS: un input puede producir varios intents. "Examen el viernes y necesito 4 horas para preparar" → 1 intent event con preparation_minutes=240. "Estudiar el viernes y programación el sábado" → 2 intents event.
 5. PREPARACIÓN ADJUNTA: cuando el usuario dice "necesito N horas para prepararme/estudiar para X" o "necesito al menos N horas", pon N*60 en preparation_minutes DENTRO del intent del evento/deadline. El planner reserva ese tiempo antes.
 6. DESCONOCIDO = null. Jamás inventes fechas, horas ni duraciones. Si no se sabe la hora, start_time: null y all_day implícito. Si no se sabe el día, start_date: null.
@@ -87,6 +88,9 @@ Usuario: "Diagnostic Test is available from August 5 until August 23."
 
 Usuario: "Tengo un proyecto del lunes al viernes de la primera semana de septiembre."
 → {"intents":[{"intent_type":"event","title":"Proyecto","category":"Trabajo","priority":"media","start_date":"2026-09-07","start_time":null,"end_date":"2026-09-11","end_time":null,"duration_minutes":null,"confidence":0.85,"reason":"evento multi-día con rango de fechas"}]}
+
+Usuario: "proyecto de programacion, inicia hoy y finaliza el lunes del siguiente mes a las 4pm"
+→ {"intents":[{"intent_type":"event","title":"Proyecto de programación","category":"Universidad","priority":"media","start_date":"<hoy>","start_time":null,"end_date":"<lunes del mes siguiente>","end_time":"16:00","duration_minutes":null,"confidence":0.9,"reason":"rango con inicio hoy y cierre con hora el último día"}]}
 "#;
 
 /// Parsea el JSON del proveedor en un lote validado de intents.
