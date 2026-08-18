@@ -32,6 +32,7 @@ fn w(s: &str) -> HSTRING {
     HSTRING::from(s)
 }
 
+
 /// PROPVARIANT VT_LPWSTR construido a mano (el crate no expone
 /// `InitPropVariantFromString` escalar). `SetValue` copia la cadena, así que
 /// el buffer `wide` solo tiene que vivir hasta que vuelve la llamada.
@@ -77,8 +78,11 @@ pub fn ensure_toast_identity() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         let store: IPropertyStore = link.cast().map_err(|e| e.to_string())?;
         let aumid_wide: Vec<u16> = AUMID.encode_utf16().chain(std::iter::once(0)).collect();
-        let pv = propvariant_str(&aumid_wide);
-        store.SetValue(&PKEY_AppUserModel_ID, &pv).map_err(|e| e.to_string())?;
+        // ManuallyDrop: el Drop del PROPVARIANT del crate llama PropVariantClear,
+        // que intentaría liberar con CoTaskMemFree un puntero del heap de Rust
+        // (el Vec) y abortaría el proceso. La variante nunca es dueña del buffer.
+        let pv = core::mem::ManuallyDrop::new(propvariant_str(&aumid_wide));
+        store.SetValue(&PKEY_AppUserModel_ID, &*pv).map_err(|e| e.to_string())?;
         store.Commit().map_err(|e| e.to_string())?;
         let persist: IPersistFile = link.cast().map_err(|e| e.to_string())?;
         persist
