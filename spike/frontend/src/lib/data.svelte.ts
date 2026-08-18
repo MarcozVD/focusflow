@@ -28,7 +28,7 @@ export interface Task {
   reminderMinutes?: number | null;
 }
 
-interface TaskRow {
+export interface TaskRow {
   id: number;
   title: string;
   category_id: string;

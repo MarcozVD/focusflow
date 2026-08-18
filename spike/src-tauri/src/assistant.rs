@@ -159,6 +159,18 @@ pub fn context_snapshot(db: &Db) -> String {
             .into_iter()
             .filter(|t| t.status != "completada")
             .collect();
+        pending.sort_by_key(|t| t.id);
+        // Deduplica copias idénticas (mismo título normalizado y mismo día de
+        // vencimiento): altas repetidas no deben inflar el contexto de la IA.
+        let mut seen: std::collections::HashSet<(String, i64)> = std::collections::HashSet::new();
+        pending.retain(|t| {
+            let day = chrono::Local
+                .timestamp_millis_opt(t.end_at)
+                .earliest()
+                .map(|d| d.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp())
+                .unwrap_or(0);
+            seen.insert((t.title.trim().to_lowercase(), day))
+        });
         pending.sort_by_key(|t| t.start_at);
         total = pending.len();
         let view: Vec<serde_json::Value> = pending
@@ -311,6 +323,31 @@ pub fn task_refs(db: &Db, now: i64) -> Vec<TaskRefView> {
             }
         })
         .collect();
+
+    // Deduplica copias idénticas (mismo título normalizado y mismo día de
+    // vencimiento): puede haber duplicados activos por altas repetidas; el
+    // asistente solo debe ver una. Se conserva la de id menor.
+    let mut seen: std::collections::HashMap<(String, chrono::NaiveDate), i64> =
+        std::collections::HashMap::new();
+    refs.retain(|r| {
+        let day = chrono::Local
+            .timestamp_millis_opt(r.end_ms)
+            .earliest()
+            .map(|d| d.date_naive())
+            .unwrap_or(today);
+        let key = (r.title.trim().to_lowercase(), day);
+        match seen.get(&key) {
+            Some(prev) if *prev < r.id => false,
+            Some(_) => {
+                seen.insert(key, r.id);
+                true
+            }
+            None => {
+                seen.insert(key, r.id);
+                true
+            }
+        }
+    });
 
     let rank = |l: &str| match l {
         "URGENT" => 0,
@@ -1041,5 +1078,27 @@ mod tests {
             let t = d.get_task(r.id).unwrap().unwrap();
             assert_eq!(r.title, t.title, "referencia real, no inventada");
         }
+    }
+
+    #[test]
+    fn task_refs_dedupes_identical_copies() {
+        let d = Db::open_memory_clean_pub().unwrap();
+        // 5 copias idénticas (mismo título y mismo día de vencimiento), como
+        // las que quedaron por altas repetidas: el asistente solo ve una.
+        for _ in 0..5 {
+            d.create("Reunion", "uni", "media", day_start(3), day_start(3) + 3_600_000, false)
+                .unwrap();
+        }
+        // mismo título pero otro día: NO es duplicado
+        d.create("Reunion", "uni", "media", day_start(5), day_start(5) + 3_600_000, false)
+            .unwrap();
+        // distinto título, mismo día: NO es duplicado
+        d.create("Otra reunion", "uni", "media", day_start(3), day_start(3) + 7_200_000, false)
+            .unwrap();
+
+        let refs = task_refs(&d, crate::email::now_ms());
+        assert_eq!(refs.len(), 3, "una copia por duplicado: {}", refs.len());
+        let first = refs.iter().find(|r| r.title == "Reunion" && r.end_ms == day_start(3) + 3_600_000).unwrap();
+        assert_eq!(first.id, 1, "se conserva la copia de id menor");
     }
 }

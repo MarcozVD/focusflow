@@ -1,7 +1,7 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import {
     suggestions as suggestionsStore,
-    tasks as tasksStore,
     categories,
     cat,
     fmtDate,
@@ -15,17 +15,18 @@
     syncNow,
     syncRunning,
     type Suggestion,
+    type TaskRow,
     KIND_LABELS,
   } from "./data.svelte";
 
   const suggestions = $derived(suggestionsStore());
-  const tasks = $derived(
-    [...tasksStore()].sort((a, b) => (a.start_at ?? 0) - (b.start_at ?? 0)),
-  );
 
   let editing = $state<number | null>(null);
   let mergeFor = $state<number | null>(null);
   let mergeTask = $state("");
+  // todas las tareas pendientes (no solo las de las semanas cargadas), para
+  // que la fusión pueda elegir cualquier tarea y preseleccionar la sugerida
+  let mergeTasks = $state<TaskRow[]>([]);
 
   let eTitle = $state("");
   let eCat = $state("otr");
@@ -55,13 +56,28 @@
     eDesc = s.description;
   }
 
-  function startMerge(s: Suggestion) {
+  async function startMerge(s: Suggestion) {
     // siempre se elige la tarea destino; si el aviso ya marca una (duplicado
     // detectado), queda preseleccionada y se puede cambiar por cualquier otra
     mergeFor = s.id;
+    mergeTask = "";
+    // carga TODAS las tareas activas (no solo las de las semanas en caché) y
+    // filtra completadas; la sugerida va primero en la lista
+    const all = await invoke<TaskRow[]>("task_list");
+    const pend = all.filter((t) => t.status !== "completada");
+    pend.sort((a, b) => {
+      const sug = s.dedupe_task_id;
+      if (sug != null) {
+        if (a.id === sug) return -1;
+        if (b.id === sug) return 1;
+      }
+      return (a.start_at ?? 0) - (b.start_at ?? 0);
+    });
+    mergeTasks = pend;
     const suggested = s.dedupe_task_id;
-    mergeTask =
-      suggested != null && tasks.some((t) => t.id === suggested) ? String(suggested) : "";
+    if (suggested != null && pend.some((t) => t.id === suggested)) {
+      mergeTask = String(suggested);
+    }
   }
 
   async function saveEdit() {
@@ -172,7 +188,7 @@
         <p class="mt">Fusionar <strong>{s.title}</strong> con una tarea existente:</p>
         <select class="t" bind:value={mergeTask}>
           <option value="">Selecciona la tarea…</option>
-          {#each tasks as t (t.id)}
+          {#each mergeTasks as t (t.id)}
             <option value={t.id}>
               {t.title}{t.start_at ? ` · ${fmtDate(t.start_at)}` : ""}{s.dedupe_task_id === t.id ? " (sugerida)" : ""}
             </option>
