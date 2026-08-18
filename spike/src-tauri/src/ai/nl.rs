@@ -573,11 +573,18 @@ mod tests {
     fn absolute_date_with_month() {
         let t = parse("el 15 de agosto a las 9 presentar informe");
         let today = chrono::Local::now().date_naive();
-        let (y, m) = (today.year(), today.month());
-        let target_m: u32 = 8;
-        let year = if target_m < m { y + 1 } else { y };
-        let date = chrono::NaiveDate::from_ymd_opt(year, target_m, 15).unwrap();
-        let day_ms = local_ms(date.and_hms_opt(0, 0, 0).unwrap());
+        let (y, m, _) = ymd(today);
+        // misma regla del parser: año actual o siguiente si el mes ya pasó…
+        let year = if 8 < m { y + 1 } else { y };
+        let date = chrono::NaiveDate::from_ymd_opt(year, 8, 15).unwrap();
+        // …y si el día ya pasó este mes, cae al "próximo día 15"
+        let expected = if date >= today {
+            date
+        } else {
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            chrono::NaiveDate::from_ymd_opt(ny, nm, 15).unwrap()
+        };
+        let day_ms = local_ms(expected.and_hms_opt(0, 0, 0).unwrap());
         assert_eq!(t.start_ms, day_ms + 9 * HOUR);
         assert_eq!(t.end_ms, day_ms + 10 * HOUR);
         assert_eq!(t.title, "Presentar informe");

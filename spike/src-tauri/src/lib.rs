@@ -24,6 +24,8 @@ pub mod planning;
 pub mod reminders;
 pub mod store;
 pub mod sync;
+#[cfg(windows)]
+pub mod win_toast;
 
 use ai::{validation::ParsedTask, AiConfig};
 use store::{lock_recover, Db, TaskRow};
@@ -1715,6 +1717,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             db.settings_default("notif.cooldown_hours", "24").ok();
             db.settings_default("plan.default_task_min", "60").ok();
             app.manage(Mutex::new(db));
+
+            // Notificaciones con nombre e icono de FocusFlow (no PowerShell):
+            // registra el AppUserModelID y su acceso directo en el menú Inicio.
+            #[cfg(windows)]
+            match crate::win_toast::ensure_toast_identity() {
+                Ok(()) => append_log(&handle, "toast_identity_ok"),
+                Err(e) => append_log(&handle, &format!("toast_identity_error: {e}")),
+            }
 
             let show = MenuItem::with_id(&handle, "show", "Abrir FocusFlow", true, None::<&str>)?;
             let quit = MenuItem::with_id(&handle, "quit", "Salir", true, None::<&str>)?;

@@ -765,13 +765,20 @@ mod tests {
         assert_eq!(i.title, "Exam");
         assert!(i.confidence >= 0.8, "explícita: {}", i.confidence);
 
-        // fecha absoluta con mes
+        // fecha absoluta con mes (misma regla del parser: si el día ya pasó
+        // este mes, rota al próximo día 15)
         let i = intent_of("el 15 de agosto a las 9 presentar informe", 0);
         let today = chrono::Local::now().date_naive();
         let (y, m, _) = nl::ymd(today);
         let year = if 8 < m { y + 1 } else { y };
-        let day = chrono::NaiveDate::from_ymd_opt(year, 8, 15).unwrap();
-        let dms = nl::local_ms(day.and_hms_opt(0, 0, 0).unwrap());
+        let date = chrono::NaiveDate::from_ymd_opt(year, 8, 15).unwrap();
+        let expected = if date >= today {
+            date
+        } else {
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            chrono::NaiveDate::from_ymd_opt(ny, nm, 15).unwrap()
+        };
+        let dms = nl::local_ms(expected.and_hms_opt(0, 0, 0).unwrap());
         assert_eq!(i.window.start, Some(dms + 9 * HOUR));
         assert_eq!(i.title, "Presentar informe");
     }
@@ -874,7 +881,10 @@ mod tests {
         assert_eq!(i.title, "Proyecto");
 
         // rango de dígitos con actividad también es evento multi-día
-        let i = intent_of("proyecto del 10 al 15 de agosto", 0);
+        let (_, m0, _) = nl::ymd(chrono::Local::now().date_naive());
+        let nm = if m0 == 12 { 1 } else { m0 + 1 };
+        let month_name = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][(nm - 1) as usize];
+        let i = intent_of(&format!("proyecto del 10 al 15 de {month_name}"), 0);
         assert_eq!(i.intent_type, IntentType::Event);
         assert!(i.window.start.unwrap() < i.window.end.unwrap());
 
