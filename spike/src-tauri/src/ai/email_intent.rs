@@ -41,6 +41,7 @@ REGLAS:
 13. HILOS: si el correo es una RESPUESTA dentro de una conversación y corrige/actualiza un compromiso mencionado antes ("corrección: la entrega es el lunes", "se pospone al viernes"), usa la fecha NUEVA en el intent. NO generes dos intents por el mismo compromiso: el correo nuevo es la versión vigente.
 14. CONTEXTO ACADÉMICO: extrae materia/asignatura y profesor cuando se mencionen ("para la materia de Arquitectura", "Profesor: X"). Pon la materia como category si es académica, y el profesor en la descripción (description) del intent si es necesario para identificarlo.
 15. DESCRIPTION: pon en description el QUÉ HAY QUE HACER en una frase corta y útil (temas del quiz, qué entregar, dónde, plataforma, link si aparece). El contexto que ayude a ejecutar la tarea; nunca cortesías.
+16. VENCIDOS: si el compromiso ya pasó respecto a la fecha actual (entrega o evento anterior a hoy), NO lo incluyas: no hay nada accionable que planificar.
 
 Ejemplos:
 Correo: "Hola, te escribo para recordarte que el informe del proyecto se entrega el lunes 10 a las 23:59. También necesitamos verte el martes 11 a las 10:00. Un saludo."

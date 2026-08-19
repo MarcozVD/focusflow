@@ -651,7 +651,9 @@ mod tests {
     #[test]
     fn free_time_offer_needs_candidate() {
         let db = db();
-        let now = now_ms();
+        // anclado a las 10:00 locales de hoy: con la hora real el test
+        // fallaba de noche (ya no queda hueco libre suficiente en el día)
+        let now = day_start(now_ms()) + 10 * 3_600_000;
         db.create("Cosas libres", "per", "baja", now, now + 3_600_000, false).unwrap();
         db.create("Preparar entrevista", "trab", "alta", at(1, 9, 0), at(1, 11, 0), false).unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
@@ -698,8 +700,10 @@ mod tests {
 
     #[test]
     fn first_free_block_merges_busy() {
-        let now = now_ms();
-        let day = day_start(now);
+        // anclado a las 08:00 locales de hoy: con la hora real el test
+        // fallaba de noche (no quedaban 120 min hasta medianoche)
+        let day = day_start(now_ms());
+        let now = day + 8 * 3_600_000;
         let mk = |s: i64, e: i64| TaskRow {
             id: 0,
             title: String::new(),

@@ -88,6 +88,14 @@ pub struct SyncCheckpoint {
     pub uidvalidity: u32,
     #[serde(default)]
     pub last_reviewed_date: i64,
+    /// Correo que falló por red/IA en el último intento y cuántas veces
+    /// seguidas lleva fallando. Si el mismo correo falla MAX_SYNC_RETRIES
+    /// veces seguidas, se salta para no congelar el checkpoint para siempre
+    /// (un rescan manual lo recupera).
+    #[serde(default)]
+    pub fail_uid: u32,
+    #[serde(default)]
+    pub fail_count: u32,
 }
 
 impl SyncCheckpoint {
@@ -96,8 +104,28 @@ impl SyncCheckpoint {
             uid: 0,
             uidvalidity: 0,
             last_reviewed_date: now_ms(),
+            fail_uid: 0,
+            fail_count: 0,
         }
     }
+}
+
+/// Fallos seguidos de red/IA sobre el MISMO correo antes de saltarlo.
+pub const MAX_SYNC_RETRIES: u32 = 3;
+
+/// Registra un fallo transitorio (red/IA) sobre `uid`. Devuelve el checkpoint
+/// actualizado y `true` si el correo lleva MAX_SYNC_RETRIES fallos seguidos y
+/// debe saltarse para no congelar el sync.
+pub fn register_fail(cp: &SyncCheckpoint, uid: u32) -> (SyncCheckpoint, bool) {
+    let mut next = cp.clone();
+    if next.fail_uid == uid {
+        next.fail_count += 1;
+    } else {
+        next.fail_uid = uid;
+        next.fail_count = 1;
+    }
+    let skip = next.fail_count >= MAX_SYNC_RETRIES;
+    (next, skip)
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +399,29 @@ let mut body_text = parse_body(&pm);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn register_fail_skips_after_max_retries_on_same_uid() {
+        let cp = SyncCheckpoint::empty();
+        let (cp, skip) = register_fail(&cp, 100);
+        assert!(!skip && cp.fail_count == 1);
+        let (cp, skip) = register_fail(&cp, 100);
+        assert!(!skip && cp.fail_count == 2);
+        let (cp, skip) = register_fail(&cp, 100);
+        assert!(skip && cp.fail_count == 3, "3 fallos seguidos → saltar");
+        // otro uid reinicia el contador
+        let (cp, skip) = register_fail(&cp, 200);
+        assert!(!skip && cp.fail_count == 1 && cp.fail_uid == 200);
+    }
+
+    #[test]
+    fn checkpoint_fail_fields_default_to_zero_in_old_json() {
+        // checkpoints guardados antes de este campo deben seguir parseando
+        let cp: SyncCheckpoint =
+            serde_json::from_str(r#"{"uid":10,"uidvalidity":3,"last_reviewed_date":1}"#).unwrap();
+        assert_eq!(cp.uid, 10);
+        assert_eq!(cp.fail_count, 0);
+    }
 
     fn raw(sender: &str, subject: &str, body: &str) -> RawEmail {
         RawEmail {

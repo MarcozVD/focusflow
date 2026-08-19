@@ -208,9 +208,19 @@ fn analyze_email(
             );
             Err(format!("ia_429 {detail}"))
         }
-        Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
+        Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) => {
             Err(format!("ia_fail {e}"))
         }
+        Err(AiError::BadResponse(e)) if e.contains("intención inválida") => {
+            // Permanente: la IA produjo intents que nunca pasarán la
+            // validación para ESTE correo (p. ej. deadline en el pasado en un
+            // correo viejo). Abortar aquí dejaba el checkpoint congelado para
+            // siempre: se reintentaba el mismo correo en cada sync. Se registra
+            // y se trata como "sin compromisos" para poder avanzar.
+            crate::append_log(app, &format!("email_intent_invalid uid={} {e}", raw.uid));
+            Ok(Vec::new())
+        }
+        Err(AiError::BadResponse(e)) => Err(format!("ia_fail {e}")),
         Err(AiError::InvalidJson(e)) => {
             crate::append_log(app, &format!("email_parse_invalid_json uid={} {e}", raw.uid));
             Ok(Vec::new())
@@ -492,8 +502,26 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                                 summary.total_suggestions += n;
                             }
                         Err(e) => {
-                            // fallo de red/IA → no avanzar checkpoint
-                            let cp = serde_json::to_string(&checkpoint).unwrap_or_default();
+                            // fallo de red/IA → no avanzar checkpoint… pero si
+                            // el MISMO correo falla MAX_SYNC_RETRIES veces
+                            // seguidas (p. ej. proveedor saturado por horas),
+                            // se salta para no congelar el sync entero; un
+                            // rescan manual puede recuperarlo después.
+                            let transient = e.starts_with("ia_429") || e.starts_with("ia_fail");
+                            let mut cp2 = checkpoint.clone();
+                            if transient {
+                                let (next, skip) = crate::email::register_fail(&checkpoint, raw.uid);
+                                cp2 = next;
+                                if skip {
+                                    crate::append_log(
+                                        app,
+                                        &format!("email_skip_after_retries uid={} {e}", raw.uid),
+                                    );
+                                    last_decided_uid = last_decided_uid.max(raw.uid);
+                                    continue;
+                                }
+                            }
+                            let cp = serde_json::to_string(&cp2).unwrap_or_default();
                             with_db(app, |db| {
                                 let _ = db.sync_state_set(&source, &cp, "error", &e);
                                 let _ = db.sync_history_add(
