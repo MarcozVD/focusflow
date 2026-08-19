@@ -1,176 +1,366 @@
 # FocusFlow
 
-> Productividad personal para Windows: calendario, tareas, agenda, recordatorios y widget de escritorio en una sola superficie **local, instantánea y bella**.
+### Gestor personal de tiempo con IA — local, instantáneo y bonito
 
-FocusFlow concentra en una sola app todo lo que normalmente vives repartido entre calendarios, apps de tareas y notas. Captura cualquier compromiso escribiendo una frase ("Mañana estudiar cálculo de 3pm a 5pm"), te recuerda en el momento exacto y funciona **sin nube**: los datos viven en SQLite local.
+FocusFlow es una aplicación de escritorio para Windows diseñada para **organizar, planificar y gestionar tu tiempo de forma inteligente**.
 
-- 💾 **Local-first**: 100 % funcional sin internet, sin cuentas, sin suscripción
-- ⚡ **Captura en segundos**: entrada por lenguaje natural con Ctrl+Shift+Espacio
-- 🧩 **Un solo modelo mental**: eventos, entregas, citas y pagos son *tareas*
-- 🪟 **Widget de escritorio**: transparente, sin marco, siempre visible
-- 🤖 **IA enchufable**: parser por reglas + proveedor de IA configurable (compatible OpenAI)
-- 📬 **Sincronización de correo**: sugerencias de tareas desde tus emails (IMAP)
+Combina calendario, gestión de tareas, notificaciones y un asistente de IA para convertir lenguaje natural y correos electrónicos en un horario organizado, manteniendo tus datos localmente en tu equipo.
+
+> **FocusFlow está actualmente en Demo / Beta.**
+
+---
+
+## Demo
+
+![FocusFlow Demo](image.png)
 
 ---
 
 ## Características
 
-### Calendario y agenda
-- Vistas **mes, semana y día** con horario visible 6:00–22:00 que **se expande automáticamente** si una tarea ocurre fuera de esa franja
-- **Agenda mixta**: tareas y eventos en una línea de tiempo unificada
-- **Drag & drop** para reprogramar y redimensionar tareas con ajuste a bloques de 15 min y **validación de conflictos** (aviso al soltar si se solapa con otra tarea)
-- Tareas **multi-día** (marcadas "⟳ continúa" en días intermedios) y tareas **todo el día** (sección fija estilo Google Calendar)
-- Hoy destacado, navegación rápida por días/semanas/meses
+* **Calendario inteligente** — Vistas de mes, semana y día con drag & drop, validación de conflictos, tareas multi-día y tareas de todo el día.
+* **Gestión de tareas** — Crea, edita, mueve, duplica, fusiona y completa tareas con categorías, prioridades, etiquetas, notas y enlaces.
+* **QuickAdd** — `Ctrl+Shift+Espacio` desde cualquier aplicación para crear tareas mediante lenguaje natural.
+* **Procesamiento local** — Si la IA tarda, no está disponible o no hay API configurada, un parser local basado en reglas permite procesar las entradas inmediatamente.
+* **Asistente IA** — Consulta tu agenda y tareas utilizando lenguaje natural.
+* **Priorización determinista** — Clasifica las tareas como URGENTE, IMPORTANTE o NORMAL sin permitir que la IA invente datos.
+* **Planificación inteligente** — Genera propuestas de horario teniendo en cuenta tareas, prioridades, disponibilidad y conflictos.
+* **Procesamiento de correo** — Analiza correos mediante IMAP para detectar tareas, exámenes y reuniones.
+* **Sugerencias de correo** — Las actividades detectadas pueden aceptarse, editarse, rechazarse o fusionarse con tareas existentes.
+* **Notificaciones nativas** — Recordatorios de Windows con identidad propia, horario silencioso y configuración personalizada.
+* **Widget de escritorio** — Ventana transparente, sin marco y siempre visible para consultar rápidamente la agenda.
+* **Diseño Neumorphism** — Interfaz consistente con soporte para modo claro y oscuro.
+* **Reporte de errores** — Sistema integrado para enviar reportes junto con los logs de la aplicación.
+* **Privacidad local-first** — Las credenciales se almacenan de forma segura y los datos principales permanecen en el dispositivo.
 
-### Captura
-- **Entrada rápida global** con `Ctrl+Shift+Espacio` desde cualquier aplicación
-- **Lenguaje natural**: "Tengo examen de física el próximo lunes a las 8 AM", "Pagar internet el 15" → la IA completa categoría, prioridad y horario. Si no hay hora explícita, la tarea se crea como **Todo el día** (nunca se inventan horas)
-- Formulario completo: título, descripción, categoría, prioridad, etiquetas, fechas, recordatorio, notas y enlaces
+---
 
-### Organización
-- 6 categorías con color e icono (Universidad, Trabajo, Personal, Finanzas, Salud, Otros)
-- Prioridades Alta / Media / Baja, etiquetas libres, progreso, estado (pendiente, en curso, completada, vencida)
-- Arrastrar para reprogramar actualiza recordatorios y notificaciones al instante
+## Cómo funciona
 
-### Widget de escritorio
-- Ventana **transparente sin marco**: solo el contenido flotando sobre el escritorio
-- Mismo diseño que la app (colores, sombras, tipografía, animaciones) y **tema sincronizado** con persistencia claro/oscuro
-- Escalado automático: compacto con pocas tareas, crece con más; con más de 8–10 muestra "+N tareas más" y abre la app en Agenda
-- Clic en una tarea → abre la app con esa tarea; completar directamente desde el widget
+```text
+             Usuario
+                │
+                ▼
+     ┌────────────────────┐
+     │ QuickAdd / Correo  │
+     │ Lenguaje natural   │
+     └──────────┬─────────┘
+                │
+                ▼
+       ┌────────────────┐
+       │ Procesamiento  │
+       │ IA / Local     │
+       └───────┬────────┘
+               │
+               ▼
+     ┌────────────────────┐
+     │ Motor de           │
+     │ planificación      │
+     │                    │
+     │ Huecos disponibles │
+     │ Prioridades        │
+     │ Conflictos         │
+     └──────────┬─────────┘
+                │
+                ▼
+       ┌────────────────┐
+       │    SQLite      │
+       │     Local      │
+       └───────┬────────┘
+               │
+               ▼
+        Notificaciones
+```
 
-### IA y correo
-- **Parser por reglas** (offline) + **proveedor IA** configurable (endpoint y modelo compatibles con OpenAI, clave opcional)
-- **Sincronización de correo IMAP**: detecta compromisos en emails, genera *sugerencias* que puedes aceptar, rechazar, editar o fusionar con tareas existentes
-- Filtros por remitentes, dominios y palabras clave + lista de remitentes de confianza
-- Estado de sincronización "de hoy": correos revisados, tareas creadas, errores y próxima sincronización
+La meta es pasar de **gestionar manualmente un calendario** a tener un asistente que ayude activamente a organizar el tiempo.
 
-### Sistema
-- Bandeja del sistema: cerrar → minimizar a bandeja, menú con acciones rápidas
-- Inicio con Windows opcional, empezar en segundo plano con solo el widget
-- Tema claro/oscuro Soft UI con persistencia entre reinicios
-- Persistencia en SQLite con WAL, sin dependencia de red
-- **Privacidad**: claves de IA y contraseña de correo cifradas en el Credential Manager de Windows (nunca en la DB); exportación de datos con lista blanca (sin secretos); borrado total con confirmación
+---
+
+## Stack tecnológico
+
+### Frontend
+
+* Svelte 5
+* TypeScript
+* Vite
+* CSS personalizado
+* Diseño Neumorphism
+
+### Desktop y Backend
+
+* Tauri 2
+* Rust
+* Tokio
+* IPC
+* `rusqlite`
+* `native-tls`
+* `keyring`
+
+### Inteligencia Artificial
+
+* APIs compatibles con OpenAI Chat Completions
+* Groq
+* `openai/gpt-oss-120b`
+* Parser local basado en reglas como fallback
+
+### Correo
+
+* IMAP
+* SMTP
+* TLS
+* Sistema de checkpoints y reintentos
+* Detección y deduplicación de sugerencias
+
+### Base de datos
+
+* SQLite
+* `rusqlite`
+* Base de datos local y embebida
+
+### Calidad
+
+* 210 tests de Rust
+* 36 tests de frontend
+* Vitest
+* Cargo Test
 
 ---
 
 ## Arquitectura
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  WINDOW 1: App principal (WebView2)      WINDOW 2: Widget (WebView2) │
-│  Svelte 5 + TypeScript (misma SPA,       Svelte 5 (layout widget,    │
-│  views: mes/semana/día/agenda/…)          transparente, auto-altura) │
-└──────────────┬───────────────────────────┬───────────────────────────┘
-               │ IPC: comandos Tauri + eventos (tasks:changed, …)     │
-┌──────────────▼──────────────────────────────────────────────────────┐
-│  SHELL: Tauri 2 (Rust)                                               │
-│  · ventanas (main, widget, captura) · tray · autostart · hotkey      │
-│  · notificaciones nativas (Windows Toast) · single-instance          │
-└──────────────┬───────────────────────────────────────────────────────┘
-┌──────────────▼───────────────────────────────────────────────────────┐
-│  DOMINIO (Rust — sin dependencias de UI)                             │
-│  · store: SQLite (rusqlite, WAL, migraciones)                        │
-│  · ai: parser de lenguaje natural por reglas + proveedor IA remoto   │
-│  · sync: motor IMAP → sugerencias de tareas + scheduler periódico    │
-│  · comandos IPC: task_*, suggestion_*, ai_*, email_*, widget_*, …    │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-**Principios**:
-- **Sin backend**: el límite del sistema es "UI ↔ dominio", no "cliente ↔ servidor". El dominio en Rust es independiente del shell.
-- La UI **nunca escribe directamente en SQLite**: solo comandos IPC → dominio → store, garantizando invariantes.
-- La IA y la sincronización son **adiciones** sobre contratos definidos desde el día uno; la app funciona sin clave de IA ni correo configurado.
-
-**Stack**: Tauri 2 (Rust) · Svelte 5 (runes) + TypeScript · SQLite (rusqlite, WAL) · tauri-plugin-notification / global-shortcut / single-instance. Justificación completa en [`spec/02-Arquitectura.md`](spec/02-Arquitectura.md).
-
----
-
-## Estructura del repositorio
-
-```
-focusflow/
-├── README.md              ← este archivo
-├── spec/                  Especificación completa del producto
-│   ├── 01-PRD.md          Visión, requisitos, casos de uso, AC del MVP
-│   ├── 02-Arquitectura.md Stack, capas, decisiones justificadas
-│   ├── 03-Modelo-Datos.md Modelo de datos (ER + tablas + índices)
-│   ├── 04-Design-System.md Tokens Soft UI 2.0 (claro/oscuro, sombras, motion)
-│   ├── 05-Roadmap.md      Fases MVP → V5 con esfuerzos y exit criteria
-│   ├── 06-Auditoria.md    Crítica competitiva + propuestas
-│   ├── 07-Spike-Tecnico.md Resultados de la validación técnica
-│   ├── 08-Implementation-Audit.md Auditoría de implementación y deuda técnica
-│   ├── 09-AI-Intent-System.md     Sistema de intenciones con IA
-│   ├── 10-Constraint-Engine.md    Motor de restricciones y planificación
-│   ├── 12-Email-Intelligence.md   Inteligencia sobre el correo (IMAP)
-│   ├── 13-AI-Assistant.md         Asistente conversacional de planes
-│   ├── 14-Security-and-Privacy.md Seguridad y privacidad
-│   ├── 14-Widget-Companion.md     Widget de escritorio
-│   ├── 15-Contextual-Notifications.md Notificaciones contextuales
-│   └── 15-Testing.md      Estrategia y suite de pruebas
-├── spike/                 App real (Tauri 2 + Svelte 5 + Rust)
-│   ├── frontend/          UI (Svelte 5 + Vite + TypeScript)
-│   ├── src-tauri/         Shell y dominio Rust (store, ai, sync, comandos)
-│   └── tools/             Utilidades de desarrollo (mocks IA/IMAP, e2e)
-└── proto/                 Prototipo Svelte 5 del diseño (validación de UX)
+```text
+FocusFlow
+│
+├── Svelte 5
+│   ├── Calendario
+│   ├── Agenda
+│   ├── Asistente
+│   ├── Sugerencias
+│   └── Ajustes
+│
+├── Tauri 2
+│   └── Rust
+│       ├── Comandos IPC
+│       ├── Planning Engine
+│       ├── AI
+│       ├── Email / Sync
+│       ├── Notifications
+│       └── Error Reporting
+│
+└── SQLite
+    ├── Tareas
+    ├── Sugerencias
+    ├── Ajustes
+    └── Historial de sincronización
 ```
 
 ---
 
-## Compilar y ejecutar
+## Instalación
 
-Requisitos: Windows 10 21H2+, Rust (stable), Node.js 18+, WebView2 (incluido en Windows 11).
+### Opción A — Instalador
 
-```powershell
-# 1) Frontend
-cd spike\frontend
+La forma recomendada de probar FocusFlow es descargar el instalador `.msi` disponible en la sección **Releases**.
+
+La aplicación se instala como una aplicación de Windows independiente.
+
+### Opción B — Desde el código fuente
+
+#### Requisitos
+
+* Windows 10/11
+* Node.js
+* npm
+* Rust
+* Cargo
+* Git
+* Tauri CLI
+
+#### Clonar el repositorio
+
+```bash
+git clone https://github.com/MarcozVD/focusflow.git
+cd focusflow/spike/frontend
+```
+
+#### Instalar dependencias
+
+```bash
 npm install
-npm run build                # → dist/ (assets que Tauri embebe)
-
-# 2) Backend / app
-cd ..\src-tauri
-cargo build --release        # → target\release\focusflow-spike.exe
-
-# 3) Ejecutar
-.\target\release\focusflow-spike.exe
 ```
 
-Alternativa en desarrollo (hot reload):
-```powershell
-cd spike\frontend
-npm run dev                  # Vite en http://localhost:5173
-cd ..\src-tauri
+#### Ejecutar en desarrollo
+
+```bash
+cd ../src-tauri
 cargo tauri dev
 ```
 
-### Configuración
+#### Generar el instalador MSI
 
-| Dato | Dónde se guarda |
-|------|-----------------|
-| Base de datos | `%APPDATA%\com.focusflow.spike\focusflow.db` (SQLite, fuera del repo) |
-| Clave de IA | Configurada desde **Ajustes** (nunca en el repositorio) |
-| Contraseña de correo | Configurada desde **Ajustes** |
-| Variables de entorno (dev) | `AI_ENDPOINT`, `AI_MODEL`, `AI_API_KEY`, `FF_EMAIL_PASSWORD` |
-| Logs de diagnóstico | `%TEMP%\focusflow-spike\spike.log` |
+Desde la raíz del repositorio:
 
-### Herramientas de desarrollo
-
-```powershell
-# Servidores mock para probar IA y correo sin red
-node spike\tools\mock-ai.mjs      # OpenAI-compatible en :9410
-node spike\tools\mock-imap.mjs    # IMAP local en :1143
-
-# Prueba e2e completa (mocks + app)
-.\spike\tools\run-e2e-email.ps1
+```bash
+build-focusflow.bat
 ```
 
 ---
 
-## Estado del proyecto
+## Tests
 
-| Componente | Estado |
-|------------|--------|
-| Spec (7 documentos) | ✅ Completa |
-| Prototipo Svelte | ✅ Funcional |
-| App Tauri + Svelte | ✅ En desarrollo activo (v0.1) |
+### Rust
 
-Ver hoja de ruta en [`spec/05-Roadmap.md`](spec/05-Roadmap.md) y auditoría competitiva en [`spec/06-Auditoria.md`](spec/06-Auditoria.md).
+```bash
+cd spike/src-tauri
+cargo test --lib
+```
+
+Actualmente existen **210 tests** para el motor de planificación, parsers, sincronización, notificaciones y lógica interna.
+
+### Frontend
+
+```bash
+cd ../frontend
+npx vitest run
+```
+
+Actualmente existen **36 tests** para el frontend.
+
+---
+
+## Configuración
+
+La configuración se realiza directamente desde la aplicación mediante la sección **Ajustes**.
+
+### Asistente IA
+
+Puedes configurar cualquier proveedor compatible con OpenAI Chat Completions.
+
+Se recomienda Groq por su velocidad y disponibilidad de modelos gratuitos.
+
+La aplicación permite probar la conexión directamente desde los ajustes.
+
+### Correo electrónico
+
+Puedes configurar una cuenta mediante IMAP utilizando:
+
+* Servidor IMAP
+* Correo electrónico
+* Contraseña de aplicación
+
+FocusFlow analiza los mensajes para detectar posibles tareas, eventos, exámenes y reuniones.
+
+Las sugerencias siempre requieren confirmación del usuario antes de modificar el calendario.
+
+### Seguridad
+
+Las credenciales se almacenan mediante el **Windows Credential Manager** y no directamente en la base de datos SQLite.
+
+> Nunca subas API keys, contraseñas o credenciales al repositorio.
+
+---
+
+## Descarga
+
+La versión más reciente de FocusFlow estará disponible en la sección **Releases**.
+
+### Plataformas
+
+* Windows 10/11 x64 — Disponible
+* Linux — Planeado
+* macOS — Planeado
+
+---
+
+## Roadmap
+
+### Actual
+
+* [x] Calendario de mes, semana y día
+* [x] Drag & drop
+* [x] Validación de conflictos
+* [x] Gestión completa de tareas
+* [x] QuickAdd
+* [x] Asistente IA
+* [x] Parser local
+* [x] Planificación inteligente
+* [x] Sugerencias desde correo
+* [x] Detección de duplicados
+* [x] Widget de escritorio
+* [x] Modo claro y oscuro
+* [x] Diseño Neumorphism
+* [x] Notificaciones nativas de Windows
+* [x] Reporte de errores integrado
+
+### Siguiente
+
+* [ ] Planificación avanzada con más restricciones
+* [ ] Sincronización con calendarios externos
+* [ ] Priorización automática mejorada
+* [ ] Mejor procesamiento contextual de correos
+* [ ] Soporte para Linux
+* [ ] Soporte para macOS
+
+### Futuro
+
+* [ ] Sincronización en la nube opcional
+* [ ] Soporte multidispositivo
+* [ ] Aplicación móvil complementaria
+* [ ] Analítica de productividad
+* [ ] Integraciones adicionales con servicios externos
+
+---
+
+## Privacidad
+
+FocusFlow sigue un enfoque **local-first**.
+
+Tus tareas, calendario, ajustes y demás información principal se almacenan en una base de datos SQLite local.
+
+No necesitas crear una cuenta ni utilizar una suscripción para utilizar las funciones principales de la aplicación.
+
+Las funciones de IA requieren comunicación con el proveedor seleccionado. En estos casos, FocusFlow envía únicamente el contexto necesario para procesar la solicitud.
+
+El procesamiento de correo también minimiza la información antes de enviarla a servicios externos.
+
+> La privacidad de los datos enviados a servicios de IA también depende de las políticas del proveedor que hayas configurado.
+
+---
+
+## Visión
+
+La mayoría de las aplicaciones de productividad requieren que el usuario organice constantemente su propio horario.
+
+**FocusFlow busca cambiar ese modelo.**
+
+En lugar de limitarse a mostrar un calendario, FocusFlow utiliza el contexto de tus tareas, prioridades y disponibilidad para ayudarte a decidir:
+
+**qué hacer, cuándo hacerlo y cómo organizar tu tiempo.**
+
+---
+
+## Licencia
+
+Este proyecto está bajo la licencia MIT.
+
+Consulta el archivo [`LICENSE`](LICENSE) para conocer los términos completos.
+
+---
+
+## Autor
+
+**Marcos**
+
+Estudiante de Ingeniería de Sistemas · Full Stack Developer
+
+* Full Stack Development
+* Inteligencia Artificial
+* Linux
+* Bases de datos
+* Desarrollo Desktop y Mobile
+
+---
+
+<p align="center">
+  FocusFlow — AI Personal Time Manager
+</p>
