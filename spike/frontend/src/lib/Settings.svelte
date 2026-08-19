@@ -65,6 +65,26 @@
   let wiping = $state(false);
   let confirmWipe = $state(false);
 
+  // ── Módulo opcional "Reportar errores" (backend: report.rs) ──
+  let repDesc = $state("");
+  let repSending = $state(false);
+  let repMsg = $state("");
+  let repOk = $state(false);
+  async function sendReport() {
+    repSending = true;
+    repMsg = "";
+    try {
+      repMsg = await invoke<string>("report_send", { description: repDesc });
+      repOk = true;
+      repDesc = "";
+    } catch (e) {
+      repMsg = String(e);
+      repOk = false;
+    } finally {
+      repSending = false;
+    }
+  }
+
   async function doExport() {
     exporting = true;
     const ok = await exportData();
@@ -386,38 +406,42 @@
       chat completions. Las claves se guardan cifradas en Windows Credential Manager.
     </p>
     <details class="guide">
-      <summary>Paso a paso: cómo sacar la clave de API</summary>
+      <summary>Paso a paso: cómo sacar la clave de API de Groq (gratis y recomendado)</summary>
       <ol class="steps">
         <li>
-          Crea una cuenta en el proveedor de IA que quieras usar
-          (OpenAI: <code>platform.openai.com</code> · OpenCode Zen: <code>opencode.ai</code>).
+          Entra en <code>console.groq.com</code> y crea una cuenta
+          (puedes usar tu cuenta de Google o un correo; puede pedir verificar tu teléfono).
         </li>
         <li>
-          Entra en <strong>API keys</strong>:
-          OpenAI → <code>platform.openai.com/api-keys</code> · OpenCode Zen → sección
-          <em>API keys</em> de tu panel.
+          En el menú de la izquierda entra en <strong>API Keys</strong>
+          (<code>console.groq.com/keys</code>).
         </li>
         <li>
-          Pulsa <strong>Create new secret key</strong> (o <em>Generate key</em>).
+          Pulsa <strong>Create API Key</strong>.
         </li>
         <li>
-          Ponle un nombre (por ejemplo «FocusFlow») y pulsa <strong>Crear</strong>.
+          Ponle un nombre (por ejemplo «FocusFlow») y pulsa <strong>Submit</strong>.
         </li>
         <li>
-          <strong>Copia la clave</strong>: empieza por <code>sk-…</code> y solo se muestra
+          <strong>Copia la clave</strong>: empieza por <code>gsk_…</code> y solo se muestra
           una vez. Si la pierdes, crea otra.
         </li>
         <li>
-          Pégala aquí en <em>Clave de API</em> y pulsa <strong>Guardar IA</strong>.
+          Aquí en FocusFlow, pulsa el botón <strong>«Groq · recomendado»</strong> de abajo:
+          rellena solo el endpoint y el modelo.
         </li>
         <li>
-          En <em>Endpoint</em> pon <code>https://api.openai.com/v1</code> (o el de tu proveedor)
-          y en <em>Modelo</em> uno válido (por ejemplo <code>gpt-4o-mini</code>).
+          Pega la clave en <em>Clave de API</em> y pulsa <strong>Guardar IA</strong>.
         </li>
         <li>
           Pulsa <strong>Probar conexión</strong> para confirmar que funciona.
         </li>
       </ol>
+      <p class="hint">
+        ¿Otro proveedor? Elige su botón en la lista y repite los pasos 5–8 con la clave
+        correspondiente (OpenAI: <code>platform.openai.com/api-keys</code>,
+        Gemini: <code>aistudio.google.com/apikey</code>).
+      </p>
     </details>
     <div class="pills">
       {#each AI_PRESETS as p}
@@ -768,6 +792,28 @@
         <p class="hint">Sin entradas.</p>
       {/if}
     </details>
+  </section>
+
+  <section>
+    <h2>Reportar un error</h2>
+    <p class="hint">
+      Envía un correo al desarrollador con tu descripción y los últimos errores del log,
+      usando la cuenta de correo que configuraste arriba. Sin datos personales: solo el
+      mensaje que escribas y líneas técnicas del registro.
+    </p>
+    <textarea
+      bind:value={repDesc}
+      placeholder="¿Qué estabas haciendo cuando falló? ¿Qué esperabas que pasara?"
+      rows="4"
+    ></textarea>
+    <div class="row">
+      <button class="btn primary" onclick={sendReport} disabled={repSending}>
+        {repSending ? "Enviando…" : "Enviar reporte"}
+      </button>
+    </div>
+    {#if repMsg}
+      <p class="test {repOk ? 'ok' : 'err'}">{repMsg}</p>
+    {/if}
   </section>
 
   <section>

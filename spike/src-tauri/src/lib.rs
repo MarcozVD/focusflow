@@ -22,6 +22,7 @@ pub mod engine;
 pub mod notify;
 pub mod planning;
 pub mod reminders;
+pub mod report; // MÓDULO OPCIONAL de reporte de errores — ver cabecera de report.rs para retirarlo
 pub mod store;
 pub mod sync;
 #[cfg(windows)]
@@ -140,6 +141,16 @@ fn task_delete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(
     lock_recover(&state).delete(id).map_err(|e| e.to_string())?;
     let _ = app.emit("tasks:changed", ());
     Ok(())
+}
+
+/// MÓDULO OPCIONAL de reporte de errores (ver report.rs): envía un correo con
+/// la descripción y los últimos errores del log usando la cuenta configurada.
+#[tauri::command]
+fn report_send(app: AppHandle, state: State<'_, Mutex<Db>>, description: String) -> Result<String, String> {
+    let cfg = sync::load_email_config(&lock_recover(&state));
+    let r = report::send_report(&cfg, &description);
+    append_log(&app, &format!("report_send ok={}", r.is_ok()));
+    r
 }
 
 #[derive(Serialize)]
@@ -1639,6 +1650,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             task_create,
             task_complete,
             task_delete,
+            report_send,
             task_move,
             task_update,
             task_duplicate,
