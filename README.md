@@ -12,7 +12,7 @@ Combina calendario, gestión de tareas, notificaciones y un asistente de IA para
 
 ## Demo
 
-![FocusFlow Demo](image.png)
+![FocusFlow Demo](https://i.ibb.co/KxtdNHwV/image.png)
 
 ---
 
