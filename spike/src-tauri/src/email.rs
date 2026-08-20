@@ -228,9 +228,23 @@ impl<T: Read + Write> IoStream for T {}
 
 pub type ImapSession = imap::Session<Box<dyn IoStream>>;
 
-pub fn connect(config: &EmailConfig) -> Result<ImapSession, String> {
+/// Autenticador SASL XOAUTH2 para el crate `imap` (Gmail OAuth2).
+/// El crate base64-codifica la respuesta devuelta por `process`.
+pub struct XOAuth2 {
+    pub user: String,
+    pub access_token: String,
+}
+
+impl imap::Authenticator for XOAuth2 {
+    type Response = String;
+    fn process(&self, _challenge: &[u8]) -> Self::Response {
+        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.access_token)
+    }
+}
+
+pub fn connect(config: &EmailConfig, access_token: &str) -> Result<ImapSession, String> {
     // TLS implícito es obligatorio salvo servidor local (pruebas). Sin
-    // cifrado, la contraseña y el correo viajan en claro (riesgo MITM).
+    // cifrado, el token y el correo viajan en claro (riesgo MITM).
     let is_local = config.host == "localhost" || config.host == "127.0.0.1" || config.host == "::1";
     if !config.ssl && !is_local {
         return Err("se requiere TLS (activar 'Usar conexión segura')".into());
@@ -248,10 +262,13 @@ pub fn connect(config: &EmailConfig) -> Result<ImapSession, String> {
     };
 
     let client = imap::Client::new(stream);
-    let password = crate::ai::get_email_credentials(&config.user).unwrap_or_default();
+    let auth = XOAuth2 {
+        user: config.user.clone(),
+        access_token: access_token.to_string(),
+    };
     let session = client
-        .login(&config.user, &password)
-        .map_err(|(e, _)| format!("login: {e}"))?;
+        .authenticate("XOAUTH2", &auth)
+        .map_err(|(e, _)| format!("login XOAUTH2: {e}"))?;
     Ok(session)
 }
 
@@ -268,21 +285,21 @@ pub fn sender_email(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
-/// Prueba de conexión: login + SELECT de la primera bandeja + logout.
-/// Devuelve (bandeja, nº de correos) si todo va bien.
-pub fn test_connection(config: &EmailConfig) -> Result<(String, u32), String> {
+/// Prueba de conexión: autenticación XOAUTH2 + SELECT de la primera bandeja +
+/// logout. Devuelve (bandeja, nº de correos) si todo va bien.
+pub fn test_connection(config: &EmailConfig, access_token: &str) -> Result<(String, u32), String> {
     if config.host.is_empty() || config.user.is_empty() {
         return Err("host y usuario requeridos".into());
     }
-    if crate::ai::get_email_credentials(&config.user).is_none() {
-        return Err("falta la contraseña de aplicación".into());
+    if access_token.is_empty() {
+        return Err("no hay sesión de Google: inicia sesión para conectar Gmail".into());
     }
     let mailbox = config
         .mailboxes
         .first()
         .cloned()
         .ok_or_else(|| "no hay bandejas configuradas".to_string())?;
-    let mut session = connect(config)?;
+    let mut session = connect(config, access_token)?;
     let mb = session
         .select(&mailbox)
         .map_err(|e| format!("select {mailbox}: {e}"))?;
@@ -480,14 +497,14 @@ mod tests {
             ssl: false,
             ..EmailConfig::default()
         };
-        let err = match connect(&cfg) {
+        let err = match connect(&cfg, "test-token") {
             Ok(_) => panic!("sin TLS en remoto no debe conectar"),
             Err(e) => e,
         };
         assert!(err.contains("TLS"), "{err}");
         // localhost no recibe el guard: falla por red, no por el guard
         cfg.host = "localhost".into();
-        match connect(&cfg) {
+        match connect(&cfg, "test-token") {
             Err(e) => assert!(!e.contains("se requiere TLS"), "el guard no debe aplicar a localhost"),
             Ok(_) => {}
         }

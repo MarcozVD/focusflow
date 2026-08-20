@@ -17,9 +17,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const AI_KEY_SERVICE: &str = "focusflow";
-pub const AI_KEY_USER: &str = "ai_api_key";
-
 pub const PROVIDER_LOCAL: &str = "local";
 pub const PROVIDER_OPENAI: &str = "openai";
 pub const PROVIDER_GEMINI: &str = "gemini";
@@ -337,40 +334,15 @@ pub fn default_model() -> String {
     std::env::var("AI_MODEL").unwrap_or_default()
 }
 
-pub fn keyring_get(key_user: &str) -> Option<String> {
-    match keyring::Entry::new(AI_KEY_SERVICE, key_user) {
-        Ok(e) => e.get_password().ok(),
-        Err(_) => None,
-    }
-}
-
-pub fn keyring_set(key_user: &str, value: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(AI_KEY_SERVICE, key_user).map_err(|e| e.to_string())?;
-    match entry.set_password(value) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let _ = e;
-            Err("no se pudo guardar en Credential Manager".into())
-        }
-    }
-}
-
-pub fn keyring_delete(key_user: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(AI_KEY_SERVICE, key_user).map_err(|e| e.to_string())?;
-    entry.delete_credential().map_err(|e| e.to_string())
-}
-
-/// Clave de IA: Credential Manager de Windows, fallback a variable de entorno.
+/// Clave de IA incrustada en el binario en tiempo de compilación (build.rs lee
+/// `spike/src-tauri/.env`). Si no está definida, el build falla (ver build.rs).
 pub fn get_ai_key() -> Option<String> {
-    keyring_get(AI_KEY_USER).or_else(|| std::env::var("AI_API_KEY").ok())
-}
-
-pub fn get_email_credentials(user: &str) -> Option<String> {
-    keyring_get(&format!("email:{user}")).or_else(|| std::env::var("FF_EMAIL_PASSWORD").ok())
-}
-
-pub fn set_email_credentials(user: &str, password: &str) -> Result<(), String> {
-    keyring_set(&format!("email:{user}"), password)
+    let key = env!("AI_API_KEY", "ERROR: AI_API_KEY no definida en build-time (ver build.rs)");
+    if key.trim().is_empty() {
+        None
+    } else {
+        Some(key.to_string())
+    }
 }
 
 /// Construye el proveedor según la configuración.

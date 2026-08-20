@@ -15,7 +15,6 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-use crate::ai::provider::get_email_credentials;
 use crate::email::EmailConfig;
 
 /// Destinatario de los reportes.
@@ -130,13 +129,15 @@ impl Smtp {
     }
 }
 
-/// Envía el reporte. Devuelve un mensaje de confirmación legible.
-pub fn send_report(cfg: &EmailConfig, description: &str) -> Result<String, String> {
+/// Envía el reporte usando SMTP con AUTH XOAUTH2 (OAuth2 de Google).
+/// Devuelve un mensaje de confirmación legible.
+pub fn send_report(cfg: &EmailConfig, access_token: &str, description: &str) -> Result<String, String> {
     if cfg.host.trim().is_empty() || cfg.user.trim().is_empty() {
-        return Err("Configura primero tu correo en Ajustes → Correo electrónico.".into());
+        return Err("Configura tu correo en Ajustes → Correo electrónico.".into());
     }
-    let pass = get_email_credentials(&cfg.user)
-        .ok_or_else(|| "No hay contraseña guardada para tu correo. Guárdala en Ajustes → Correo electrónico.".to_string())?;
+    if access_token.trim().is_empty() {
+        return Err("No hay sesión de Google: inicia sesión para enviar el reporte.".to_string());
+    }
 
     let desc: String = description.trim().chars().take(MAX_DESCRIPTION_CHARS).collect();
     let errors = recent_error_lines(MAX_ERROR_LINES);
@@ -160,9 +161,11 @@ pub fn send_report(cfg: &EmailConfig, description: &str) -> Result<String, Strin
     let host = smtp_host_for(&cfg.host);
     let mut smtp = Smtp::connect(&host, 465)?;
     smtp.cmd("EHLO focusflow.local", "250")?;
-    smtp.cmd("AUTH LOGIN", "334")?;
-    smtp.cmd(&b64(&cfg.user), "334")?;
-    smtp.cmd(&b64(&pass), "235")?;
+    let auth_b64 = b64(&format!(
+        "user={}\x01auth=Bearer {}\x01\x01",
+        cfg.user, access_token
+    ));
+    smtp.cmd(&format!("AUTH XOAUTH2 {auth_b64}"), "235")?;
     smtp.cmd(&format!("MAIL FROM:<{}>", cfg.user), "250")?;
     smtp.cmd(&format!("RCPT TO:<{REPORT_DEST}>"), "250")?;
     smtp.cmd("DATA", "354")?;

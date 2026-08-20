@@ -3,7 +3,7 @@ use rusqlite::OptionalExtension;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -114,6 +114,17 @@ pub struct DueReminder {
     pub reminder_minutes: i64,
 }
 
+/// Sesión de Google OAuth persistida en `auth_sessions` (CAMBIO 2).
+#[derive(Debug, Clone, Default)]
+pub struct AuthSession {
+    pub user_id: String,
+    pub email: String,
+    pub name: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
+}
+
 impl Db {
     pub fn open(data_dir: &PathBuf) -> rusqlite::Result<Self> {
         std::fs::create_dir_all(data_dir).ok();
@@ -184,7 +195,7 @@ impl Db {
     /// "migración aplicada" de "columna preexistente", y una futura migración
     /// con transformación de datos necesita ese punto de anclaje
     /// (auditoría 17, hallazgo #7).
-    const SCHEMA_VERSION: i64 = 9;
+    const SCHEMA_VERSION: i64 = 10;
 
     fn migrate(&self) -> rusqlite::Result<()> {
         let v: i64 = self
@@ -217,8 +228,31 @@ impl Db {
         if v < 9 {
             self.migrate_0009()?;
         }
+        if v < 10 {
+            self.migrate_0010()?;
+        }
         self.conn
             .pragma_update(None, "user_version", Self::SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    /// Sesión de Google OAuth (CAMBIO 2): tokens de acceso/refresco y perfil
+    /// del usuario. Se guardan en la DB local (SQLite del usuario), NO en
+    /// Credential Manager. Una sola fila por instalación (id = 1).
+    fn migrate_0010(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS auth_sessions (
+                id            INTEGER PRIMARY KEY CHECK (id = 1),
+                user_id       TEXT NOT NULL DEFAULT '',
+                email         TEXT NOT NULL DEFAULT '',
+                name          TEXT NOT NULL DEFAULT '',
+                access_token  TEXT NOT NULL DEFAULT '',
+                refresh_token TEXT NOT NULL DEFAULT '',
+                expires_at    INTEGER NOT NULL DEFAULT 0,
+                created_at    INTEGER NOT NULL,
+                updated_at    INTEGER NOT NULL
+            )",
+        )?;
         Ok(())
     }
 
@@ -789,6 +823,56 @@ impl Db {
              WHERE id = ?1 AND deleted_at IS NULL",
             rusqlite::params![id, minutes, now_ms()],
         )?;
+        Ok(())
+    }
+
+    /// Sesión de Google OAuth: una fila única (id = 1). Uso local de la DB
+    /// (refresh_token incluido); el acceso a esta tabla queda en la app.
+    pub fn auth_save(&self, s: &AuthSession) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO auth_sessions (id, user_id, email, name, access_token, refresh_token, expires_at, created_at, updated_at)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+               user_id = excluded.user_id,
+               email = excluded.email,
+               name = excluded.name,
+               access_token = excluded.access_token,
+               refresh_token = excluded.refresh_token,
+               expires_at = excluded.expires_at,
+               updated_at = excluded.updated_at",
+            rusqlite::params![
+                s.user_id,
+                s.email,
+                s.name,
+                s.access_token,
+                s.refresh_token,
+                s.expires_at,
+                now_ms()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn auth_load(&self) -> rusqlite::Result<Option<AuthSession>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT user_id, email, name, access_token, refresh_token, expires_at FROM auth_sessions WHERE id = 1")?;
+        let mut rows = stmt.query_map([], |r| {
+            Ok(AuthSession {
+                user_id: r.get(0)?,
+                email: r.get(1)?,
+                name: r.get(2)?,
+                access_token: r.get(3)?,
+                refresh_token: r.get(4)?,
+                expires_at: r.get(5)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn auth_clear(&self) -> rusqlite::Result<()> {
+        self.conn
+            .execute("DELETE FROM auth_sessions WHERE id = 1", [])?;
         Ok(())
     }
 

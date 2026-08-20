@@ -945,7 +945,9 @@ mod tests {
 
     #[test]
     fn multiple_commitments() {
-        let text = "Estudiar cálculo mañana y programación el viernes";
+        // fechas relativas que SIEMPRE quedan ordenadas: "mañana" vs "pasado
+        // mañana" (con "el viernes" hoy jueves coincidiría con mañana → flaky)
+        let text = "Estudiar cálculo mañana y programación pasado mañana";
         assert_eq!(count(text), 2);
         let a = intent_of(text, 0);
         let b = intent_of(text, 1);

@@ -17,6 +17,7 @@ use winreg::RegKey;
 
 pub mod ai;
 pub mod assistant;
+pub mod auth;
 pub mod email;
 pub mod engine;
 pub mod notify;
@@ -147,8 +148,13 @@ fn task_delete(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<(
 /// la descripción y los últimos errores del log usando la cuenta configurada.
 #[tauri::command]
 fn report_send(app: AppHandle, state: State<'_, Mutex<Db>>, description: String) -> Result<String, String> {
-    let cfg = sync::load_email_config(&lock_recover(&state));
-    let r = report::send_report(&cfg, &description);
+    let (cfg, token) = {
+        let db = lock_recover(&state);
+        let cfg = sync::load_email_config(&db);
+        let token = auth::access_token(&db)?;
+        (cfg, token)
+    };
+    let r = report::send_report(&cfg, &token, &description);
     append_log(&app, &format!("report_send ok={}", r.is_ok()));
     r
 }
@@ -323,7 +329,6 @@ async fn task_from_text(
 struct AiConfigView {
     endpoint: String,
     model: String,
-    has_key: bool,
     effective_endpoint: String,
     effective_model: String,
     configured: bool,
@@ -336,7 +341,6 @@ fn ai_config_get(state: State<'_, Mutex<Db>>) -> AiConfigView {
     AiConfigView {
         endpoint: cfg.endpoint.clone(),
         model: cfg.model.clone(),
-        has_key: ai::get_ai_key().is_some(),
         effective_endpoint: if cfg.endpoint.is_empty() {
             ai::default_endpoint()
         } else {
@@ -370,16 +374,6 @@ fn ai_config_set(state: State<'_, Mutex<Db>>, endpoint: String, model: String) -
     db.settings_set("ai.endpoint", &endpoint).map_err(|e| e.to_string())?;
     db.settings_set("ai.model", &model).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-fn ai_set_key(key: String) -> Result<(), String> {
-    ai::keyring_set(ai::AI_KEY_USER, &key)
-}
-
-#[tauri::command]
-fn ai_clear_key() -> Result<(), String> {
-    ai::keyring_delete(ai::AI_KEY_USER)
 }
 
 #[derive(Serialize)]
@@ -453,7 +447,6 @@ struct EmailConfigView {
     enabled: bool,
     interval_hours: u64,
     max_age_days: u32,
-    has_password: bool,
     trusted: Vec<String>,
 }
 
@@ -462,7 +455,6 @@ fn email_config_get(state: State<'_, Mutex<Db>>) -> EmailConfigView {
     let db = lock_recover(&state);
     let config = sync::load_email_config(&db);
     EmailConfigView {
-        has_password: ai::get_email_credentials(&config.user).is_some(),
         enabled: db
             .settings_get("email.enabled")
             .ok()
@@ -486,7 +478,6 @@ fn email_config_set(
     app: AppHandle,
     state: State<'_, Mutex<Db>>,
     config: email::EmailConfig,
-    password: Option<String>,
     enabled: bool,
     interval_hours: u64,
     max_age_days: u32,
@@ -497,11 +488,6 @@ fn email_config_set(
     db.settings_set("email.enabled", if enabled { "1" } else { "0" }).map_err(|e| e.to_string())?;
     db.settings_set("email.interval_hours", &interval_hours.to_string()).map_err(|e| e.to_string())?;
     db.settings_set("email.max_age_days", &max_age_days.to_string()).map_err(|e| e.to_string())?;
-    if let Some(p) = password {
-        if !p.is_empty() {
-            ai::set_email_credentials(&config.user, &p)?;
-        }
-    }
     append_log(&app, &format!("email_config_saved user={} mailboxes={:?} enabled={enabled} max_age_days={max_age_days}", config.user, config.mailboxes));
     Ok(())
 }
@@ -567,6 +553,7 @@ async fn verify_connections(state: State<'_, Mutex<Db>>, app: AppHandle) -> Resu
         let db = lock_recover(&state);
         (ai_config_from_db(&db), sync::load_email_config(&db))
     };
+    let app2 = app.clone();
 
     let res = tauri::async_runtime::spawn_blocking(move || {
         let ai = match ai::provider_from_config(&ai_cfg) {
@@ -586,7 +573,8 @@ async fn verify_connections(state: State<'_, Mutex<Db>>, app: AppHandle) -> Resu
             Err(e) => ConnectionCheck { ok: false, detail: e.to_string() },
         };
 
-        let email = match email::test_connection(&email_cfg) {
+        let token = crate::sync::with_db(&app2, |db| crate::auth::access_token(db)).unwrap_or_default();
+        let email = match email::test_connection(&email_cfg, &token) {
             Ok((mailbox, n)) => ConnectionCheck {
                 ok: true,
                 detail: format!("Conectado a {mailbox} ({n} correos)"),
@@ -615,6 +603,59 @@ async fn verify_connections(state: State<'_, Mutex<Db>>, app: AppHandle) -> Resu
         },
     };
     Ok(result)
+}
+
+// ---------------- Google OAuth (CAMBIO 2) ----------------
+
+/// Inicia el flujo OAuth2 PKCE completo (navegador + callback + intercambio).
+/// Async + spawn_blocking: puede tardar hasta ~2 min mientras el usuario
+/// autoriza en el navegador; la DB no se retiene durante el flujo.
+#[tauri::command]
+async fn auth_google_sign_in(app: AppHandle) -> Result<auth::AuthSessionView, String> {
+    let app2 = app.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let session = auth::perform_login()?;
+        // persistir sesión + materializar config de Gmail (lock breve)
+        crate::sync::with_db(&app2, |db| {
+            db.auth_save(&session).map_err(|e| e.to_string())?;
+            let cfg = auth::gmail_email_config(&session.email);
+            let json = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+            db.settings_set("email.config", &json).map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        })?;
+        Ok::<_, String>(auth::to_view(&session))
+    })
+    .await;
+    match res {
+        Ok(Ok(v)) => {
+            append_log(&app, &format!("auth_sign_in ok user={}", v.email));
+            Ok(v)
+        }
+        Ok(Err(e)) => {
+            append_log(&app, &format!("auth_sign_in error: {e}"));
+            Err(e)
+        }
+        Err(e) => {
+            append_log(&app, &format!("auth_sign_in thread error: {e}"));
+            Err(format!("error interno: {e}"))
+        }
+    }
+}
+
+/// Cierra sesión: borra los tokens de la DB (refresh_token incluido).
+#[tauri::command]
+fn auth_google_sign_out(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
+    let db = lock_recover(&state);
+    db.auth_clear().map_err(|e| e.to_string())?;
+    append_log(&app, "auth_sign_out");
+    Ok(())
+}
+
+/// Estado actual de la sesión (sin red, sin refresco).
+#[tauri::command]
+fn auth_status(state: State<'_, Mutex<Db>>) -> Option<auth::AuthSessionView> {
+    let db = lock_recover(&state);
+    auth::status(&db)
 }
 
 #[derive(Serialize)]
@@ -1229,7 +1270,6 @@ struct OnboardingAiView {
     model: String,
     effective_endpoint: String,
     effective_model: String,
-    has_key: bool,
 }
 
 #[derive(Serialize)]
@@ -1265,7 +1305,6 @@ fn onboarding_status(state: State<'_, Mutex<Db>>) -> OnboardingStatusView {
             } else {
                 ai_cfg.model.clone()
             },
-            has_key: ai::keyring_get(ai::AI_KEY_USER).is_some(),
         },
         email,
     }
@@ -1398,8 +1437,9 @@ fn data_export(state: State<'_, Mutex<Db>>) -> Result<String, String> {
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
 
-/// Borra TODO: datos en DB, log local y secretos del Credential Manager
-/// (clave de IA y contraseña de correo). Destructivo e irreversible.
+/// Borra TODO: datos en DB y log local. Destructivo e irreversible.
+/// Los secretos ya no viven en Credential Manager (ver CAMBIO 1); el logout
+/// de Google se hace con `auth_google_sign_out` (borra tokens de la DB).
 #[tauri::command]
 fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>, confirmation: String) -> Result<(), String> {
     // borrado irreversible: exige token explícito del frontend para que una
@@ -1410,19 +1450,7 @@ fn data_wipe(app: AppHandle, state: State<'_, Mutex<Db>>, confirmation: String) 
         return Err("borrado cancelado: falta confirmación".into());
     }
     let db = lock_recover(&state);
-    // el usuario de correo se lee ANTES de limpiar settings (se borraría)
-    let email_user = db
-        .settings_get("email.config")
-        .ok()
-        .flatten()
-        .and_then(|s| serde_json::from_str::<email::EmailConfig>(&s).ok())
-        .map(|c| c.user)
-        .unwrap_or_default();
     db.wipe_data().map_err(|e| e.to_string())?;
-    let _ = ai::keyring_delete(ai::AI_KEY_USER);
-    if !email_user.is_empty() {
-        let _ = ai::keyring_delete(&format!("email:{email_user}"));
-    }
     drop(db);
     if let Some(dir) = log_dir() {
         let _ = std::fs::write(dir.join("spike.log"), "");
@@ -1657,9 +1685,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             task_from_text,
             ai_config_get,
             ai_config_set,
-            ai_set_key,
-            ai_clear_key,
             ai_test,
+            auth_google_sign_in,
+            auth_google_sign_out,
+            auth_status,
             verify_connections,
             email_config_get,
             email_config_set,

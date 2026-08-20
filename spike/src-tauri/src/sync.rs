@@ -405,9 +405,27 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
 
     let ai_cfg = with_db(app, crate::ai_config_from_db);
     let provider = ai::provider_from_config(&ai_cfg).map_err(|e| e.to_string())?;
-    if ai::get_email_credentials(&config.user).is_none() {
-        return Err("falta la contraseña de aplicación del correo (Ajustes → Correo)".into());
-    }
+    // token OAuth2 de Google (CAMBIO 2): se lee la sesión con lock breve y el
+    // refresco (red) ocurre FUERA del lock para no congelar otros comandos.
+    let session = with_db(app, |db| db.auth_load().ok().flatten());
+    let oauth_token = {
+        let Some(mut s) = session else {
+            return Err("no hay sesión de Google: inicia sesión para sincronizar Gmail".into());
+        };
+        if !s.access_token.is_empty() && s.expires_at > crate::store::now_ms() {
+            s.access_token
+        } else if !s.refresh_token.is_empty() {
+            let (new_access, expires_in) = crate::auth::refresh(&s.refresh_token)?;
+            s.access_token = new_access;
+            s.expires_at = crate::store::now_ms() + (expires_in as i64) * 1000;
+            with_db(app, |db| {
+                let _ = db.auth_save(&s);
+            });
+            s.access_token
+        } else {
+            return Err("la sesión de Google no tiene token válido; cierra sesión y vuelve a entrar".into());
+        }
+    };
     let ai_configured = !ai_cfg.endpoint.is_empty() && !ai_cfg.model.is_empty() && ai_cfg.provider_name() != "local";
 
     // rescan pendiente → reiniciar checkpoints: se vuelve a repasar la
@@ -427,7 +445,7 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
         crate::append_log(app, "rescan_pending → checkpoints reiniciados");
     }
 
-    let mut session = match email::connect(&config) {
+    let mut session = match email::connect(&config, &oauth_token) {
         Ok(s) => s,
         Err(e) => {
             crate::append_log(app, &format!("email_connect_fail: {e}"));
