@@ -393,9 +393,8 @@ mod tests {
 
     #[test]
     fn openai_provider_without_key_is_not_configured() {
-        // fuerza ausencia de clave: usar un usuario distinto en keyring
         let cfg = AiConfig { endpoint: "http://x".into(), model: "m".into(), provider: String::new() };
-        // la clave puede existir en el entorno CI; sin ella debe fallar con NotConfigured
+        // la clave build-time existe en el entorno CI; con ella debe construir el proveedor
         match provider_from_config(&cfg) {
             Ok(p) => assert_eq!(p.id(), "openai-compat"),
             Err(e) => assert!(matches!(e, AiError::NotConfigured(_))),
