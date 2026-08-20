@@ -212,6 +212,7 @@ const store = $state({
   assistantDraft: "",
   onboarding: null as OnboardingStatus | null,
   onboardingBusy: false,
+  authUser: null as AuthSessionView | null,
 });
 
 export const tasks = () => store.tasks;
@@ -249,6 +250,7 @@ export const assistantRetry = () => store.assistantRetry;
 export const assistantActionsPending = () => store.assistantActions;
 export const onboarding = () => store.onboarding;
 export const onboardingBusy = () => store.onboardingBusy;
+export const authUser = () => store.authUser;
 
 export function closePlanProposal() {
   store.planProposal = null;
@@ -477,6 +479,7 @@ export function takeAssistantDraft(): string {
   return t;
 }
 
+import { friendlyAssistantError } from "./assistantError";
 export { friendlyAssistantError } from "./assistantError";
 import type { FriendlyAssistantError } from "./assistantError";
 export type { FriendlyAssistantError };
@@ -850,9 +853,9 @@ export const KIND_LABELS: Record<string, string> = {
 export interface AiConfigView {
   endpoint: string;
   model: string;
-  has_key: boolean;
   effective_endpoint: string;
   effective_model: string;
+  configured: boolean;
 }
 
 export interface OnboardingStatus {
@@ -862,7 +865,6 @@ export interface OnboardingStatus {
     model: string;
     effective_endpoint: string;
     effective_model: string;
-    has_key: boolean;
   };
   email: {
     host: string;
@@ -888,8 +890,14 @@ export interface EmailConfigView {
   enabled: boolean;
   interval_hours: number;
   max_age_days: number;
-  has_password: boolean;
   trusted: string[];
+}
+
+export interface AuthSessionView {
+  email: string;
+  name: string;
+  user_id: string;
+  gmail_connected: boolean;
 }
 
 export interface SyncStateRow {
@@ -987,6 +995,38 @@ export async function completeOnboarding(): Promise<{ ok: boolean; error?: strin
     return { ok: false, error: String(e) };
   } finally {
     store.onboardingBusy = false;
+  }
+}
+
+export async function loadAuthStatus() {
+  if (!inTauri()) return;
+  try {
+    store.authUser = await invoke<AuthSessionView | null>("auth_status");
+  } catch (e) {
+    console.error("loadAuthStatus", e);
+  }
+}
+
+/** Inicia el flujo OAuth2 en el backend (abre navegador; tarda hasta ~2 min). */
+export async function signInWithGoogle(): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: false, error: "no disponible fuera de Tauri" };
+  try {
+    store.authUser = await invoke<AuthSessionView>("auth_google_sign_in");
+    await Promise.all([loadEmailConfig(), loadAiConfig()]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+export async function signOutGoogle(): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
+  try {
+    await invoke("auth_google_sign_out");
+    store.authUser = null;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 }
 

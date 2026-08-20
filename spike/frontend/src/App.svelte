@@ -13,7 +13,8 @@
   import Assistant from "./lib/Assistant.svelte";
   import Settings from "./lib/Settings.svelte";
   import Onboarding from "./lib/Onboarding.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding } from "./lib/data.svelte.ts";
+  import Login from "./lib/Login.svelte";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
   import ContextualToast from "./lib/ContextualToast.svelte";
 
@@ -58,7 +59,8 @@
     loadSyncStatus();
     loadUiPrefs();
     loadNotifPrefs();
-    loadOnboardingStatus().then(() => (bootReady = true));
+    loadOnboardingStatus();
+    loadAuthStatus().then(() => (bootReady = true));
     try {
       isWidget = getCurrentWindow().label === "widget";
       if (isWidget) document.documentElement.dataset.widget = "";
@@ -162,6 +164,11 @@
 {:else if !bootReady}
   <div class="app">
     <TitleBar />
+  </div>
+{:else if !authUser()}
+  <div class="app">
+    <TitleBar />
+    <Login />
   </div>
 {:else if onboardingPending}
   <div class="app">

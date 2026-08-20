@@ -3,64 +3,19 @@
   import { fade } from "svelte/transition";
   import gsap from "gsap";
   import { invoke } from "@tauri-apps/api/core";
-  import { onboarding, completeOnboarding } from "./data.svelte";
+  import {
+    onboarding,
+    completeOnboarding,
+    authUser,
+    signInWithGoogle,
+    loadAuthStatus,
+  } from "./data.svelte";
 
-  type ProviderId = "gmail" | "outlook" | "yahoo" | "other";
-
-  interface Provider {
-    label: string;
-    host: string;
-    port: number;
-    steps: string[];
-    tip: string;
-  }
-
-  const PROVIDERS: Record<ProviderId, Provider> = {
-    gmail: {
-      label: "Gmail",
-      host: "imap.gmail.com",
-      port: 993,
-      steps: [
-        "En tu cuenta de Google activa la verificación en dos pasos (Seguridad → Verificación en 2 pasos).",
-        "Crea una contraseña de aplicación: Seguridad → Contraseñas de aplicaciones.",
-        "Copia la contraseña de 16 caracteres y pégala aquí.",
-      ],
-      tip: "FocusFlow leerá tu bandeja, detectará fechas, horas y compromisos, y te propondrá añadirlos al calendario. La contraseña se guarda cifrada en Windows.",
-    },
-    outlook: {
-      label: "Outlook / Hotmail",
-      host: "outlook.office365.com",
-      port: 993,
-      steps: [
-        "Activa la verificación en dos pasos de tu cuenta Microsoft (si aún no la tienes).",
-        "Crea una contraseña de aplicación en la configuración de seguridad de Microsoft.",
-        "Copia esa contraseña y pégala aquí.",
-      ],
-      tip: "FocusFlow leerá tu bandeja, detectará fechas, horas y compromisos, y te propondrá añadirlos al calendario. La contraseña se guarda cifrada en Windows.",
-    },
-    yahoo: {
-      label: "Yahoo",
-      host: "imap.mail.yahoo.com",
-      port: 993,
-      steps: [
-        "Genera una contraseña de aplicación en la configuración de seguridad de Yahoo.",
-        "Copia la contraseña de aplicación generada.",
-        "Pégala aquí: tu contraseña normal no sirve para IMAP.",
-      ],
-      tip: "FocusFlow leerá tu bandeja, detectará fechas, horas y compromisos, y te propondrá añadirlos al calendario. La contraseña se guarda cifrada en Windows.",
-    },
-    other: {
-      label: "Otro servidor",
-      host: "",
-      port: 993,
-      steps: [
-        "Escribe el servidor IMAP de tu proveedor (host y puerto suelen aparecer en su ayuda).",
-        "Usa tu dirección de correo completa como usuario.",
-        "Si tu proveedor exige TLS (recomendado), deja SSL activado.",
-      ],
-      tip: "Cualquier servidor IMAP funciona. FocusFlow nunca guarda tu contraseña en la base de datos: va cifrada al administrador de credenciales de Windows.",
-    },
-  };
+  const GOOGLE_STEPS: string[] = [
+    "Pulsa «Iniciar sesión con Google»: se abre tu navegador.",
+    "Elige la cuenta y acepta los permisos de lectura de Gmail.",
+    "Vuelve a FocusFlow: la cuenta queda conectada automáticamente.",
+  ];
 
   const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -81,12 +36,11 @@
       endpoint: "https://api.groq.com/openai/v1",
       model: "openai/gpt-oss-120b",
       name: "Groq — gratis y muy rápida",
-      tip: "La opción gratuita más rápida (hardware LPU): entiende tus tareas al instante. 1.000 peticiones al día gratis, sin tarjeta. La clave se guarda cifrada en Windows.",
+      tip: "La opción gratuita más rápida (hardware LPU): entiende tus tareas al instante. 1.000 peticiones al día gratis, sin tarjeta. La clave va incrustada en la app.",
       steps: [
-        "Entra en console.groq.com y crea una cuenta (con Google o correo; puede pedir verificar tu teléfono).",
-        "En el menú lateral abre API Keys y pulsa Create API Key — ponle un nombre, por ejemplo focusflow.",
-        "Copia la clave (empieza por gsk_…) y pégala en el campo Clave de API.",
+        "Elige el proveedor (o deja el recomendado).",
         "Endpoint y Modelo ya vienen rellenados: no hace falta tocarlos.",
+        "Pulsa Continuar y la IA queda lista.",
       ],
     },
     opencode: {
@@ -94,12 +48,11 @@
       endpoint: "https://opencode.ai/zen/v1",
       model: "big-pickle",
       name: "OpenCode Zen",
-      tip: "Modelos gratuitos dentro de OpenCode. Pueden ir lentos o saturarse (límite de peticiones). La clave se guarda cifrada en Windows.",
+      tip: "Modelos gratuitos dentro de OpenCode. Pueden ir lentos o saturarse (límite de peticiones). La clave va incrustada en la app.",
       steps: [
-        "Entra en opencode.ai/auth y crea una cuenta o inicia sesión.",
-        "En tu panel abre API keys y copia tu clave.",
-        "Pégala en el campo Clave de API.",
+        "Elige OpenCode Zen.",
         "Endpoint y Modelo ya vienen rellenados (hay otros modelos gratis: kimi-k3…).",
+        "Pulsa Continuar y la IA queda lista.",
       ],
     },
     other: {
@@ -111,7 +64,7 @@
       steps: [
         "Copia el endpoint base de tu proveedor (suele terminar en /v1).",
         "Escribe el nombre exacto del modelo que quieras usar.",
-        "Pega tu clave de API en el campo Clave de API.",
+        "Pulsa Continuar y la IA queda lista.",
       ],
     },
   };
@@ -122,46 +75,32 @@
   );
   let stageEl = $state<HTMLElement | null>(null);
 
-  let provider = $state<ProviderId>("gmail");
-  let emailUser = $state("");
-  let emailPass = $state("");
-  let host = $state("imap.gmail.com");
-  let port = $state(993);
-  let useSsl = $state(true);
+  let googleBusy = $state(false);
+  let googleErr = $state("");
 
   let aiEndpoint = $state(AI_PRESETS.groq.endpoint);
   let aiModel = $state(AI_PRESETS.groq.model);
-  let aiKey = $state("");
   let aiPreset = $state<AiPresetId>("groq");
 
-  let emailState = $state<"idle" | "loading" | "ok" | "error" | "skip">("idle");
   let aiState = $state<"idle" | "loading" | "ok" | "error" | "skip">("idle");
-  let emailDetail = $state("");
   let aiDetail = $state("");
-  let emailRaw = $state("");
   let aiRaw = $state("");
-  let fieldErr = $state<{ user?: string; pass?: string; host?: string; key?: string; endpoint?: string }>({});
+  let fieldErr = $state<{ endpoint?: string; model?: string }>({});
   let busy = $state(false);
 
-  function detectProvider(h: string): ProviderId {
-    const l = h.toLowerCase();
-    if (l.includes("gmail")) return "gmail";
-    if (l.includes("outlook") || l.includes("office365") || l.includes("hotmail")) return "outlook";
-    if (l.includes("yahoo")) return "yahoo";
-    return "other";
+  function pickAiPreset(p: AiPresetId) {
+    aiPreset = p;
+    if (p !== "other") {
+      aiEndpoint = AI_PRESETS[p].endpoint;
+      aiModel = AI_PRESETS[p].model;
+    }
+    fieldErr = {};
   }
 
   onMount(() => {
+    loadAuthStatus();
     const o = onboarding();
     if (o) {
-      const em = o.email;
-      if (em) {
-        provider = detectProvider(em.host);
-        host = em.host;
-        port = em.port ?? 993;
-        useSsl = em.ssl ?? true;
-        emailUser = em.user || "";
-      }
       const ep = (o.ai.effective_endpoint || "").toLowerCase();
       if (ep) {
         // configuración existente: manda sobre los valores por defecto
@@ -173,15 +112,6 @@
       }
     }
   });
-
-  function pickAiPreset(p: AiPresetId) {
-    aiPreset = p;
-    if (p !== "other") {
-      aiEndpoint = AI_PRESETS[p].endpoint;
-      aiModel = AI_PRESETS[p].model;
-    }
-    fieldErr = {};
-  }
 
   // Entrada escalonada de las cards (GSAP). Se respeta prefers-reduced-motion:
   // con reduce, las cards aparecen sin animación (solo el fade CSS global).
@@ -211,36 +141,30 @@
     return () => ctx.revert();
   });
 
-  function pickProvider(p: ProviderId) {
-    provider = p;
-    host = PROVIDERS[p].host;
-    port = PROVIDERS[p].port;
-    fieldErr = {};
-  }
-
-  function setHostManual(v: string) {
-    host = v;
-    provider = v ? detectProvider(v) : provider;
-  }
-
-  const emailFilled = $derived(emailUser.trim() !== "" || emailPass !== "");
-  const aiFilled = $derived(aiEndpoint.trim() !== "" || aiModel.trim() !== "" || aiKey !== "");
+  const aiFilled = $derived(aiEndpoint.trim() !== "" || aiModel.trim() !== "");
 
   function validateFields(): boolean {
     const errs: typeof fieldErr = {};
-    if (emailFilled) {
-      if (!emailUser.trim()) errs.user = "Escribe tu dirección de correo.";
-      else if (!VALID_EMAIL.test(emailUser.trim())) errs.user = "Esa dirección no parece válida.";
-      if (!emailPass) errs.pass = "Escribe la contraseña (para Gmail y Outlook, la contraseña de aplicación).";
-      if (!host.trim()) errs.host = "Escribe el servidor IMAP.";
-    }
     if (aiFilled) {
       if (!aiEndpoint.trim()) errs.endpoint = "Escribe el endpoint de la API.";
-      if (!aiModel.trim()) errs.endpoint = errs.endpoint || "Escribe el nombre del modelo.";
-      if (!aiKey && !onboarding()?.ai.has_key) errs.key = "Escribe la clave de API.";
+      if (!aiModel.trim()) errs.model = errs.model || "Escribe el nombre del modelo.";
     }
     fieldErr = errs;
     return Object.keys(errs).length === 0;
+  }
+
+  async function doGoogleSignIn() {
+    googleBusy = true;
+    googleErr = "";
+    try {
+      const r = await signInWithGoogle();
+      if (!r.ok) googleErr = r.error ?? "no se pudo conectar con Google";
+      else await loadAuthStatus();
+    } catch (e) {
+      googleErr = String(e);
+    } finally {
+      googleBusy = false;
+    }
   }
 
   function humanError(raw: string, kind: "ai" | "email"): string {
@@ -264,39 +188,17 @@
   async function continueSetup() {
     if (busy) return;
     if (!validateFields()) {
-      emailState = "idle";
       aiState = "idle";
       return;
     }
     busy = true;
-    emailState = emailFilled ? "loading" : "skip";
     aiState = aiFilled ? "loading" : "skip";
-    emailDetail = "";
     aiDetail = "";
-    emailRaw = "";
     aiRaw = "";
 
     try {
       if (aiFilled) {
         await invoke("ai_config_set", { endpoint: aiEndpoint.trim(), model: aiModel.trim() });
-        if (aiKey) await invoke("ai_set_key", { key: aiKey });
-      }
-      if (emailFilled) {
-        await invoke("email_config_set", {
-          config: {
-            host: host.trim(),
-            port: Number(port) || 993,
-            user: emailUser.trim(),
-            auth: "password",
-            ssl: useSsl,
-            mailboxes: ["INBOX"],
-            filters: { senders: [], domains: [], keywords: [] },
-          },
-          password: emailPass,
-          enabled: true,
-          intervalHours: 8,
-          maxAgeDays: 7,
-        });
       }
       const r = await invoke<{ ai: { ok: boolean; detail: string }; email: { ok: boolean; detail: string } }>(
         "verify_connections",
@@ -306,26 +208,19 @@
         aiDetail = r.ai.detail;
         aiRaw = r.ai.ok ? "" : r.ai.detail;
       }
-      if (emailFilled) {
-        emailState = r.email.ok ? "ok" : "error";
-        emailDetail = r.email.detail;
-        emailRaw = r.email.ok ? "" : r.email.detail;
+      if (aiFilled && aiState === "error") {
+        return;
       }
-      const failed = (emailFilled && emailState === "error") || (aiFilled && aiState === "error");
-      if (!failed) {
-        await completeOnboarding();
-      }
+      await completeOnboarding();
     } catch (e) {
       const msg = String(e);
-      if (emailFilled) {
-        emailState = "error";
-        emailDetail = humanError(msg, "email");
-        emailRaw = msg;
-      }
       if (aiFilled) {
         aiState = "error";
         aiDetail = humanError(msg, "ai");
         aiRaw = msg;
+      } else {
+        // sin IA configurada, un fallo de verify no debe bloquear el onboarding
+        await completeOnboarding();
       }
     } finally {
       busy = false;
@@ -411,10 +306,12 @@
       <div class="grid">
         <aside class="guide">
           <div class="g-card">
-            <h2>{PROVIDERS[provider].label}</h2>
-            <p class="g-tip">{PROVIDERS[provider].tip}</p>
+            <h2>Cuenta de Google</h2>
+            <p class="g-tip">
+              Conecta tu cuenta para sincronizar Gmail (OAuth2): no necesitas servidores ni contraseñas.
+            </p>
             <ol class="g-steps">
-              {#each PROVIDERS[provider].steps as s}
+              {#each GOOGLE_STEPS as s}
                 <li>{s}</li>
               {/each}
             </ol>
@@ -432,100 +329,30 @@
 
         <form class="form" onsubmit={(e) => { e.preventDefault(); continueSetup(); }}>
           <fieldset>
-            <legend>Correo (IMAP)</legend>
+            <legend>Cuenta de Google</legend>
+            <p class="fs-hint">
+              Conecta tu cuenta para sincronizar Gmail (IMAP con OAuth2). Se abre tu navegador
+              para autorizar; al volver, la cuenta queda conectada.
+            </p>
 
-            <div class="frow">
-              <span class="lbl" id="ob-provider">Proveedor</span>
-              <div class="pills" role="group" aria-labelledby="ob-provider">
-                {#each Object.entries(PROVIDERS) as [id, p]}
-                  <button
-                    type="button"
-                    class="pill {provider === id ? 'on' : ''}"
-                    onclick={() => pickProvider(id as ProviderId)}
-                    aria-pressed={provider === id}
-                  >
-                    {p.label}
-                  </button>
-                {/each}
+            {#if authUser()}
+              <p class="fok" role="status">✓ Conectado: {authUser()!.name} ({authUser()!.email})</p>
+            {:else}
+              <div class="frow">
+                <button
+                  type="button"
+                  class="btn primary big"
+                  onclick={doGoogleSignIn}
+                  disabled={googleBusy}
+                >
+                  {googleBusy ? "Abriendo navegador…" : "Iniciar sesión con Google"}
+                </button>
               </div>
-            </div>
-
-            <div class="frow">
-              <label class="lbl" for="ob-user">Dirección de correo</label>
-              <input
-                id="ob-user"
-                type="email"
-                class={fieldClass(emailState, emailUser !== "")}
-                placeholder="tucorreo@ejemplo.com"
-                bind:value={emailUser}
-                autocomplete="username"
-                disabled={busy}
-                aria-invalid={!!fieldErr.user}
-              />
-              {#if fieldErr.user}
-                <p class="ferr">{fieldErr.user}</p>
+              {#if googleErr}
+                <div class="ferrbox" role="alert">
+                  <p>{googleErr}</p>
+                </div>
               {/if}
-            </div>
-
-            <div class="frow">
-              <label class="lbl" for="ob-pass">Contraseña o contraseña de aplicación</label>
-              <input
-                id="ob-pass"
-                type="password"
-                class={fieldClass(emailState, emailUser !== "")}
-                placeholder="••••••••••••••••"
-                bind:value={emailPass}
-                autocomplete="current-password"
-                disabled={busy}
-                aria-invalid={!!fieldErr.pass}
-              />
-              {#if fieldErr.pass}
-                <p class="ferr">{fieldErr.pass}</p>
-              {/if}
-            </div>
-
-            <div class="frow srv">
-              <div class="srv-field">
-                <label class="lbl" for="ob-host">Servidor</label>
-                <input
-                  id="ob-host"
-                  type="text"
-                  class={fieldClass(emailState, emailUser !== "")}
-                  bind:value={host}
-                  oninput={(e) => setHostManual(e.currentTarget.value)}
-                  disabled={busy}
-                  aria-invalid={!!fieldErr.host}
-                />
-                {#if fieldErr.host}
-                  <p class="ferr">{fieldErr.host}</p>
-                {/if}
-              </div>
-              <div class="srv-field small">
-                <label class="lbl" for="ob-port">Puerto</label>
-                <input id="ob-port" type="number" class="inp" bind:value={port} disabled={busy} />
-              </div>
-              <label class="check">
-                <input type="checkbox" bind:checked={useSsl} disabled={busy} />
-                SSL
-              </label>
-            </div>
-
-            {#if emailState === "ok"}
-              <p class="fok" role="status">✓ {emailDetail || "Correo conectado"}</p>
-            {:else if emailState === "error"}
-              <div class="ferrbox" role="alert">
-                <p>{emailDetail}</p>
-                {#if emailRaw}
-                  <details>
-                    <summary>Ver detalles</summary>
-                    <pre>{emailRaw}</pre>
-                  </details>
-                {/if}
-              </div>
-            {:else if emailState === "skip"}
-              <p class="fskip">Omitido: puedes conectarlo después desde Ajustes.</p>
-            {:else if emailState === "loading"}
-              <p class="fwait">Comprobando correo…</p>
             {/if}
           </fieldset>
 
@@ -557,7 +384,7 @@
               <input
                 id="ob-endpoint"
                 type="text"
-                class={fieldClass(aiState, aiEndpoint !== "" || aiModel !== "" || aiKey !== "")}
+                class={fieldClass(aiState, aiEndpoint !== "" || aiModel !== "")}
                 bind:value={aiEndpoint}
                 placeholder="https://…/v1"
                 disabled={busy}
@@ -573,30 +400,11 @@
               <input
                 id="ob-model"
                 type="text"
-                class={fieldClass(aiState, aiEndpoint !== "" || aiModel !== "" || aiKey !== "")}
+                class={fieldClass(aiState, aiEndpoint !== "" || aiModel !== "")}
                 bind:value={aiModel}
                 placeholder="gpt-4o-mini"
                 disabled={busy}
               />
-            </div>
-
-            <div class="frow">
-              <label class="lbl" for="ob-key">
-                Clave de API{onboarding()?.ai.has_key ? " (ya guardada, déjala en blanco)" : ""}
-              </label>
-              <input
-                id="ob-key"
-                type="password"
-                class={fieldClass(aiState, aiEndpoint !== "" || aiModel !== "" || aiKey !== "")}
-                placeholder={onboarding()?.ai.has_key ? "•••••••• (guardada)" : "sk-…"}
-                bind:value={aiKey}
-                autocomplete="off"
-                disabled={busy}
-                aria-invalid={!!fieldErr.key}
-              />
-              {#if fieldErr.key}
-                <p class="ferr">{fieldErr.key}</p>
-              {/if}
             </div>
 
             {#if aiState === "ok"}
@@ -623,8 +431,7 @@
               {busy ? "Comprobando…" : "Continuar →"}
             </button>
             <p class="sec">
-              Las claves van cifradas al administrador de credenciales de Windows. Nada se guarda
-              en la base de datos.
+              La clave de IA va incrustada en la app. Tus tokens de Google quedan en tu disco local.
             </p>
           </div>
         </form>
@@ -853,12 +660,6 @@
     color: var(--primary);
     font-weight: 700;
   }
-  .g-steps code {
-    background: var(--surface-3);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 12px;
-  }
 
   .form {
     display: flex;
@@ -992,9 +793,6 @@
     color: var(--text-2);
     padding-bottom: 11px;
     user-select: none;
-  }
-  .check input {
-    accent-color: var(--primary);
   }
 
   .fok {

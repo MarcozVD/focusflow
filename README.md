@@ -204,6 +204,16 @@ Desde la raíz del repositorio:
 build-focusflow.bat
 ```
 
+> **Antes de compilar**, exporta `AI_API_KEY` o crea `spike/src-tauri/.env`
+> con `AI_API_KEY=tu-clave`. La clave se incrusta en el binario en tiempo de
+> compilación y **nunca se commitea al repo** (`.env` está en `.gitignore`).
+> Sin `AI_API_KEY` el build falla con un mensaje claro.
+
+Para el login con Google y la sincronización de Gmail (OAuth2) crea también
+`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` en el mismo `.env`
+(mira `spike/src-tauri/.env.example`). Sin ellos la app compila, pero el
+login de Google queda deshabilitado.
+
 ---
 
 ## Tests
@@ -215,7 +225,7 @@ cd spike/src-tauri
 cargo test --lib
 ```
 
-Actualmente existen **210 tests** para el motor de planificación, parsers, sincronización, notificaciones y lógica interna.
+Actualmente existen **216 tests** para el motor de planificación, parsers, sincronización, notificaciones y lógica interna.
 
 ### Frontend
 
@@ -238,15 +248,15 @@ Puedes configurar cualquier proveedor compatible con OpenAI Chat Completions.
 
 Se recomienda Groq por su velocidad y disponibilidad de modelos gratuitos.
 
+La clave de API va **incrustada en la app** (tiempo de compilación, vía
+`AI_API_KEY` en `spike/src-tauri/.env`): el usuario final no configura nada.
 La aplicación permite probar la conexión directamente desde los ajustes.
 
-### Correo electrónico
+### Correo electrónico (Gmail)
 
-Puedes configurar una cuenta mediante IMAP utilizando:
-
-* Servidor IMAP
-* Correo electrónico
-* Contraseña de aplicación
+La sincronización de correo usa tu **cuenta de Google** (IMAP con OAuth2):
+inicia sesión desde Ajustes → Cuenta de Google. No se necesitan servidores ni
+contraseñas de aplicación.
 
 FocusFlow analiza los mensajes para detectar posibles tareas, eventos, exámenes y reuniones.
 
@@ -254,7 +264,9 @@ Las sugerencias siempre requieren confirmación del usuario antes de modificar e
 
 ### Seguridad
 
-Las credenciales se almacenan mediante el **Windows Credential Manager** y no directamente en la base de datos SQLite.
+La clave de IA se incrusta en el binario en build-time (no está en el repo).
+Los tokens de Google (`refresh_token`) se guardan en la base de datos local
+del usuario (SQLite), no en el repositorio.
 
 > Nunca subas API keys, contraseñas o credenciales al repositorio.
 

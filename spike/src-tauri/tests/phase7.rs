@@ -19,7 +19,9 @@ fn clean_db() -> Db {
     Db::open_memory_clean_pub().unwrap()
 }
 
-const EXAMPLE: &str = "Examen de cálculo el viernes y necesito 4 horas para preparar";
+// "pasado mañana" (día+2) garantiza margen de preparación SIN depender del día
+// de la semana: "el viernes" con hoy jueves dejaba <2 sesiones (flake fecha).
+const EXAMPLE: &str = "Examen de cálculo pasado mañana y necesito 4 horas para preparar";
 
 /// Input → Intent (proveedor local determinista, sin envoltorio de prompt).
 fn interpret(text: &str) -> (Vec<focusflow_spike_lib::ai::intent::Intent>, String) {

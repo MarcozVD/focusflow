@@ -24,6 +24,10 @@
     uiAccent,
     notifPrefs,
     loadNotifPrefs,
+    saveNotifPrefs,
+    authUser,
+    signInWithGoogle,
+    signOutGoogle,
     exportData,
     wipeData,
   } from "./data.svelte";
@@ -106,7 +110,6 @@
 
   let aiEndpoint = $state("");
   let aiModel = $state("");
-  let aiKey = $state("");
   const aiHttp = $derived(/^https:\/\//i.test(aiEndpoint.trim()));
 
   /** Presets de proveedores gratuitos compatibles con OpenAI chat completions. */
@@ -119,10 +122,6 @@
     aiEndpoint = p.endpoint;
     aiModel = p.model;
   }
-  let emailHost = $state("");
-  let emailPort = $state(993);
-  let emailUser = $state("");
-  let emailPass = $state("");
   let emailSsl = $state(true);
   let emailEnabled = $state(false);
   let emailInterval = $state(8);
@@ -133,6 +132,8 @@
   let keywords = $state("");
   let newTrusted = $state("");
   let trusted = $state<string[]>([]);
+  let authBusy = $state(false);
+  let authErr = $state("");
 
   let gStartWin = $state(false);
   let gStartMinimized = $state(false);
@@ -211,9 +212,6 @@
   $effect(() => {
     const e = emailConfig();
     if (e) {
-      emailHost = e.config.host;
-      emailPort = e.config.port;
-      emailUser = e.config.user;
       emailSsl = e.config.ssl;
       emailEnabled = e.enabled;
       emailInterval = e.interval_hours;
@@ -231,25 +229,12 @@
     saved = "";
     try {
       await invoke("ai_config_set", { endpoint: aiEndpoint, model: aiModel });
-      if (aiKey) {
-        await invoke("ai_set_key", { key: aiKey });
-        aiKey = "";
-      }
       await loadAiConfig();
       saved = "IA guardada";
     } catch (e) {
       saved = `Error: ${e}`;
     } finally {
       saving = false;
-    }
-  }
-
-  async function clearKey() {
-    try {
-      await invoke("ai_clear_key");
-      await loadAiConfig();
-    } catch (e) {
-      saved = `Error: ${e}`;
     }
   }
 
@@ -271,10 +256,10 @@
     saved = "";
     try {
       const config = {
-        host: emailHost,
-        port: Number(emailPort) || 993,
-        user: emailUser,
-        auth: "password",
+        host: emailConfig()?.config.host ?? "imap.gmail.com",
+        port: emailConfig()?.config.port ?? 993,
+        user: emailConfig()?.config.user ?? (authUser()?.email ?? ""),
+        auth: "oauth2",
         ssl: emailSsl,
         mailboxes: mailboxes.split("\n").map((s) => s.trim()).filter(Boolean),
         filters: {
@@ -285,12 +270,10 @@
       };
       await invoke("email_config_set", {
         config,
-        password: emailPass || null,
         enabled: emailEnabled,
         intervalHours: Number(emailInterval) || 8,
         maxAgeDays: Math.max(1, Number(emailMaxAge) || 7),
       });
-      emailPass = "";
       await loadEmailConfig();
       saved = "Configuración de correo guardada";
     } catch (e) {
@@ -309,6 +292,32 @@
       await loadEmailConfig();
     } catch (e) {
       saved = `Error: ${e}`;
+    }
+  }
+
+  async function doSignIn() {
+    authBusy = true;
+    authErr = "";
+    try {
+      const r = await signInWithGoogle();
+      if (!r.ok) authErr = r.error ?? "no se pudo iniciar sesión";
+    } catch (e) {
+      authErr = String(e);
+    } finally {
+      authBusy = false;
+    }
+  }
+
+  async function doSignOut() {
+    authBusy = true;
+    authErr = "";
+    try {
+      const r = await signOutGoogle();
+      if (!r.ok) authErr = r.error ?? "no se pudo cerrar sesión";
+    } catch (e) {
+      authErr = String(e);
+    } finally {
+      authBusy = false;
     }
   }
 
@@ -403,46 +412,9 @@
     <h2>Asistente IA</h2>
     <p class="hint">
       Proveedor intercambiable (OpenCode Zen, OpenAI, Anthropic, Gemini…). API compatible con
-      chat completions. Las claves se guardan cifradas en Windows Credential Manager.
+      chat completions. La clave de API va incrustada en la app (tiempo de compilación) — no
+      necesitas configurarla ni pegarla.
     </p>
-    <details class="guide">
-      <summary>Paso a paso: cómo sacar la clave de API de Groq (gratis y recomendado)</summary>
-      <ol class="steps">
-        <li>
-          Entra en <code>console.groq.com</code> y crea una cuenta
-          (puedes usar tu cuenta de Google o un correo; puede pedir verificar tu teléfono).
-        </li>
-        <li>
-          En el menú de la izquierda entra en <strong>API Keys</strong>
-          (<code>console.groq.com/keys</code>).
-        </li>
-        <li>
-          Pulsa <strong>Create API Key</strong>.
-        </li>
-        <li>
-          Ponle un nombre (por ejemplo «FocusFlow») y pulsa <strong>Submit</strong>.
-        </li>
-        <li>
-          <strong>Copia la clave</strong>: empieza por <code>gsk_…</code> y solo se muestra
-          una vez. Si la pierdes, crea otra.
-        </li>
-        <li>
-          Aquí en FocusFlow, pulsa el botón <strong>«Groq · recomendado»</strong> de abajo:
-          rellena solo el endpoint y el modelo.
-        </li>
-        <li>
-          Pega la clave en <em>Clave de API</em> y pulsa <strong>Guardar IA</strong>.
-        </li>
-        <li>
-          Pulsa <strong>Probar conexión</strong> para confirmar que funciona.
-        </li>
-      </ol>
-      <p class="hint">
-        ¿Otro proveedor? Elige su botón en la lista y repite los pasos 5–8 con la clave
-        correspondiente (OpenAI: <code>platform.openai.com/api-keys</code>,
-        Gemini: <code>aistudio.google.com/apikey</code>).
-      </p>
-    </details>
     <div class="pills">
       {#each AI_PRESETS as p}
         <button
@@ -461,11 +433,6 @@
         <input type="text" bind:value={aiModel} placeholder="modelo-ia" />
       </label>
     </div>
-    <div class="grid">
-      <label>Clave de API {aiConfig()?.has_key ? "(guardada ✓)" : "(no hay clave)"}
-        <input type="password" bind:value={aiKey} placeholder="••••••••" />
-      </label>
-    </div>
     {#if aiEndpoint.trim() && !aiHttp}
       <p class="warn">
         El endpoint no usa HTTPS. La clave de API viajaría sin cifrar; usa una URL que empiece
@@ -474,12 +441,9 @@
     {/if}
     <div class="row">
       <button class="btn primary" onclick={saveAi} disabled={saving}>Guardar IA</button>
-      <button class="btn" onclick={testAi} disabled={testing || !aiConfig()?.has_key}>
+      <button class="btn" onclick={testAi} disabled={testing}>
         {testing ? "Probando…" : "Probar conexión"}
       </button>
-      {#if aiConfig()?.has_key}
-        <button class="btn danger" onclick={clearKey}>Eliminar clave</button>
-      {/if}
     </div>
     {#if testResult}
       <p class="test {testResult.ok ? 'ok' : 'err'}">
@@ -496,75 +460,47 @@
   </section>
 
   <section>
-    <h2>Correo electrónico</h2>
+    <h2>Cuenta de Google</h2>
     <p class="hint">
-      IMAP seguro (Gmail, Outlook, universidad…). Para Gmail usa una contraseña de aplicación.
-      La contraseña se guarda cifrada en Windows Credential Manager — nunca en disco.
-      La IA revisa los correos nuevos cada {emailInterval} h en segundo plano.
+      La sincronización de correo usa tu cuenta de Google (Gmail vía IMAP con OAuth2).
+      Conecta tu cuenta una vez; no se necesitan servidores ni contraseñas.
+    </p>
+    {#if authUser()}
+      <div class="card">
+        <p><strong>{authUser()!.name}</strong> <span class="hint">({authUser()!.email})</span></p>
+        <p class="hint">
+          {authUser()!.gmail_connected
+            ? "Gmail conectado: los correos nuevos se revisan en segundo plano."
+            : "Cuenta conectada, pendiente de sincronizar."}
+        </p>
+        <div class="row">
+          <button class="btn danger" onclick={() => doSignOut()} disabled={authBusy}>Cerrar sesión</button>
+        </div>
+        {#if authErr}<p class="test err">{authErr}</p>{/if}
+      </div>
+    {:else}
+      <div class="card">
+        <p class="hint">
+          Inicia sesión con Google para conectar Gmail y sincronizar tus correos.
+        </p>
+        <div class="row">
+          <button class="btn primary" onclick={() => doSignIn()} disabled={authBusy}>
+            {authBusy ? "Abriendo navegador…" : "Iniciar sesión con Google"}
+          </button>
+        </div>
+        {#if authErr}<p class="test err">{authErr}</p>{/if}
+      </div>
+    {/if}
+
+    <h3>Sincronización de Gmail</h3>
+    <p class="hint">
       Solo se revisan correos de los últimos {emailMaxAge} días (el avance queda registrado y no se repite).
     </p>
-    <details class="guide">
-      <summary>Paso a paso: cómo sacar la contraseña de aplicación (Gmail)</summary>
-      <ol class="steps">
-        <li>
-          Requisito: tu cuenta de Google debe tener la
-          <strong>verificación en 2 pasos</strong> activada
-          (<code>myaccount.google.com/security</code> → <em>Verificación en 2 pasos</em>).
-        </li>
-        <li>
-          Entra en <code>myaccount.google.com/apppasswords</code>
-          (te pedirá confirmar tu contraseña).
-        </li>
-        <li>
-          En <em>Nombre de la aplicación</em> escribe «FocusFlow» y pulsa <strong>Crear</strong>.
-        </li>
-        <li>
-          Google te muestra una <strong>contraseña de 16 letras</strong> (por ejemplo
-          <code>abcd efgh ijkl mnop</code>). Cópiala.
-        </li>
-        <li>
-          Pégala aquí en <em>Contraseña de aplicación</em> (los espacios no importan) y pulsa
-          <strong>Guardar correo</strong>.
-        </li>
-        <li>
-          Deja <em>Servidor IMAP</em> en <code>imap.gmail.com</code>, puerto <code>993</code> y
-          <em>SSL: Sí</em>.
-        </li>
-        <li>
-          Pulsa <strong>Comprobar ahora</strong> para verificar la conexión.
-        </li>
-      </ol>
-      <p class="hint">
-        ¿No usas Gmail? Outlook: <code>outlook.office365.com</code> con tu contraseña normal.
-        Universidades: usa el servidor IMAP que te den y, si piden contraseña de aplicación,
-        sácala del panel de tu institución.
-      </p>
-    </details>
     <label class="check">
       <input type="checkbox" bind:checked={emailEnabled} />
       Revisar correo automáticamente
     </label>
     <div class="grid">
-      <label>Servidor IMAP
-        <input type="text" bind:value={emailHost} placeholder="imap.gmail.com" />
-      </label>
-      <label>Puerto
-        <input type="number" bind:value={emailPort} />
-      </label>
-      <label>SSL
-        <select bind:value={emailSsl}>
-          <option value={true}>Sí (993)</option>
-          <option value={false}>No (143)</option>
-        </select>
-      </label>
-    </div>
-    <div class="grid">
-      <label>Usuario
-        <input type="text" bind:value={emailUser} placeholder="tucorreo@gmail.com" />
-      </label>
-      <label>Contraseña de aplicación {emailConfig()?.has_password ? "(guardada ✓)" : ""}
-        <input type="password" bind:value={emailPass} placeholder="••••••••" />
-      </label>
       <label>Frecuencia de revisión (horas)
         <input type="number" min="1" bind:value={emailInterval} />
       </label>
@@ -587,12 +523,12 @@
       </label>
     </div>
     <div class="row">
-      <button class="btn primary" onclick={saveEmail} disabled={saving}>Guardar correo</button>
-      <button class="btn primary-solid" onclick={syncNow} disabled={syncRunning()}>
+      <button class="btn primary" onclick={saveEmail} disabled={saving}>Guardar ajustes</button>
+      <button class="btn primary-solid" onclick={syncNow} disabled={syncRunning() || !authUser()}>
         {syncRunning() ? "Comprobando…" : "Comprobar ahora"}
       </button>
-      <button class="btn" onclick={rescanEmail} disabled={syncRunning()}>
-        Reescanear correo (7 días)
+      <button class="btn" onclick={rescanEmail} disabled={syncRunning() || !authUser()}>
+        Reescanear correo ({emailMaxAge} días)
       </button>
     </div>
     <p class="hint">
@@ -881,38 +817,6 @@
     color: var(--text-3);
     line-height: 1.5;
   }
-  .guide {
-    margin: 6px 0 4px;
-    border: none;
-    border-radius: var(--r-md);
-    background: var(--surface-2);
-    padding: 10px 14px;
-    font-size: 12.5px;
-  }
-  .guide summary {
-    cursor: pointer;
-    font-weight: 600;
-    color: var(--text-2);
-    user-select: none;
-  }
-  .guide summary:hover {
-    color: var(--primary);
-  }
-  .steps {
-    margin: 10px 0 4px;
-    padding-left: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-    color: var(--text-1);
-    line-height: 1.55;
-  }
-  .steps code {
-    background: var(--surface-3);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 11.5px;
-  }
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -932,7 +836,6 @@
     gap: 8px;
   }
   input,
-  select,
   textarea {
     border: none;
     background: var(--surface-3);
@@ -946,7 +849,6 @@
     transition: box-shadow var(--dur-fast) var(--ease-out);
   }
   input:focus,
-  select:focus,
   textarea:focus {
     box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
   }
