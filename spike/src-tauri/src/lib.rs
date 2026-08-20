@@ -629,6 +629,9 @@ async fn auth_google_sign_in(app: AppHandle) -> Result<auth::AuthSessionView, St
     match res {
         Ok(Ok(v)) => {
             append_log(&app, &format!("auth_sign_in ok user={}", v.email));
+            // enfoca la ventana principal: el usuario acaba de autorizar en el
+            // navegador y la app debe traerse a primer plano automáticamente
+            show_main(&app);
             Ok(v)
         }
         Ok(Err(e)) => {
