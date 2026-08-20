@@ -8,7 +8,8 @@
 //! 5. Los tokens se guardan en la DB local (tabla `auth_sessions`), NO en
 //!    Credential Manager. El usuario decide (prompt) qué cuenta usar.
 //!
-//! Scopes: identidad (openid email profile) + lectura de Gmail (IMAP XOAUTH2).
+//! Scopes: identidad (openid email profile) + acceso a Gmail vía IMAP/SMTP
+//! XOAUTH2 (`https://mail.google.com/`).
 //! `access_type=offline` + `prompt=consent` garantizan `refresh_token`.
 
 use std::io::{Read, Write};
@@ -23,7 +24,9 @@ use crate::store::{AuthSession, Db};
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const SCOPE: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly";
+// gmail.readonly NO sirve para IMAP/SMTP XOAUTH2 (solo para la API REST);
+// Google exige el scope completo mail.google.com para autenticar IMAP/SMTP.
+const SCOPE: &str = "openid email profile https://mail.google.com/";
 const CALLBACK_TIMEOUT_SECS: u64 = 120;
 
 /// ID/secret de cliente incrustados en build-time (build.rs lee `.env`).
