@@ -146,8 +146,33 @@ pub fn perform_login() -> Result<AuthSession, String> {
         state,
     );
 
-    open::that(&auth_url)
-        .map_err(|e| format!("no se pudo abrir el navegador: {e} — abre manualmente: {auth_url}"))?;
+    // `open::that` en Windows usa explorer.exe, que a veces devuelve
+    // ExitStatus(1) con URLs largas (como las de OAuth). Cadena de
+    // fallback: open → rundll32 → cmd start; si todo falla, URL manual.
+    fn open_browser(url: &str) -> Result<(), String> {
+        if open::that(url).is_ok() {
+            return Ok(());
+        }
+        let rundll32 = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if rundll32 {
+            return Ok(());
+        }
+        let cmd_start = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if cmd_start {
+            return Ok(());
+        }
+        Err(format!("no se pudo abrir el navegador — abre manualmente: {url}"))
+    }
+
+    open_browser(&auth_url)?;
 
     let code = recv_callback(listener, &state)?;
 
