@@ -308,9 +308,19 @@ async fn task_from_text(
 
     let task = {
         let db = lock_recover(&state);
-        let t = db
-            .create(&parsed.title, &parsed.category_id, &parsed.priority, parsed.start_ms, parsed.end_ms, parsed.all_day)
-            .map_err(|e| e.to_string())?;
+        // Rango multi-día ("inicia hoy y finaliza el lunes a las 4pm") →
+        // bloque de inicio + bloque "(entrega)"; un solo día → una tarea.
+        let blocks = planning::split_range_blocks(&parsed.title, parsed.start_ms, parsed.end_ms);
+        let mut first: Option<TaskRow> = None;
+        for (title, s, e, all_day) in &blocks {
+            let t = db
+                .create(title, &parsed.category_id, &parsed.priority, *s, *e, *all_day)
+                .map_err(|e| e.to_string())?;
+            if first.is_none() {
+                first = Some(t);
+            }
+        }
+        let t = first.ok_or_else(|| "no se pudo crear la tarea".to_string())?;
         // conservar el recordatorio sugerido por la IA ("1d", "3h", ...)
         if let Some(min) = parsed.reminders.first().and_then(|s| reminders::parse_reminder_minutes(s)) {
             db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;

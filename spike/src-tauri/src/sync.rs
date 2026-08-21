@@ -119,15 +119,27 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         }
     };
     let end = s.end_at.unwrap_or(start);
-    // Una ventana de disponibilidad se acepta como UNA tarea de todo el día
-    // que abarca el rango completo (nunca una tarea por día).
-    let all_day = s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at || s.kind == "availability";
     let status = if s.status == "auto_approved" { "auto_approved" } else { "accepted" };
+    // Rango multi-día (ventana de disponibilidad, "del 5 al 23", inicio+fin):
+    // NO una tarea banner que ocupa todos los días intermedios — solo bloque
+    // de inicio + bloque "(entrega)", igual que QuickAdd y el plan sugerido.
+    let blocks = crate::planning::split_range_blocks(&s.title, start, end);
+    let single_day = blocks.len() == 1;
+    let single_all_day =
+        s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at || s.kind == "availability";
     db.tx_begin().map_err(|e| e.to_string())?;
     let result = (|| {
-        let task = db
-            .create(&s.title, &s.category_id, &s.priority, start, end, all_day)
-            .map_err(|e| e.to_string())?;
+        let mut main: Option<crate::store::TaskRow> = None;
+        for (title, bs, be, range_all_day) in &blocks {
+            let all_day = if single_day { single_all_day } else { *range_all_day };
+            let t = db
+                .create(title, &s.category_id, &s.priority, *bs, *be, all_day)
+                .map_err(|e| e.to_string())?;
+            if main.is_none() {
+                main = Some(t);
+            }
+        }
+        let task = main.ok_or_else(|| "tarea no creada".to_string())?;
         // Contexto de la sugerencia → descripción de la tarea: qué hay que
         // hacer + procedencia (remitente y asunto del correo).
         let mut desc = s.description.trim().to_string();

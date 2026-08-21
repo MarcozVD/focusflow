@@ -390,6 +390,43 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
     out
 }
 
+/// Regla compartida para rangos multi-día (QuickAdd y sugerencias de correo):
+/// NADA de banner que cruce días ni relleno intermedio — solo dos bloques:
+/// 1. **Inicio**: si el rango trae hora de inicio, ese día a esa hora (2 h);
+///    si no y empieza hoy, a la hora actual (2 h); si es un día futuro sin
+///    hora, marcador de todo el día solo ese día.
+/// 2. **Cierre** "<título> (entrega)": si el fin trae hora, bloque de 2 h que
+///    empieza a esa hora; si no, marcador de todo el día del último día.
+/// Los días intermedios quedan libres.
+///
+/// Devuelve un único bloque si el rango cabe en un solo día.
+pub fn split_range_blocks(title: &str, start: i64, end: i64) -> Vec<(String, i64, i64, bool)> {
+    const HOUR: i64 = 3_600_000;
+    let s_day = local_midnight(start);
+    let e_day = local_midnight(end);
+    if end <= start || e_day <= s_day {
+        return vec![(title.to_string(), start, end.max(start), false)];
+    }
+    let now = chrono::Local::now().timestamp_millis();
+    let today = local_midnight(now);
+    // inicio
+    let start_block = if start > s_day {
+        (title.to_string(), start, start + 2 * HOUR, false)
+    } else if s_day <= today {
+        (title.to_string(), now, now + 2 * HOUR, false)
+    } else {
+        (title.to_string(), s_day, s_day + DAY_MS, true)
+    };
+    // cierre
+    let close_title = format!("{title} (entrega)");
+    let end_block = if end > e_day {
+        (close_title, end, end + 2 * HOUR, false)
+    } else {
+        (close_title, e_day, e_day + DAY_MS, true)
+    };
+    vec![start_block, end_block]
+}
+
 fn apply_intents(base: &mut ConstraintEngine, intents: &[Intent]) {
     let ie = ConstraintEngine::from_intents(intents);
     base.commitments.extend(ie.commitments);
@@ -1202,5 +1239,46 @@ mod tests {
         let view = plan_from_text(&d, "organiza mi día", &[], "local").unwrap();
         assert_eq!(view.items.len(), 1, "sin 'semana' no hay filtro de semana");
         assert_eq!(view.items[0].title, "Lejana");
+    }
+
+    #[test]
+    fn split_range_blocks_multi_day_with_hours() {
+        // "inicia hoy a las 10 y finaliza en 3 días a las 4pm" → inicio
+        // 10:00–12:00 hoy + "(entrega)" 16:00–18:00 ese día. Sin días medios.
+        let day = local_midnight(chrono::Local::now().timestamp_millis());
+        let start = day + 10 * 3_600_000;
+        let end = day + 3 * DAY_MS + 16 * 3_600_000;
+        let b = split_range_blocks("Proyecto", start, end);
+        assert_eq!(b.len(), 2, "solo inicio + entrega: {b:?}");
+        assert_eq!(b[0].0, "Proyecto");
+        assert_eq!((b[0].1, b[0].2), (start, start + 2 * 3_600_000));
+        assert!(!b[0].3, "inicio con hora no es todo el día");
+        assert_eq!(b[1].0, "Proyecto (entrega)");
+        assert_eq!((b[1].1, b[1].2), (end, end + 2 * 3_600_000));
+        assert!(!b[1].3);
+    }
+
+    #[test]
+    fn split_range_blocks_single_day_unchanged() {
+        let day = local_midnight(chrono::Local::now().timestamp_millis());
+        let (s, e) = (day + 9 * 3_600_000, day + 11 * 3_600_000);
+        let b = split_range_blocks("Tarea", s, e);
+        assert_eq!(b.len(), 1, "un solo día no se divide");
+        assert_eq!(b[0].0, "Tarea");
+        assert_eq!((b[0].1, b[0].2), (s, e));
+    }
+
+    #[test]
+    fn split_range_blocks_future_without_hours_all_day_markers() {
+        // rango futuro sin horas (medianoche exacta) → marcadores de todo el
+        // día en el primer y último día, nada en medio
+        let today = local_midnight(chrono::Local::now().timestamp_millis());
+        let (s, e) = (today + 5 * DAY_MS, today + 8 * DAY_MS);
+        let b = split_range_blocks("Encuesta", s, e);
+        assert_eq!(b.len(), 2);
+        assert!(b[0].3 && b[1].3, "marcadores de todo el día");
+        assert_eq!(b[0].1, s);
+        assert_eq!(b[1].1, e);
+        assert_eq!(b[1].0, "Encuesta (entrega)");
     }
 }
