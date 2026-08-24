@@ -629,10 +629,14 @@ impl Db {
 
     /// Devuelve otra tarea activa que se solapa con [start, end].
     pub fn find_overlap(&self, exclude_id: i64, start: i64, end: i64) -> rusqlite::Result<Option<(i64, String)>> {
+        // No cuentan como solape: tareas de todo el día (marcadores) ni
+        // spans multi-día (>26 h): son rangos inicio→fin cuyos días
+        // intermedios quedan libres y no bloquean bloques puntuales.
         self.conn
             .query_row(
                 "SELECT id, title FROM tasks
                  WHERE deleted_at IS NULL AND id != ?1 AND status != 'completada'
+                   AND NOT all_day AND (end_at - start_at) <= 93600000
                    AND start_at < ?3 AND end_at > ?2
                  ORDER BY start_at LIMIT 1",
                 rusqlite::params![exclude_id, start, end],
@@ -647,6 +651,7 @@ impl Db {
         let mut stmt = self.conn.prepare(
             "SELECT id, title FROM tasks
              WHERE deleted_at IS NULL AND status != 'completada'
+               AND NOT all_day AND (end_at - start_at) <= 93600000
                AND start_at < ?2 AND end_at > ?1
              ORDER BY start_at LIMIT 16",
         )?;

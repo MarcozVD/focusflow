@@ -613,13 +613,24 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     // Los eventos "todo el día" son marcadores de día (inicio/cierre de un
     // rango, etc.): no ocupan horas concretas, así que no se validan por
     // solape crudo; solo chocan los bloques con hora (inicio/cierre).
-    let event_spans: Vec<(i64, i64, String, bool)> = plan
-        .understanding
+    //
+    // Los spans salen de las sesiones EFECTIVAS: si el usuario editó los
+    // bloques en la revisión, el evento se crea donde él lo puso (antes se
+    // usaba siempre la ventana original de la IA y la edición se ignoraba,
+    // creando además un duplicado en la hora editada).
+    let all_day_of = |title: &str| {
+        plan.understanding
+            .iter()
+            .find(|u| u.title == title)
+            .map(|u| u.all_day)
+            .unwrap_or(false)
+    };
+    let event_spans: Vec<(i64, i64, String, bool)> = sessions
         .iter()
-        .filter(|u| u.intent_type == IntentType::Event)
-        .filter_map(|u| {
-            u.window_start
-                .map(|s| (s, u.window_end.unwrap_or(s + 3_600_000), u.title.clone(), u.all_day))
+        .filter(|(idx, _)| plan.items[*idx].intent_type == IntentType::Event)
+        .map(|(idx, s)| {
+            let t = plan.items[*idx].title.clone();
+            (s.start_ms, s.end_ms, t.clone(), all_day_of(&t))
         })
         .filter(|(s, e, _, _)| e > s)
         .collect();
@@ -1282,3 +1293,4 @@ mod tests {
         assert_eq!(b[1].0, "Encuesta (entrega)");
     }
 }
+
