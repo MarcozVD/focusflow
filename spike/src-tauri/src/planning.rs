@@ -353,6 +353,14 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
     for i in intents {
         let mut i = i.clone();
         if i.intent_type == IntentType::Event {
+            // Evento con hora de inicio pero SIN hora de fin ("7pm lunes"):
+            // hereda 1 h de duración por defecto. Sin esto el ítem no se
+            // crea (fill_fixed_item exige ambos extremos) y aceptar no
+            // registra nada en el calendario.
+            if i.window.start.is_some() && i.window.end.is_none() {
+                let s = i.window.start.unwrap();
+                i.window = TimeWindow { start: Some(s), end: Some(s + HOUR), all_day: false };
+            }
             if let (Some(s), Some(e)) = (i.window.start, i.window.end) {
                 if e > s {
                     let s_day = local_midnight(s);
@@ -625,15 +633,43 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
             .map(|u| u.all_day)
             .unwrap_or(false)
     };
-    let event_spans: Vec<(i64, i64, String, bool)> = sessions
+    // Ítems Event que el usuario editó en la revisión: solo ellos usan las
+    // sesiones efectivas como span del evento (el evento se crea donde él lo
+    // puso). El resto de eventos se crea desde su ventana en `understanding`
+    // — incluidos los marcadores all-day de rangos multi-día, que no generan
+    // ítems ni sesiones pero SÍ deben materializarse al aceptar.
+    let edited_event_idx: Vec<usize> = plan
+        .items
         .iter()
-        .filter(|(idx, _)| plan.items[*idx].intent_type == IntentType::Event)
-        .map(|(idx, s)| {
-            let t = plan.items[*idx].title.clone();
-            (s.start_ms, s.end_ms, t.clone(), all_day_of(&t))
-        })
-        .filter(|(s, e, _, _)| e > s)
+        .enumerate()
+        .filter(|(_idx, it)| it.intent_type == IntentType::Event)
+        .filter(|(idx, _)| matches!(edit.items.get(*idx), Some(ed) if !ed.is_empty()))
+        .map(|(idx, _)| idx)
         .collect();
+    let edited_event_titles: Vec<String> =
+        edited_event_idx.iter().map(|idx| plan.items[*idx].title.clone()).collect();
+    let mut event_spans: Vec<(i64, i64, String, bool)> = Vec::new();
+    for (idx, s) in &sessions {
+        if edited_event_idx.contains(idx) {
+            let t = plan.items[*idx].title.clone();
+            event_spans.push((s.start_ms, s.end_ms, t.clone(), all_day_of(&t)));
+        }
+    }
+    for u in &plan.understanding {
+        if u.intent_type != IntentType::Event || edited_event_titles.contains(&u.title) {
+            continue;
+        }
+        // Evento con inicio pero sin fin ("7pm lunes"): hereda 1 h. Sin esto
+        // el span no se crea y aceptar no registra nada (propuestas viejas
+        // u otras rutas pueden llegar sin `window_end`).
+        if let Some(s) = u.window_start {
+            let e = u.window_end.unwrap_or(s + crate::engine::HOUR_MS);
+            if e > s {
+                event_spans.push((s, e, u.title.clone(), u.all_day));
+            }
+        }
+    }
+    event_spans.retain(|(s, e, _, _)| e > s);
     let is_marker = |_s: i64, _e: i64, all_day: bool| all_day;
     let mut check_spans: Vec<(i64, i64, String)> = event_spans
         .iter()
@@ -827,18 +863,18 @@ mod tests {
     #[test]
     fn multiday_allday_blocks_only_external_days() {
         let d = clean_db();
-        // "proyecto del lunes al jueves": cubre lunes, martes y miércoles;
-        // el jueves es el día de fin (sin hora de cierre).
+        // "proyecto del lunes al jueves": rango all-day multi-día. Los
+        // marcadores all-day NO bloquean horas: todos los días quedan
+        // libres para añadir tareas independientes; solo se registra la
+        // fecha límite del día de fin (22:00).
         d.create("Proyecto", "trab", "alta", day(1), day(4), true).unwrap();
         let e = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
-        // día inicial: bloqueado completo
-        assert_eq!(e.available_minutes(day(1) + 9 * hour, day(1) + 10 * hour), 0);
-        assert_eq!(e.available_minutes(day(1), day(1) + 24 * hour), 0);
-        // días intermedios: libres (06:00–22:00 = 16h)
+        // ningún día bloqueado: 06:00–22:00 = 16h de trabajo
+        assert_eq!(e.available_minutes(day(1), day(1) + 24 * hour), 16 * 60);
+        assert_eq!(e.available_minutes(day(1) + 9 * hour, day(1) + 10 * hour), 60);
         assert_eq!(e.available_minutes(day(2), day(2) + 24 * hour), 16 * 60);
         assert_eq!(e.available_minutes(day(3) + 9 * hour, day(3) + 10 * hour), 60);
-        // día de fin sin hora de cierre: libre, con fecha límite 22:00
         assert_eq!(e.available_minutes(day(4), day(4) + 24 * hour), 16 * 60);
         let dl = e
             .deadlines
@@ -997,23 +1033,24 @@ mod tests {
     #[test]
     fn multiday_allday_with_close_time_blocks_two_hours_before() {
         let d = clean_db();
-        // cierra el jueves a las 22:00 → ocupa 20:00–22:00 de ese día
+        // cierra el jueves a las 22:00 → solo deadline, sin bloqueo
         d.create("Proyecto", "trab", "alta", day(1), day(4) + 22 * 3_600_000, true).unwrap();
         let e = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
-        assert_eq!(e.available_minutes(day(4) + 20 * hour, day(4) + 22 * hour), 0, "2 h antes del cierre ocupadas");
+        assert_eq!(e.available_minutes(day(4) + 20 * hour, day(4) + 22 * hour), 120, "sin bloqueo: 2 h libres");
         assert_eq!(e.available_minutes(day(4) + 14 * hour, day(4) + 15 * hour), 60, "resto del día libre");
         let dl = e.deadlines.iter().find(|x| x.label == "Proyecto").expect("deadline = hora de cierre");
         assert_eq!(dl.at_ms, day(4) + 22 * hour);
     }
 
     #[test]
-    fn single_day_allday_blocks_full_day() {
+    fn single_day_allday_is_marker_free() {
         let d = clean_db();
         d.create("Examen", "uni", "alta", day(2), day(3), true).unwrap();
         let engine = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
-        assert_eq!(engine.available_minutes(day(2), day(2) + 24 * hour), 0, "todo el día sigue ocupado");
+        // all-day de un solo día es marcador visual: no bloquea horas
+        assert_eq!(engine.available_minutes(day(2), day(2) + 24 * hour), 16 * 60, "día libre (06:00–22:00)");
         assert_eq!(engine.available_minutes(day(1) + 12 * hour, day(2)), 10 * 60, "día anterior libre (12:00–22:00)");
         assert!(engine.deadlines.is_empty(), "todo el día simple no crea fecha límite");
     }
@@ -1291,6 +1328,33 @@ mod tests {
         assert_eq!(b[0].1, s);
         assert_eq!(b[1].1, e);
         assert_eq!(b[1].0, "Encuesta (entrega)");
+    }
+
+    #[test]
+    fn event_with_start_but_no_end_gets_default_duration_and_creates() {
+        // "7pm lunes futbol": la IA puede interpretar solo la hora de inicio
+        // (window_end = None). El evento debe heredar 1 h y poder aceptarse
+        // creando la tarea real (antes quedaba items vacío y no se creaba).
+        let d = clean_db();
+        let hour = crate::engine::HOUR_MS;
+        let s = day(1) + 19 * hour; // lunes 19:00
+        let mut i = intent("Futbol", IntentType::Event, 0);
+        i.window = TimeWindow { start: Some(s), end: None, all_day: false };
+        let view = plan_from_text(&d, "7pm lunes futbol", &[i], "local").unwrap();
+        // el entendimiento hereda 1 h
+        assert_eq!(view.understanding[0].window_start, Some(s));
+        assert_eq!(view.understanding[0].window_end, Some(s + hour));
+        // hay un ítem con la sesión
+        assert_eq!(view.items.len(), 1, "no queda vacío: {:?}", view.items);
+        assert_eq!(view.items[0].sessions.len(), 1);
+        assert_eq!(view.items[0].sessions[0].start_ms, s);
+        assert_eq!(view.items[0].sessions[0].end_ms, s + hour);
+        // aceptar crea la tarea real
+        let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
+        assert_eq!(created.len(), 1, "se crea la tarea al aceptar");
+        assert_eq!(created[0].start_at, s);
+        assert_eq!(created[0].end_at, s + hour);
+        assert_eq!(created[0].title, "Futbol");
     }
 }
 

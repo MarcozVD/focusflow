@@ -833,21 +833,28 @@ mod tests {
 
     #[test]
     fn availability_ranges() {
-        // "Diagnostic Test is available August 5 through August 23" — ejemplo 7
-        let i = intent_of("Diagnostic Test is available August 5 through August 23", 0);
-        assert_eq!(i.intent_type, IntentType::Availability);
-        assert!(i.window.all_day);
+        // rango de fechas SIEMPRE futuro (mes siguiente a hoy): el parser
+        // rechaza ventanas que ya terminaron, así que el texto no puede ser
+        // una fecha fija. "Diagnostic Test is available {mes} 5 through
+        // {mes} 23" — ejemplo 7.
         let today = chrono::Local::now().date_naive();
         let (y0, m0, _) = nl::ymd(today);
-        let year = if 8 < m0 { y0 + 1 } else { y0 };
-        let s = nl::local_ms(chrono::NaiveDate::from_ymd_opt(year, 8, 5).unwrap().and_hms_opt(0, 0, 0).unwrap());
-        let e = nl::local_ms(chrono::NaiveDate::from_ymd_opt(year, 8, 23).unwrap().and_hms_opt(0, 0, 0).unwrap());
+        let (m, y) = if m0 == 12 { (1, y0 + 1) } else { (m0 + 1, y0) };
+        let month = ["", "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"][m as usize];
+        let s = nl::local_ms(chrono::NaiveDate::from_ymd_opt(y, m, 5).unwrap().and_hms_opt(0, 0, 0).unwrap());
+        let e = nl::local_ms(chrono::NaiveDate::from_ymd_opt(y, m, 23).unwrap().and_hms_opt(0, 0, 0).unwrap());
+        let i = intent_of(&format!("Diagnostic Test is available {month} 5 through {month} 23"), 0);
+        assert_eq!(i.intent_type, IntentType::Availability);
+        assert!(i.window.all_day);
         assert_eq!(i.window.start, Some(s));
         assert_eq!(i.window.end, Some(e));
         assert_eq!(i.title, "Diagnostic Test");
 
-        // rango en español
-        let i = intent_of("Disponible del 5 al 23 de agosto", 0);
+        // rango en español — mes siguiente a hoy
+        let month_es = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio",
+            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"][m as usize];
+        let i = intent_of(&format!("Disponible del 5 al 23 de {month_es}"), 0);
         assert_eq!(i.intent_type, IntentType::Availability);
         assert!(i.window.start.unwrap() < i.window.end.unwrap());
 
