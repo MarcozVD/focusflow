@@ -262,6 +262,9 @@ pub(crate) fn ai_config_from_db(db: &Db) -> AiConfig {
 #[derive(Serialize)]
 struct TaskFromTextResult {
     task: TaskRow,
+    /// Todos los bloques creados (un rango multi-día genera inicio +
+    /// "(entrega)"). El frontend los cachea todos, no solo `task`.
+    created: Vec<TaskRow>,
     source: String,
     used_ai: bool,
 }
@@ -306,33 +309,34 @@ async fn task_from_text(
     .await
     .map_err(|e| e.to_string())??;
 
-    let task = {
+    let (task, created) = {
         let db = lock_recover(&state);
         // Rango multi-día ("inicia hoy y finaliza el lunes a las 4pm") →
         // bloque de inicio + bloque "(entrega)"; un solo día → una tarea.
         let blocks = planning::split_range_blocks(&parsed.title, parsed.start_ms, parsed.end_ms);
-        let mut first: Option<TaskRow> = None;
+        let mut created = Vec::with_capacity(blocks.len());
         for (title, s, e, all_day) in &blocks {
             let t = db
                 .create(title, &parsed.category_id, &parsed.priority, *s, *e, *all_day)
                 .map_err(|e| e.to_string())?;
-            if first.is_none() {
-                first = Some(t);
-            }
+            created.push(t);
         }
-        let t = first.ok_or_else(|| "no se pudo crear la tarea".to_string())?;
+        let t = created
+            .first()
+            .cloned()
+            .ok_or_else(|| "no se pudo crear la tarea".to_string())?;
         // conservar el recordatorio sugerido por la IA ("1d", "3h", ...)
         if let Some(min) = parsed.reminders.first().and_then(|s| reminders::parse_reminder_minutes(s)) {
             db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
         }
-        t
+        (t, created)
     };
     append_log(
         &app,
         &format!("nl_task source={source} ai={used_ai} title={} start={}", parsed.title, parsed.start_ms),
     );
     let _ = app.emit("tasks:changed", ());
-    Ok(TaskFromTextResult { task, source, used_ai })
+    Ok(TaskFromTextResult { task, created, source, used_ai })
 }
 
 #[derive(Serialize)]

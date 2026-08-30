@@ -298,10 +298,14 @@ export async function planAccept(id: number, edit?: EditedPlan): Promise<{ ok: b
   store.planBusy = true;
   store.planError = "";
   try {
-    await invoke("plan_accept", { id, edit: edit ?? null });
+    const tasks = await invoke<TaskRow[]>("plan_accept", { id, edit: edit ?? null });
     store.planProposal = null;
     store.planResults[id] = { ok: true, text: "Propuesta aceptada y añadida al calendario." };
-    await refreshTasks();
+    // insertar tareas nuevas directamente en la caché de su semana
+    for (const r of tasks) {
+      putInCache(toTask(r));
+    }
+    rebuildTasks();
     return { ok: true };
   } catch (e) {
     store.planError = String(e);
@@ -618,12 +622,14 @@ export async function refreshRange(from: Date, to: Date) {
   await ensureRange(from, to);
 }
 
-/** Inserta/actualiza una tarea en su semana de caché sin recargar todo. */
+/** Inserta/actualiza una tarea en su semana de caché sin recargar todo.
+ *  Crea la semana si aún no está cargada: una tarea nueva debe verse aunque
+ *  caiga fuera del rango visible (antes se descartaba silenciosamente y
+ *  solo aparecía tras recargar la app). */
 function putInCache(t: Task) {
   const k = weekKey(t.start);
-  if (weekCache.has(k)) {
-    weekCache.get(k)!.set(t.id, t);
-  }
+  if (!weekCache.has(k)) weekCache.set(k, new Map());
+  weekCache.get(k)!.set(t.id, t);
 }
 
 export async function refreshTasks() {
@@ -938,6 +944,8 @@ export interface TaskFromTextResult {
     completed_at: number | null;
     created_at: number;
   };
+  /** Todos los bloques creados (inicio + "(entrega)" en rangos multi-día). */
+  created: TaskRow[];
   source: string;
   used_ai: boolean;
 }
@@ -1106,7 +1114,10 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
   try {
     const r = await invoke<TaskFromTextResult>("task_from_text", { text });
     if (myId !== nlReqId) return { ok: false, source: "stale", error: "cancelada" };
-    putInCache(toTask(r.task));
+    // cachear TODOS los bloques creados (inicio + "(entrega)" en rangos)
+    for (const row of r.created.length > 0 ? r.created : [r.task]) {
+      putInCache(toTask(row as TaskRow));
+    }
     rebuildTasks();
     return { ok: true, source: r.source };
   } catch (e) {

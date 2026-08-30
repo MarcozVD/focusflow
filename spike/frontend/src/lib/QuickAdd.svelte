@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
-  import { categories, quickadd, createTaskFromText, planFromText, nlBusy, planBusy } from "./data.svelte";
+  import { categories, quickadd, createTaskFromText, planFromText, planProposal, planAccept, nlBusy, planBusy } from "./data.svelte";
   import PlanProposal from "./PlanProposal.svelte";
 
   let text = $state("");
@@ -81,7 +81,21 @@
       if (r.ok) {
         text = "";
         showPreview = false;
-        showFlash("Plan generado — revísalo antes de aceptar", 2000);
+        // Evento único ("7pm lunes futbol"): auto-aceptar para que la tarea
+        // se cree al instante, sin esperar a que el usuario haga clic en
+        // "Aceptar" en la propuesta.
+        const p = planProposal();
+        if (
+          p &&
+          p.understanding.length === 1 &&
+          p.understanding[0].intent_type === "Event" &&
+          p.understanding[0].window_start != null
+        ) {
+          await planAccept(p.id);
+          showFlash("Tarea creada", 1600);
+        } else {
+          showFlash("Plan generado — revísalo antes de aceptar", 2000);
+        }
         return;
       }
       if (r.source === "stale") return;
