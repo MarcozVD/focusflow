@@ -268,39 +268,19 @@ impl ConstraintEngine {
             });
             return;
         }
+        // All-day tasks son marcadores visuales, no compromisos de tiempo.
+        // No bloquean el día completo para poder añadir otras tareas
+        // independientemente. Solo se registra vencimiento si es multi-día
+        // o tiene hora de cierre.
         let start_day = local_midnight(start);
         let end_day = local_midnight(end);
-        if end_day - start_day <= DAY_MS {
-            self.commitments.push(Block {
-                interval: Interval { start, end },
-                label,
-                severity: Severity::Hard,
-            });
-            return;
-        }
-        let first_end = (start_day + DAY_MS).min(end);
-        if first_end > start {
-            self.commitments.push(Block {
-                interval: Interval { start, end: first_end },
-                label: label.clone(),
-                severity: Severity::Hard,
-            });
-        }
-        let deadline = if end == end_day {
-            end_day + 22 * HOUR_MS
-        } else {
-            end
-        };
-        self.deadlines.push(Deadline { at_ms: deadline, label: label.clone() });
-        if end != end_day {
-            let s = (end - 2 * HOUR_MS).max(end_day);
-            if s < end {
-                self.commitments.push(Block {
-                    interval: Interval { start: s, end },
-                    label,
-                    severity: Severity::Hard,
-                });
-            }
+        if end_day - start_day > DAY_MS || end != end_day {
+            let deadline = if end == end_day {
+                end_day + 22 * HOUR_MS
+            } else {
+                end
+            };
+            self.deadlines.push(Deadline { at_ms: deadline, label });
         }
     }
 
@@ -1336,20 +1316,23 @@ mod tests {
         i.window.all_day = true;
         let e = ConstraintEngine::from_intents(&[i]);
         let hour = HOUR_MS;
-        // día inicial: bloqueado; días medios: libres
-        assert_eq!(e.available_minutes(start + 9 * hour, start + 10 * hour), 0);
+        // All-day es marcador: NO bloquea ningún día (se pueden añadir
+        // tareas independientes), solo registra la fecha límite del fin.
+        assert_eq!(e.available_minutes(start + 9 * hour, start + 10 * hour), 60);
         assert_eq!(e.available_minutes(dt(day(2), 9, 0), dt(day(2), 10, 0)), 60);
         // día de fin: libre con fecha límite 22:00
         assert_eq!(e.available_minutes(dt(day(4), 9, 0), dt(day(4), 10, 0)), 60);
         let dl = e.deadlines.iter().find(|d| d.label == "Proyecto").expect("deadline");
         assert_eq!(dl.at_ms, dt(day(4), 22, 0));
 
-        // con hora de cierre: bloquea las 2 h previas
+        // con hora de cierre: solo deadline a esa hora, sin bloqueo
         let mut i = intent_event("Proyecto", start, dt(day(4), 22, 0));
         i.window.all_day = true;
         let e = ConstraintEngine::from_intents(&[i]);
-        assert_eq!(e.available_minutes(dt(day(4), 20, 0), dt(day(4), 22, 0)), 0);
+        assert_eq!(e.available_minutes(dt(day(4), 20, 0), dt(day(4), 22, 0)), 120);
         assert_eq!(e.available_minutes(dt(day(4), 14, 0), dt(day(4), 15, 0)), 60);
+        let dl = e.deadlines.iter().find(|d| d.label == "Proyecto").expect("deadline cierre");
+        assert_eq!(dl.at_ms, dt(day(4), 22, 0));
     }
 
     #[test]
