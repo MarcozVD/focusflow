@@ -150,7 +150,11 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
         if let Some(m) = month_number(caps.get(1)?.as_str()) {
             let pos = caps.get(1)?.start();
             let before = &lower[..pos];
-            if let Some(dcaps) = regex::Regex::new(r"(\d{1,2})\s*$").ok()?.captures(before) {
+            // el día va justo antes del mes: "el 15 de agosto" / "15 de marzo".
+            // `before` termina en "…de " (con la preposición), así que la
+            // extracción debe permitir " de" tras el número — un `(\d+)\s*$`
+            // simple fallaba y la fecha caía a la regla del "día 15".
+            if let Some(dcaps) = regex::Regex::new(r"(\d{1,2})\s*de\s*$").ok()?.captures(before) {
                 if let Ok(d) = dcaps.get(1)?.as_str().parse::<u32>() {
                     if (1..=31).contains(&d) {
                         let (y, cur_m, _) = ymd(today);
