@@ -525,7 +525,7 @@
       {#each days as d, di (d.toDateString())}
         <div class="day-col {isToday(d) ? 'today' : ''}">
           <div class="allday-row" bind:this={alldayEls[di]}>
-            <span class="allday-label">Todo el día</span>
+            {#if view !== "semana"}<span class="allday-label">Todo el día</span>{/if}
             {#each visibleTopChipsOf(d) as t (t.id)}
               <button
                 type="button"
