@@ -49,6 +49,9 @@ desktop.ini
 .vscode/
 *.code-workspace
 
+# ---------- landing page (no se sube al repo) ----------
+landing/
+
 # ---------- graphify (output generado) ----------
 graphify-out/
 opencode.jsonc
