@@ -725,14 +725,14 @@ fn suggestions_list(state: State<'_, Mutex<Db>>, only_pending: bool) -> Result<V
 }
 
 #[tauri::command]
-fn suggestion_accept(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<TaskRow, String> {
+fn suggestion_accept(app: AppHandle, state: State<'_, Mutex<Db>>, id: i64) -> Result<Vec<TaskRow>, String> {
     let db = lock_recover(&state);
-    let task = sync::accept_suggestion(&db, id)?;
+    let tasks = sync::accept_suggestion(&db, id)?;
     drop(db);
-    append_log(&app, &format!("suggestion_accepted id={id} task={}", task.id));
+    append_log(&app, &format!("suggestion_accepted id={id} tasks={}", tasks.len()));
     let _ = app.emit("tasks:changed", ());
     let _ = app.emit("email:new-suggestions", ());
-    Ok(task)
+    Ok(tasks)
 }
 
 #[tauri::command]

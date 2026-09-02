@@ -87,7 +87,7 @@ pub fn rollback_uid(
 /// una ya procesada devuelve la tarea existente en vez de duplicarla
 /// (auditoría 17, hallazgo #3). Las tres escrituras van en una transacción
 /// (#5): un fallo a mitad no deja sugerencia pending con tarea ya creada.
-pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, String> {
+pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>, String> {
     let s = db
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
@@ -99,7 +99,7 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         if !auto_pending {
             if let Some(task_id) = s.result_task_id {
                 if let Ok(Some(t)) = db.get_task(task_id) {
-                    return Ok(t);
+                    return Ok(vec![t]);
                 }
             }
             return Err(format!("la sugerencia ya fue procesada (estado: {})", s.status));
@@ -129,17 +129,22 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at || s.kind == "availability";
     db.tx_begin().map_err(|e| e.to_string())?;
     let result = (|| {
-        let mut main: Option<crate::store::TaskRow> = None;
+        let mut created: Vec<crate::store::TaskRow> = Vec::new();
         for (title, bs, be, range_all_day) in &blocks {
             let all_day = if single_day { single_all_day } else { *range_all_day };
+            // Marcador de día completo: una tarea all-day de UN día debe cubrir
+            // [inicio, inicio + 24h), no tener duración cero. Si end <= start
+            // (deadline a medianoche "vie 4 sept 00:00"), coversDay en el
+            // frontend exige end > dayStart y la tarea queda invisible en
+            // mes/día/semana. Igual que split_range_blocks hace con los
+            // marcadores de día (s_day, s_day + DAY_MS).
+            let be = if all_day && *be <= *bs { *bs + crate::engine::DAY_MS } else { *be };
             let t = db
-                .create(title, &s.category_id, &s.priority, *bs, *be, all_day)
+                .create(title, &s.category_id, &s.priority, *bs, be, all_day)
                 .map_err(|e| e.to_string())?;
-            if main.is_none() {
-                main = Some(t);
-            }
+            created.push(t);
         }
-        let task = main.ok_or_else(|| "tarea no creada".to_string())?;
+        let task = created.first().cloned().ok_or_else(|| "tarea no creada".to_string())?;
         // Contexto de la sugerencia → descripción de la tarea: qué hay que
         // hacer + procedencia (remitente y asunto del correo).
         let mut desc = s.description.trim().to_string();
@@ -161,14 +166,18 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<crate::store::TaskRow, Stri
         }
         db.set_suggestion_status(id, status).map_err(|e| e.to_string())?;
         db.set_suggestion_result_task(id, task.id).map_err(|e| e.to_string())?;
-        db.get_task(task.id)
+        // re-fetch main para incluir la descripción, luego reemplazar en el vec
+        let main = db
+            .get_task(task.id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "tarea no creada".to_string())
+            .ok_or_else(|| "tarea no creada".to_string())?;
+        created[0] = main;
+        Ok(created)
     })();
     match result {
-        Ok(task) => {
+        Ok(tasks) => {
             db.tx_commit().map_err(|e| e.to_string())?;
-            Ok(task)
+            Ok(tasks)
         }
         Err(e) => {
             let _ = db.tx_rollback();
@@ -725,11 +734,58 @@ mod tests {
 
     #[test]
     fn excluded_emails_roll_back_uid() {
-        // 20 excluidos al final: nunca pasar del último procesado (30)
-        assert_eq!(rollback_uid(50, 30, 10, 20), 30);
-        // sin procesados (todos excluidos): se mantiene el previo
-        assert_eq!(rollback_uid(50, 0, 10, 5), 10);
-        // procesados hasta el final → igual que sin rollback
-        assert_eq!(rollback_uid(50, 50, 10, 3), 50);
+            // 20 excluidos al final: nunca pasar del último procesado (30)
+            assert_eq!(rollback_uid(50, 30, 10, 20), 30);
+            // sin procesados (todos excluidos): se mantiene el previo
+            assert_eq!(rollback_uid(50, 0, 10, 5), 10);
+            // procesados hasta el final → igual que sin rollback
+            assert_eq!(rollback_uid(50, 50, 10, 3), 50);
+        }
+
+        #[test]
+        fn accept_suggestion_all_day_deadline_creates_full_day() {
+            // Sugerencia con deadline a medianoche (start == end == misma
+            // medianoche). Al aceptar, la tarea all-day debe cubrir 24h, no
+            // tener duración cero — si no, coversDay la ve invisible.
+            const DAY_MS: i64 = crate::engine::DAY_MS;
+            let db = crate::store::Db::open_memory_clean_pub().unwrap();
+            let now = chrono::Local::now().timestamp_millis();
+            let today = crate::engine::local_midnight(now);
+            let id = db
+                .insert_suggestion(
+                    "test", None, None, "test",
+                    "deadline",                    // kind
+                    "Envío enlace video catálogo", // title
+                    "",                            // description
+                    "uni",                         // category_id
+                    "alta",                        // priority
+                    Some(today),                   // start_at (hoy)
+                    Some(today),                   // end_at == start_at (misma medianoche)
+                    None,                          // deadline_at
+                    0,                             // prep_min
+                    "",                            // location
+                    "[]",                          // tags
+                    0.8,                           // confidence
+                    "test",                        // reason
+                    None,                          // dedupe_task_id
+                    "",                            // dedupe_note
+                    "pending",                     // status
+                )
+                .unwrap();
+            let tasks = accept_suggestion(&db, id).unwrap();
+
+            // Una tarea creada (single day, no split)
+            assert_eq!(tasks.len(), 1, "debe crear exactamente 1 tarea");
+            let t = &tasks[0];
+            assert_eq!(t.title, "Envío enlace video catálogo");
+            assert!(t.all_day, "la tarea debe ser all_day");
+            assert_eq!(
+                t.start_at, today,
+                "start_at debe ser la medianoche de la sugerencia"
+            );
+            assert_eq!(
+                t.end_at - t.start_at, DAY_MS,
+                "end_at debe ser start + 24h para cubrir el día completo, no duración cero"
+            );
+        }
     }
-}

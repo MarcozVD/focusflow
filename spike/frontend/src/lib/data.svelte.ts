@@ -549,7 +549,15 @@ function weekKey(d: Date): string {
 function rebuildTasks() {
   const map = new Map<number, Task>();
   for (const w of weekCache.values()) {
-    for (const [id, t] of w) map.set(id, t);
+    for (const [id, t] of w) {
+      // Saneo: tarea all-day con duración cero (start==end) — normalizar end
+      // para que coversDay la vea. El backend ya crea nuevas con end=start+24h;
+      // esto repara las existentes en caché sin recargar.
+      if (t.allDay && t.end.getTime() <= t.start.getTime()) {
+        t.end = new Date(t.start.getTime() + 86_400_000);
+      }
+      map.set(id, t);
+    }
   }
   store.tasks = [...map.values()].sort((a, b) => a.start.getTime() - b.start.getTime());
 }
@@ -666,6 +674,12 @@ function toTask(r: TaskRow): Task {
   } catch {
     tags = [];
   }
+  // Tarea de día completo con duración cero (end == start, p.ej. deadline a
+  // medianoche "vie 4 sept 00:00"): si no se normaliza, coversDay exige
+  // end > dayStart y la tarea queda invisible en mes/día/semana. El backend
+  // ya crea las nuevas con end = start + 24h; esto saneala las existentes.
+  let endMs = r.end_at;
+  if (r.all_day && endMs <= r.start_at) endMs = r.start_at + 86_400_000;
   return {
     id: r.id,
     title: r.title,
@@ -673,7 +687,7 @@ function toTask(r: TaskRow): Task {
     priority: r.priority as Priority,
     status,
     start: new Date(r.start_at),
-    end: new Date(r.end_at),
+    end: new Date(endMs),
     allDay: r.all_day,
     progress: r.progress,
     description: r.description,
@@ -1251,8 +1265,15 @@ export async function deleteTask(id: number): Promise<{ ok: boolean; error?: str
 export async function suggestionAccept(id: number) {
   if (!inTauri()) return;
   try {
-    await invoke("suggestion_accept", { id });
-    await refreshTasks();
+    const rows = await invoke<TaskRow[]>("suggestion_accept", { id });
+    // insertar las tareas creadas directamente en la caché de su semana (crea
+    // la semana si hace falta): una sugerencia aceptada puede caer fuera del
+    // rango visible y refreshTasks() solo recarga lo visible → sin esto la
+    // tarea no aparece en mes/día/semana hasta reiniciar la app.
+    for (const r of rows) {
+      putInCache(toTask(r));
+    }
+    rebuildTasks();
     await loadSuggestions();
   } catch (e) {
     console.error("suggestionAccept", e);
