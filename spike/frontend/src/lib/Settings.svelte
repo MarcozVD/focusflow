@@ -108,6 +108,22 @@
     }
   }
 
+  // ── Documentos legales: se abren en el navegador del sistema ──
+  const WEB_BASE = "https://gentle-cherry-45b1.mmvaleradaza.workers.dev";
+  let legalMsg = $state("");
+  let legalOk = $state(false);
+  async function openLegal(doc: "directivas" | "privacidad" | "condiciones") {
+    const url = `${WEB_BASE}/legal/${doc}.html`;
+    try {
+      await invoke("open_website", { url });
+      legalOk = true;
+      legalMsg = "Abierto en tu navegador.";
+    } catch (e) {
+      legalOk = false;
+      legalMsg = `No se pudo abrir: ${String(e)}`;
+    }
+  }
+
   let aiEndpoint = $state("");
   let aiModel = $state("");
   const aiHttp = $derived(/^https:\/\//i.test(aiEndpoint.trim()));
@@ -778,6 +794,22 @@
         <button class="btn danger" onclick={wipeConfirmed}>Sí, borrar todo</button>
         <button class="btn" onclick={() => (confirmWipe = false)}>Cancelar</button>
       </div>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Legal</h2>
+    <p class="hint">
+      Documentos legales de FocusFlow: los principios de privacidad del proyecto, la política de
+      datos y las condiciones del servicio. Se abren en tu navegador.
+    </p>
+    <div class="row">
+      <button class="btn" onclick={() => openLegal("directivas")}>Directivas de privacidad</button>
+      <button class="btn" onclick={() => openLegal("privacidad")}>Política de privacidad</button>
+      <button class="btn" onclick={() => openLegal("condiciones")}>Condiciones del servicio</button>
+    </div>
+    {#if legalMsg}
+      <p class="test {legalOk ? 'ok' : 'err'}">{legalMsg}</p>
     {/if}
   </section>
 

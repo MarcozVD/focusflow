@@ -32,6 +32,10 @@ pub mod win_toast;
 use ai::{validation::ParsedTask, AiConfig};
 use store::{lock_recover, Db, TaskRow};
 
+/// Base del sitio web público de FocusFlow (landing desplegada en Cloudflare).
+/// Única fuente para los enlaces legales abiertos desde Ajustes.
+const WEB_BASE: &str = "https://gentle-cherry-45b1.mmvaleradaza.workers.dev";
+
 /// Directorio de log en %TEMP%. Nunca panic: si no se puede crear, el log
 /// se degrada a no-op (auditoría 17, hallazgo #6).
 pub(crate) fn log_dir() -> Option<PathBuf> {
@@ -1509,6 +1513,33 @@ fn open_agenda(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Abre una URL del sitio web de FocusFlow (directivas/privacidad/condiciones)
+/// en el navegador del sistema. Misma cadena de fallback que auth.rs.
+#[tauri::command]
+fn open_website(app: AppHandle, url: String) -> Result<(), String> {
+    let allowed = url == format!("{WEB_BASE}/legal/directivas.html")
+        || url == format!("{WEB_BASE}/legal/privacidad.html")
+        || url == format!("{WEB_BASE}/legal/condiciones.html");
+    if !allowed {
+        return Err("url_no_permitida".into());
+    }
+    if open::that(&url).is_ok() {
+        append_log(&app, &format!("open_website {url}"));
+        return Ok(());
+    }
+    let rundll32 = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if rundll32 {
+        append_log(&app, &format!("open_website {url}"));
+        return Ok(());
+    }
+    append_log(&app, &format!("open_website_failed {url}"));
+    Err("no_se_pudo_abrir_navegador".into())
+}
+
 /// "Pregunta a FocusFlow": abre la app en la vista del Asistente (fase 9/10).
 #[tauri::command]
 fn open_assistant(app: AppHandle) -> Result<(), String> {
@@ -1737,6 +1768,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             open_task,
             open_agenda,
             open_assistant,
+            open_website,
             widget_action,
             general_settings_get,
             general_settings_set,
