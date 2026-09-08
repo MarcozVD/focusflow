@@ -176,7 +176,10 @@ pub fn matches_filters(e: &RawEmail, f: &EmailFilters) -> bool {
         {
             return true;
         }
-        if f.keywords.iter().any(|k| body_lower.contains(&k.to_lowercase())) {
+        if f.keywords
+            .iter()
+            .any(|k| body_lower.contains(&k.to_lowercase()))
+        {
             return true;
         }
         return false;
@@ -238,7 +241,10 @@ pub struct XOAuth2 {
 impl imap::Authenticator for XOAuth2 {
     type Response = String;
     fn process(&self, _challenge: &[u8]) -> Self::Response {
-        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.access_token)
+        format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            self.user, self.access_token
+        )
     }
 }
 
@@ -334,7 +340,14 @@ pub fn fetch_mailbox(
     let searched = session
         .uid_search(search_expr.as_str())
         .map_err(|e| format!("uid_search({search_expr}): {e}"))?;
-    let ids: Vec<u32> = searched.iter().copied().collect();
+    // UID n:* siempre incluye el último correo del buzón aunque su uid sea
+    // menor o igual al checkpoint (semántica IMAP); sin este filtro, el mismo
+    // correo se re-analizaba en cada sync cuando nada nuevo llegaba.
+    let ids: Vec<u32> = searched
+        .iter()
+        .copied()
+        .filter(|&uid| uid > checkpoint.uid)
+        .collect();
 
     let take: Vec<u32> = ids.into_iter().take(MAX_FETCH_PER_SYNC).collect();
     if take.is_empty() {
@@ -355,7 +368,9 @@ pub fn fetch_mailbox(
     let mut max_uid: u32 = 0;
     for f in fetched.iter() {
         let Some(body) = f.body() else { continue };
-        let Ok(pm) = mailparse::parse_mail(body) else { continue };
+        let Ok(pm) = mailparse::parse_mail(body) else {
+            continue;
+        };
         let uid = f.uid.unwrap_or(0);
         if uid > max_uid {
             max_uid = uid;
@@ -379,7 +394,7 @@ pub fn fetch_mailbox(
             }
         }
 
-let mut body_text = parse_body(&pm);
+        let mut body_text = parse_body(&pm);
         body_text.truncate(MAX_BODY_CHARS);
 
         // hilo: In-Reply-To (padre inmediato) + References (toda la cadena)
@@ -456,12 +471,19 @@ mod tests {
     #[test]
     fn union_semantics_sender_or_domain_or_keyword() {
         let f = EmailFilters {
-            senders: vec!["notifications@instructure.com".into(), "gosma@unab.edu.co".into()],
+            senders: vec![
+                "notifications@instructure.com".into(),
+                "gosma@unab.edu.co".into(),
+            ],
             domains: vec!["unab.edu.co".into()],
             keywords: vec!["examen".into()],
         };
         // remitente en la lista, dominio fuera → pasa (antes: AND lo rechazaba)
-        let canvas = raw("UNAB Canvas <notifications@instructure.com>", "Tarea calificada", "hola");
+        let canvas = raw(
+            "UNAB Canvas <notifications@instructure.com>",
+            "Tarea calificada",
+            "hola",
+        );
         assert!(matches_filters(&canvas, &f));
         // dominio universitario, remitente fuera de la lista → pasa
         let uni = raw("jpinzon408@unab.edu.co", "Clase de IoT", "hola");
@@ -484,8 +506,14 @@ mod tests {
 
     #[test]
     fn single_group_still_filters() {
-        let f = EmailFilters { senders: vec!["jefe@corp.com".into()], ..EmailFilters::default() };
-        assert!(matches_filters(&raw("Jefe <jefe@corp.com>", "reunión", ""), &f));
+        let f = EmailFilters {
+            senders: vec!["jefe@corp.com".into()],
+            ..EmailFilters::default()
+        };
+        assert!(matches_filters(
+            &raw("Jefe <jefe@corp.com>", "reunión", ""),
+            &f
+        ));
         assert!(!matches_filters(&raw("otro@corp.com", "reunión", ""), &f));
     }
 
@@ -505,7 +533,10 @@ mod tests {
         // localhost no recibe el guard: falla por red, no por el guard
         cfg.host = "localhost".into();
         match connect(&cfg, "test-token") {
-            Err(e) => assert!(!e.contains("se requiere TLS"), "el guard no debe aplicar a localhost"),
+            Err(e) => assert!(
+                !e.contains("se requiere TLS"),
+                "el guard no debe aplicar a localhost"
+            ),
             Ok(_) => {}
         }
     }

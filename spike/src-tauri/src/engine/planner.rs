@@ -72,10 +72,17 @@ impl PlanReport {
         let mut out = String::new();
         for it in &self.items {
             if it.required_min == 0 {
-                out.push_str(&format!("Plan: {}\nSin duración declarada: no se puede dimensionar.\n\n", it.title));
+                out.push_str(&format!(
+                    "Plan: {}\nSin duración declarada: no se puede dimensionar.\n\n",
+                    it.title
+                ));
                 continue;
             }
-            out.push_str(&format!("Plan:\n{}\n\n{} requeridos\n", it.title, it.hours()));
+            out.push_str(&format!(
+                "Plan:\n{}\n\n{} requeridos\n",
+                it.title,
+                it.hours()
+            ));
             if it.prep_min > 0 {
                 out.push_str(&format!("Incluye {} de preparación\n", it.prep_min));
             }
@@ -119,7 +126,13 @@ struct Candidate {
 ///        −5      * días antes del vencimiento (planificar temprano)
 /// ```
 /// Empate → el candidato que empieza antes.
-fn score_candidate(c: &Candidate, sessions_so_far: usize, day_load_min: u32, preferred_after_min: Option<u32>, deadline_bound_ms: Option<i64>) -> i64 {
+fn score_candidate(
+    c: &Candidate,
+    sessions_so_far: usize,
+    day_load_min: u32,
+    preferred_after_min: Option<u32>,
+    deadline_bound_ms: Option<i64>,
+) -> i64 {
     let mut sc: i64 = 0;
     if let Some(p) = preferred_after_min {
         if time_of_day_min(c.start_ms) < p {
@@ -163,11 +176,7 @@ fn order_items(intents: &[Intent]) -> Vec<ItemSpec> {
         if task_min == 0 && prep_min == 0 {
             continue; // no dimensionable (availability/constraint/task backlog)
         }
-        let bound = if is_fixed {
-            i.window.start
-        } else {
-            i.deadline
-        };
+        let bound = if is_fixed { i.window.start } else { i.deadline };
         items.push(ItemSpec {
             title: i.title.clone(),
             intent_type: i.intent_type,
@@ -179,8 +188,16 @@ fn order_items(intents: &[Intent]) -> Vec<ItemSpec> {
         });
     }
     items.sort_by(|a, b| {
-        (priority_rank(a.priority), a.deadline_bound_ms.unwrap_or(i64::MAX), &a.title)
-            .cmp(&(priority_rank(b.priority), b.deadline_bound_ms.unwrap_or(i64::MAX), &b.title))
+        (
+            priority_rank(a.priority),
+            a.deadline_bound_ms.unwrap_or(i64::MAX),
+            &a.title,
+        )
+            .cmp(&(
+                priority_rank(b.priority),
+                b.deadline_bound_ms.unwrap_or(i64::MAX),
+                &b.title,
+            ))
     });
     items
 }
@@ -258,21 +275,26 @@ impl Planner {
         let mut sessions: Vec<PlanSession> = Vec::new();
         let mut notes: Vec<String> = Vec::new();
         let mut remaining = it.required_min;
-        let overdue = it
-            .deadline_bound_ms
-            .is_some_and(|d| {
-                chrono::Local
-                    .timestamp_millis_opt(d)
-                    .earliest()
-                    .is_some_and(|t| t.date_naive() < from)
-            });
+        let overdue = it.deadline_bound_ms.is_some_and(|d| {
+            chrono::Local
+                .timestamp_millis_opt(d)
+                .earliest()
+                .is_some_and(|t| t.date_naive() < from)
+        });
         if overdue {
             notes.push("vencida: se agenda hoy para recuperarla".into());
         }
 
         while remaining > 0 {
             let so_far = sessions.len();
-            let Some(c) = self.best_candidate(engine, from, it.deadline_bound_ms, remaining, so_far, &day_load) else {
+            let Some(c) = self.best_candidate(
+                engine,
+                from,
+                it.deadline_bound_ms,
+                remaining,
+                so_far,
+                &day_load,
+            ) else {
                 notes.push("no hay tiempo disponible en el horizonte (restricciones hard)".into());
                 break;
             };
@@ -294,7 +316,12 @@ impl Planner {
                 break;
             }
             let prep_left = it.prep_min.saturating_sub(
-                sessions.iter().filter(|s| s.is_prep).map(|s| s.end_ms - s.start_ms).sum::<i64>() as u32 / 60_000,
+                sessions
+                    .iter()
+                    .filter(|s| s.is_prep)
+                    .map(|s| s.end_ms - s.start_ms)
+                    .sum::<i64>() as u32
+                    / 60_000,
             );
             let is_prep = prep_left > 0;
             sessions.push(PlanSession {
@@ -305,7 +332,10 @@ impl Planner {
             // reservar de inmediato: el siguiente candidato no puede
             // reutilizar el mismo hueco (evita doble reserva)
             engine.commitments.push(Block {
-                interval: Interval { start: c.start_ms, end: c.start_ms + c.len_min as i64 * MIN_MS },
+                interval: Interval {
+                    start: c.start_ms,
+                    end: c.start_ms + c.len_min as i64 * MIN_MS,
+                },
                 label: it.title.clone(),
                 severity: Severity::Hard,
             });
@@ -313,7 +343,10 @@ impl Planner {
             remaining -= c.len_min;
         }
 
-        let planned_min: u32 = sessions.iter().map(|s| ((s.end_ms - s.start_ms) / MIN_MS) as u32).sum();
+        let planned_min: u32 = sessions
+            .iter()
+            .map(|s| ((s.end_ms - s.start_ms) / MIN_MS) as u32)
+            .sum();
         PlannedItem {
             title: it.title.clone(),
             intent_type: it.intent_type,
@@ -344,7 +377,12 @@ impl Planner {
         let cap = self.per_day_max_min.unwrap_or(u32::MAX);
         let mut best: Option<Candidate> = None;
         let mut best_score = i64::MAX;
-        let deadline_day = deadline_bound_ms.and_then(|d| chrono::Local.timestamp_millis_opt(d).earliest().map(|t| t.date_naive()));
+        let deadline_day = deadline_bound_ms.and_then(|d| {
+            chrono::Local
+                .timestamp_millis_opt(d)
+                .earliest()
+                .map(|t| t.date_naive())
+        });
         // Vencida (deadline anterior a hoy): se agenda HOY para recuperarla,
         // nunca salta a mañana. El horizonte se reduce al día actual.
         let overdue = deadline_day.is_some_and(|dd| dd < from);
@@ -397,10 +435,16 @@ impl Planner {
                     if len == 0 {
                         continue;
                     }
-                    let cand = Candidate { day, start_ms: start, len_min: len };
+                    let cand = Candidate {
+                        day,
+                        start_ms: start,
+                        len_min: len,
+                    };
                     let load = *day_load.get(&day).unwrap_or(&0);
                     let sc = score_candidate(&cand, sessions_so_far, load, pref, deadline_bound_ms);
-                    let replace = sc < best_score || (sc == best_score && start < best.map(|b| b.start_ms).unwrap_or(i64::MAX));
+                    let replace = sc < best_score
+                        || (sc == best_score
+                            && start < best.map(|b| b.start_ms).unwrap_or(i64::MAX));
                     if replace {
                         best_score = sc;
                         best = Some(cand);
@@ -438,16 +482,21 @@ pub fn fmt_session(start_ms: i64, end_ms: i64) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{DayWindow, SoftPreference, DAY_MS, HOUR_MS};
     use super::*;
     use crate::ai::intent::TimeWindow;
-    use super::super::{DayWindow, SoftPreference, DAY_MS, HOUR_MS};
 
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
 
     fn dt((y, mo, d): (i32, u32, u32), h: u32, m: u32) -> i64 {
-        super::super::local_ms(chrono::NaiveDate::from_ymd_opt(y, mo, d).unwrap().and_hms_opt(h, m, 0).unwrap())
+        super::super::local_ms(
+            chrono::NaiveDate::from_ymd_opt(y, mo, d)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap(),
+        )
     }
 
     fn day(offset: i64) -> (i32, u32, u32) {
@@ -455,17 +504,39 @@ mod tests {
         (t.year(), t.month(), t.day())
     }
 
-    fn intent(title: &str, kind: IntentType, priority: Priority, minutes: u32, prep: u32, deadline: Option<i64>) -> Intent {
+    fn intent(
+        title: &str,
+        kind: IntentType,
+        priority: Priority,
+        minutes: u32,
+        prep: u32,
+        deadline: Option<i64>,
+    ) -> Intent {
         Intent {
             intent_type: kind,
             title: title.into(),
             description: String::new(),
             category_id: "uni".into(),
             priority,
-            window: TimeWindow { start: None, end: None, all_day: false },
-            duration: if minutes > 0 { Some(crate::ai::intent::Duration { minutes }) } else { None },
+            window: TimeWindow {
+                start: None,
+                end: None,
+                all_day: false,
+            },
+            duration: if minutes > 0 {
+                Some(crate::ai::intent::Duration { minutes })
+            } else {
+                None
+            },
             deadline,
-            preparation: if prep > 0 { Some(crate::ai::intent::Preparation { minutes: prep, note: String::new() }) } else { None },
+            preparation: if prep > 0 {
+                Some(crate::ai::intent::Preparation {
+                    minutes: prep,
+                    note: String::new(),
+                })
+            } else {
+                None
+            },
             recurrence: None,
             reminders: Vec::new(),
             constraints: Vec::new(),
@@ -480,15 +551,26 @@ mod tests {
     }
 
     fn planner(engine: ConstraintEngine) -> Planner {
-        Planner { engine, ..Planner::default() }
+        Planner {
+            engine,
+            ..Planner::default()
+        }
     }
 
     fn block(e: &mut ConstraintEngine, start: i64, end: i64, label: &str) {
-        e.blocks.push(Block { interval: Interval { start, end }, label: label.into(), severity: Severity::Hard });
+        e.blocks.push(Block {
+            interval: Interval { start, end },
+            label: label.into(),
+            severity: Severity::Hard,
+        });
     }
 
     fn commit(e: &mut ConstraintEngine, start: i64, end: i64, label: &str) {
-        e.commitments.push(Block { interval: Interval { start, end }, label: label.into(), severity: Severity::Hard });
+        e.commitments.push(Block {
+            interval: Interval { start, end },
+            label: label.into(),
+            severity: Severity::Hard,
+        });
     }
 
     /// Bloquea hoy para que la planificación arranque en day(1).
@@ -500,7 +582,10 @@ mod tests {
     }
 
     fn sessions_min(it: &PlannedItem) -> u32 {
-        it.sessions.iter().map(|s| ((s.end_ms - s.start_ms) / MIN_MS) as u32).sum()
+        it.sessions
+            .iter()
+            .map(|s| ((s.end_ms - s.start_ms) / MIN_MS) as u32)
+            .sum()
     }
 
     fn assert_no_overlap_with(engine: &ConstraintEngine, it: &PlannedItem) {
@@ -508,7 +593,8 @@ mod tests {
             assert!(
                 engine.is_available(s.start_ms, s.end_ms).is_empty(),
                 "sesión {}–{} no es libre: {:?}",
-                s.start_ms, s.end_ms,
+                s.start_ms,
+                s.end_ms,
                 engine.is_available(s.start_ms, s.end_ms)
             );
         }
@@ -525,7 +611,14 @@ mod tests {
         let friday_ms = super::super::local_ms(friday.and_hms_opt(12, 0, 0).unwrap());
         let e = no_today(engine_free());
         let p = planner(e.clone());
-        let items = vec![intent("Examen de cálculo", IntentType::Deadline, Priority::Media, 0, 240, Some(friday_ms))];
+        let items = vec![intent(
+            "Examen de cálculo",
+            IntentType::Deadline,
+            Priority::Media,
+            0,
+            240,
+            Some(friday_ms),
+        )];
         let report = p.plan(&items);
         let it = &report.items[0];
         assert!(it.complete, "4h completas: {report:?}");
@@ -535,11 +628,26 @@ mod tests {
         for s in &it.sessions {
             assert!(s.is_prep);
             assert!(s.end_ms <= friday_ms, "todo termina antes del examen");
-            assert!(s.start_ms >= super::super::local_ms(Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap()));
+            assert!(
+                s.start_ms
+                    >= super::super::local_ms(
+                        Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap()
+                    )
+            );
         }
         // per_day_max 120 → 240 min repartidos en ≥2 días (carga equilibrada)
         let days_used = {
-            let mut ds: Vec<_> = it.sessions.iter().map(|s| chrono::Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive()).collect();
+            let mut ds: Vec<_> = it
+                .sessions
+                .iter()
+                .map(|s| {
+                    chrono::Local
+                        .timestamp_millis_opt(s.start_ms)
+                        .earliest()
+                        .unwrap()
+                        .date_naive()
+                })
+                .collect();
             ds.sort();
             ds.dedup();
             ds.len()
@@ -557,7 +665,14 @@ mod tests {
             block(&mut e, s, s + DAY_MS, "todo bloqueado");
         }
         let p = planner(e);
-        let report = p.plan(&[intent("Tarea", IntentType::Task, Priority::Alta, 60, 0, None)]);
+        let report = p.plan(&[intent(
+            "Tarea",
+            IntentType::Task,
+            Priority::Alta,
+            60,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
         assert!(!it.complete);
         assert_eq!(it.planned_min, 0);
@@ -578,8 +693,19 @@ mod tests {
                 block(&mut e, s + 6 * HOUR_MS, s + 24 * HOUR_MS, "día ocupado");
             }
         }
-        let p = Planner { engine: e, per_day_max_min: Some(300), ..Planner::default() };
-        let report = p.plan(&[intent("Escribir", IntentType::Task, Priority::Alta, 300, 0, None)]);
+        let p = Planner {
+            engine: e,
+            per_day_max_min: Some(300),
+            ..Planner::default()
+        };
+        let report = p.plan(&[intent(
+            "Escribir",
+            IntentType::Task,
+            Priority::Alta,
+            300,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
         assert_eq!(it.planned_min, 180, "solo hay 3h: {report:?}");
         assert!(!it.complete);
@@ -591,13 +717,26 @@ mod tests {
         commit(&mut e, dt(day(1), 9, 0), dt(day(1), 11, 0), "clase");
         commit(&mut e, dt(day(1), 14, 0), dt(day(1), 16, 0), "reunión");
         let p = planner(e.clone());
-        let report = p.plan(&[intent("Estudiar", IntentType::Task, Priority::Media, 120, 0, None)]);
+        let report = p.plan(&[intent(
+            "Estudiar",
+            IntentType::Task,
+            Priority::Media,
+            120,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
         assert!(it.complete);
         assert_no_overlap_with(&e, it);
         for s in &it.sessions {
-            assert!(!(s.start_ms < dt(day(1), 11, 0) && s.end_ms > dt(day(1), 9, 0)), "no solapa la clase");
-            assert!(!(s.start_ms < dt(day(1), 16, 0) && s.end_ms > dt(day(1), 14, 0)), "no solapa la reunión");
+            assert!(
+                !(s.start_ms < dt(day(1), 11, 0) && s.end_ms > dt(day(1), 9, 0)),
+                "no solapa la clase"
+            );
+            assert!(
+                !(s.start_ms < dt(day(1), 16, 0) && s.end_ms > dt(day(1), 14, 0)),
+                "no solapa la reunión"
+            );
         }
     }
 
@@ -628,7 +767,12 @@ mod tests {
                 assert!(
                     a.1 <= b.0 || b.1 <= a.0,
                     "doble reserva: {} {}–{} vs {} {}–{}",
-                    a.2, a.0, a.1, b.2, b.0, b.1
+                    a.2,
+                    a.0,
+                    a.1,
+                    b.2,
+                    b.0,
+                    b.1
                 );
             }
         }
@@ -645,16 +789,37 @@ mod tests {
         let e = no_today(engine_free());
         let p = planner(e.clone());
         let items = vec![
-            intent("Informe lunes", IntentType::Deadline, Priority::Media, 180, 0, Some(monday_ms)),
-            intent("Examen viernes", IntentType::Deadline, Priority::Media, 180, 0, Some(friday_ms)),
+            intent(
+                "Informe lunes",
+                IntentType::Deadline,
+                Priority::Media,
+                180,
+                0,
+                Some(monday_ms),
+            ),
+            intent(
+                "Examen viernes",
+                IntentType::Deadline,
+                Priority::Media,
+                180,
+                0,
+                Some(friday_ms),
+            ),
         ];
         let report = p.plan(&items);
         assert_eq!(report.items.len(), 2);
-        assert_eq!(report.items[0].title, "Informe lunes", "vencimiento más cercano primero");
+        assert_eq!(
+            report.items[0].title, "Informe lunes",
+            "vencimiento más cercano primero"
+        );
         for it in &report.items {
             assert!(it.complete);
             for s in &it.sessions {
-                assert!(s.end_ms <= it.deadline_bound_ms.unwrap(), "{} respeta su vencimiento", it.title);
+                assert!(
+                    s.end_ms <= it.deadline_bound_ms.unwrap(),
+                    "{} respeta su vencimiento",
+                    it.title
+                );
             }
             assert_no_overlap_with(&e, it);
         }
@@ -679,7 +844,8 @@ mod tests {
         assert!(
             alta.sessions[0].start_ms <= baja.sessions[0].start_ms,
             "Alta se agenda antes: {:?} vs {:?}",
-            alta.sessions, baja.sessions
+            alta.sessions,
+            baja.sessions
         );
         assert!(report.items[0].title == "Alta", "orden por prioridad");
         let _ = p;
@@ -694,10 +860,21 @@ mod tests {
             horizon_days: 2,
             ..Planner::default()
         };
-        let report = p.plan(&[intent("Tesis", IntentType::Task, Priority::Alta, 300, 0, None)]);
+        let report = p.plan(&[intent(
+            "Tesis",
+            IntentType::Task,
+            Priority::Alta,
+            300,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
         assert!(!it.complete);
-        assert_eq!(it.planned_min, 2 * 2 * 60, "planifica lo que hay: {report:?}");
+        assert_eq!(
+            it.planned_min,
+            2 * 2 * 60,
+            "planifica lo que hay: {report:?}"
+        );
         assert!(it.planned_min < it.required_min);
         assert!(!it.notes.is_empty());
         let _ = e;
@@ -710,12 +887,24 @@ mod tests {
         let friday_ms = super::super::local_ms(friday.and_hms_opt(12, 0, 0).unwrap());
         let e = no_today(engine_free());
         let p = planner(e);
-        let items = vec![intent("Examen", IntentType::Deadline, Priority::Media, 60, 240, Some(friday_ms))];
+        let items = vec![intent(
+            "Examen",
+            IntentType::Deadline,
+            Priority::Media,
+            60,
+            240,
+            Some(friday_ms),
+        )];
         let report = p.plan(&items);
         let it = &report.items[0];
         assert!(it.complete);
         assert_eq!(sessions_min(it), 300);
-        let prep_sessions: u32 = it.sessions.iter().filter(|s| s.is_prep).map(|s| ((s.end_ms - s.start_ms) / MIN_MS) as u32).sum();
+        let prep_sessions: u32 = it
+            .sessions
+            .iter()
+            .filter(|s| s.is_prep)
+            .map(|s| ((s.end_ms - s.start_ms) / MIN_MS) as u32)
+            .sum();
         assert_eq!(prep_sessions, 240, "las primeras 240 min son preparación");
         // los 60 min finales son la tarea
         assert!(it.sessions.last().map(|s| !s.is_prep).unwrap_or(false));
@@ -732,12 +921,29 @@ mod tests {
         for d in 1..15i64 {
             let t = Local::now().date_naive() + chrono::Duration::days(d);
             let s = super::super::local_ms(t.and_hms_opt(0, 0, 0).unwrap());
-            block(&mut e, s + 6 * HOUR_MS, s + 21 * HOUR_MS + 30 * MIN_MS, "día ocupado");
+            block(
+                &mut e,
+                s + 6 * HOUR_MS,
+                s + 21 * HOUR_MS + 30 * MIN_MS,
+                "día ocupado",
+            );
         }
         let p = planner(e);
-        let report = p.plan(&[intent("Tarea", IntentType::Task, Priority::Media, 300, 0, None)]);
+        let report = p.plan(&[intent(
+            "Tarea",
+            IntentType::Task,
+            Priority::Media,
+            300,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
-        assert!(it.sessions.len() <= p.max_sessions_per_item, "solo {} sesiones: {:?}", it.sessions.len(), report.to_text());
+        assert!(
+            it.sessions.len() <= p.max_sessions_per_item,
+            "solo {} sesiones: {:?}",
+            it.sessions.len(),
+            report.to_text()
+        );
         assert!(!it.complete, "no se puede completar sin fragmentar de más");
         assert_eq!(it.planned_min, 6 * 30, "6 sesiones de 30 min");
     }
@@ -745,21 +951,36 @@ mod tests {
     #[test]
     fn preference_respected_when_possible() {
         let mut e = no_today(engine_free());
-        e.working_hours = Some(DayWindow { start_min: 9 * 60, end_min: 21 * 60 });
-        e.preferences.push(SoftPreference::StartAfter { minute: 18 * 60 });
+        e.working_hours = Some(DayWindow {
+            start_min: 9 * 60,
+            end_min: 21 * 60,
+        });
+        e.preferences
+            .push(SoftPreference::StartAfter { minute: 18 * 60 });
         let p = planner(e);
-        let report = p.plan(&[intent("Estudiar", IntentType::Task, Priority::Media, 120, 0, None)]);
+        let report = p.plan(&[intent(
+            "Estudiar",
+            IntentType::Task,
+            Priority::Media,
+            120,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
         assert!(it.complete);
         for s in &it.sessions {
-            assert!(time_of_day_min(s.start_ms) >= 18 * 60, "respeta estudiar después de las 18");
+            assert!(
+                time_of_day_min(s.start_ms) >= 18 * 60,
+                "respeta estudiar después de las 18"
+            );
         }
     }
 
     #[test]
     fn preference_yields_if_unavoidable() {
         let mut e = no_today(engine_free());
-        e.preferences.push(SoftPreference::StartAfter { minute: 17 * 60 });
+        e.preferences
+            .push(SoftPreference::StartAfter { minute: 17 * 60 });
         // todo el horizonte con la tarde ocupada → no existe opción ≥17:00
         for d in 1..15i64 {
             let t = Local::now().date_naive() + chrono::Duration::days(d);
@@ -767,10 +988,21 @@ mod tests {
             commit(&mut e, s + 12 * HOUR_MS, s + 24 * HOUR_MS, "tarde ocupada");
         }
         let p = planner(e);
-        let report = p.plan(&[intent("Estudiar", IntentType::Task, Priority::Media, 120, 0, None)]);
+        let report = p.plan(&[intent(
+            "Estudiar",
+            IntentType::Task,
+            Priority::Media,
+            120,
+            0,
+            None,
+        )]);
         let it = &report.items[0];
         assert!(it.complete, "cede y usa la mañana: {report:?}");
-        assert!(time_of_day_min(it.sessions[0].start_ms) < 12 * 60, "usa la mañana: {:?}", it.sessions);
+        assert!(
+            time_of_day_min(it.sessions[0].start_ms) < 12 * 60,
+            "usa la mañana: {:?}",
+            it.sessions
+        );
     }
 
     #[test]
@@ -778,7 +1010,11 @@ mod tests {
         // evento con ventana fija → no se planifica (es compromiso); su prep sí
         let e = no_today(engine_free());
         let mut ev = intent("Examen", IntentType::Event, Priority::Alta, 0, 120, None);
-        ev.window = TimeWindow { start: Some(dt(day(2), 10, 0)), end: Some(dt(day(2), 12, 0)), all_day: false };
+        ev.window = TimeWindow {
+            start: Some(dt(day(2), 10, 0)),
+            end: Some(dt(day(2), 12, 0)),
+            all_day: false,
+        };
         let p = planner(e.clone());
         let report = p.plan(&[ev]);
         assert_eq!(report.items.len(), 1);
@@ -795,7 +1031,14 @@ mod tests {
     fn not_schedulable_intents_skipped() {
         let p = planner(no_today(engine_free()));
         let report = p.plan(&[
-            intent("Disponibilidad", IntentType::Availability, Priority::Media, 0, 0, None),
+            intent(
+                "Disponibilidad",
+                IntentType::Availability,
+                Priority::Media,
+                0,
+                0,
+                None,
+            ),
             intent("Backlog", IntentType::Task, Priority::Media, 0, 0, None),
             intent("Tarea", IntentType::Task, Priority::Media, 60, 0, None),
         ]);
@@ -808,8 +1051,22 @@ mod tests {
         let e = no_today(engine_free());
         let p = planner(e);
         let items = vec![
-            intent("A", IntentType::Task, Priority::Media, 150, 30, Some(dt(day(5), 23, 59))),
-            intent("B", IntentType::Deadline, Priority::Baja, 90, 0, Some(dt(day(8), 12, 0))),
+            intent(
+                "A",
+                IntentType::Task,
+                Priority::Media,
+                150,
+                30,
+                Some(dt(day(5), 23, 59)),
+            ),
+            intent(
+                "B",
+                IntentType::Deadline,
+                Priority::Baja,
+                90,
+                0,
+                Some(dt(day(8), 12, 0)),
+            ),
         ];
         let r1 = p.plan(&items);
         let r2 = p.plan(&items);
@@ -828,9 +1085,19 @@ mod tests {
         // propio ahora (≥ este valor); capturarlo después creaba una carrera
         // de milisegundos que flakeaba el test.
         let now = Local::now().timestamp_millis();
-        let report = p.plan(&[intent("Hoy", IntentType::Task, Priority::Media, 60, 0, None)]);
+        let report = p.plan(&[intent(
+            "Hoy",
+            IntentType::Task,
+            Priority::Media,
+            60,
+            0,
+            None,
+        )]);
         for s in &report.items[0].sessions {
-            assert!(s.start_ms >= now, "sesión en el pasado: {s:?} (ahora {now})");
+            assert!(
+                s.start_ms >= now,
+                "sesión en el pasado: {s:?} (ahora {now})"
+            );
         }
     }
 
@@ -841,13 +1108,27 @@ mod tests {
         let e = engine_free();
         let p = planner(e);
         let today = Local::now().date_naive();
-        let past = super::super::local_ms((today - chrono::Duration::days(1)).and_hms_opt(12, 0, 0).unwrap());
-        let report = p.plan(&[intent("Vencida", IntentType::Task, Priority::Alta, 120, 0, Some(past))]);
+        let past = super::super::local_ms(
+            (today - chrono::Duration::days(1))
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let report = p.plan(&[intent(
+            "Vencida",
+            IntentType::Task,
+            Priority::Alta,
+            120,
+            0,
+            Some(past),
+        )]);
         let it = &report.items[0];
         assert!(
-            it.sessions
-                .iter()
-                .all(|s| Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive() == today),
+            it.sessions.iter().all(|s| Local
+                .timestamp_millis_opt(s.start_ms)
+                .earliest()
+                .unwrap()
+                .date_naive()
+                == today),
             "vencida → sesiones HOY, nunca mañana ni más tarde: {report:?}"
         );
         assert!(
@@ -855,7 +1136,10 @@ mod tests {
             "explica la decisión: {:?}",
             it.notes
         );
-        assert!(it.complete || !it.sessions.is_empty(), "al menos intenta hoy: {report:?}");
+        assert!(
+            it.complete || !it.sessions.is_empty(),
+            "al menos intenta hoy: {report:?}"
+        );
     }
 
     #[test]
@@ -866,20 +1150,41 @@ mod tests {
         let e = no_today(engine_free());
         let p = planner(e.clone());
         let items: Vec<Intent> = (0..6)
-            .map(|i| intent(&format!("T{i}"), IntentType::Task, Priority::Media, 60, 0, None))
+            .map(|i| {
+                intent(
+                    &format!("T{i}"),
+                    IntentType::Task,
+                    Priority::Media,
+                    60,
+                    0,
+                    None,
+                )
+            })
             .collect();
         let report = p.plan(&items);
-        assert!(report.items.iter().all(|it| it.complete), "todo se planifica: {report:?}");
+        assert!(
+            report.items.iter().all(|it| it.complete),
+            "todo se planifica: {report:?}"
+        );
         let mut days: Vec<NaiveDate> = report
             .items
             .iter()
-            .flat_map(|it| it.sessions.iter().map(|s| {
-                Local.timestamp_millis_opt(s.start_ms).earliest().unwrap().date_naive()
-            }))
+            .flat_map(|it| {
+                it.sessions.iter().map(|s| {
+                    Local
+                        .timestamp_millis_opt(s.start_ms)
+                        .earliest()
+                        .unwrap()
+                        .date_naive()
+                })
+            })
             .collect();
         days.sort();
         days.dedup();
-        assert!(days.len() >= 3, "6×60 con tope 120 → mínimo 3 días, no uno: {days:?}");
+        assert!(
+            days.len() >= 3,
+            "6×60 con tope 120 → mínimo 3 días, no uno: {days:?}"
+        );
         for it in &report.items {
             assert_no_overlap_with(&e, it);
         }
@@ -890,12 +1195,21 @@ mod tests {
         let e = engine_free();
         assert_eq!(
             e.working_hours,
-            Some(DayWindow { start_min: 6 * 60, end_min: 22 * 60 }),
+            Some(DayWindow {
+                start_min: 6 * 60,
+                end_min: 22 * 60
+            }),
             "horario unificado 06:00-22:00"
         );
         let day = Local::now().date_naive() + chrono::Duration::days(1);
         let start = super::super::local_ms(day.and_hms_opt(0, 0, 0).unwrap());
-        assert_eq!(e.free_intervals_on(day), vec![Interval { start: start + 6 * HOUR_MS, end: start + 22 * HOUR_MS }]);
+        assert_eq!(
+            e.free_intervals_on(day),
+            vec![Interval {
+                start: start + 6 * HOUR_MS,
+                end: start + 22 * HOUR_MS
+            }]
+        );
     }
 
     #[test]
@@ -904,7 +1218,14 @@ mod tests {
         let friday_ms = super::super::local_ms(friday.and_hms_opt(23, 59, 0).unwrap());
         let e = no_today(engine_free());
         let p = planner(e);
-        let report = p.plan(&[intent("Calculus preparation", IntentType::Deadline, Priority::Media, 0, 240, Some(friday_ms))]);
+        let report = p.plan(&[intent(
+            "Calculus preparation",
+            IntentType::Deadline,
+            Priority::Media,
+            0,
+            240,
+            Some(friday_ms),
+        )]);
         let text = report.to_text();
         assert!(text.contains("Plan:"), "{text}");
         assert!(text.contains("4 horas requeridos"), "{text}");

@@ -17,13 +17,13 @@
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 use winreg::RegKey;
 
-use windows::core::{HSTRING, Interface, PWSTR, PCWSTR};
+use windows::core::{Interface, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
 use windows::Win32::System::Com::StructuredStorage::{
     PROPVARIANT, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile,
+    CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
@@ -101,13 +101,13 @@ pub fn ensure_toast_identity() -> Result<(), String> {
             return Ok(());
         }
         let appdata = std::env::var("APPDATA").map_err(|e| e.to_string())?;
-        let lnk_path =
-            format!(r"{appdata}\Microsoft\Windows\Start Menu\Programs\FocusFlow.lnk");
+        let lnk_path = format!(r"{appdata}\Microsoft\Windows\Start Menu\Programs\FocusFlow.lnk");
 
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let link: IShellLinkW =
             CoCreateInstance(&ShellLink, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
-        link.SetPath(PCWSTR(w(&exe_s).as_ptr())).map_err(|e| e.to_string())?;
+        link.SetPath(PCWSTR(w(&exe_s).as_ptr()))
+            .map_err(|e| e.to_string())?;
         link.SetIconLocation(PCWSTR(w(&exe_s).as_ptr()), 0)
             .map_err(|e| e.to_string())?;
         let store: IPropertyStore = link.cast().map_err(|e| e.to_string())?;
@@ -116,7 +116,9 @@ pub fn ensure_toast_identity() -> Result<(), String> {
         // que intentaría liberar con CoTaskMemFree un puntero del heap de Rust
         // (el Vec) y abortaría el proceso. La variante nunca es dueña del buffer.
         let pv = core::mem::ManuallyDrop::new(propvariant_str(&aumid_wide));
-        store.SetValue(&PKEY_AppUserModel_ID, &*pv).map_err(|e| e.to_string())?;
+        store
+            .SetValue(&PKEY_AppUserModel_ID, &*pv)
+            .map_err(|e| e.to_string())?;
         store.Commit().map_err(|e| e.to_string())?;
         let persist: IPersistFile = link.cast().map_err(|e| e.to_string())?;
         persist

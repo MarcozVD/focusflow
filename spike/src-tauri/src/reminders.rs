@@ -67,7 +67,10 @@ fn tick(app: &AppHandle) {
             Ok(_) => {
                 let _ = crate::sync::with_db(app, |db| db.mark_reminder_fired(r.task_id));
                 fired += 1;
-                crate::append_log(app, &format!("reminder_fired id={} title={}", r.task_id, r.title));
+                crate::append_log(
+                    app,
+                    &format!("reminder_fired id={} title={}", r.task_id, r.title),
+                );
             }
             Err(e) => crate::append_log(app, &format!("reminder_show_error id={} {e}", r.task_id)),
         }
@@ -175,13 +178,23 @@ mod tests {
     #[test]
     fn reminder_body_all_day_and_timed() {
         let now = chrono::Local::now();
-        assert_eq!(reminder_body(&due(now.timestamp_millis(), true)), "Todo el día");
+        assert_eq!(
+            reminder_body(&due(now.timestamp_millis(), true)),
+            "Todo el día"
+        );
         assert_eq!(
             reminder_body(&due(now.timestamp_millis(), false)),
             format!("Hoy a las {}", now.format("%H:%M"))
         );
         let mañana = now + chrono::Duration::days(1);
         let b = reminder_body(&due(mañana.timestamp_millis(), false));
-        assert_eq!(b, format!("{} a las {}", mañana.format("%d/%m"), mañana.format("%H:%M")));
+        assert_eq!(
+            b,
+            format!(
+                "{} a las {}",
+                mañana.format("%d/%m"),
+                mañana.format("%H:%M")
+            )
+        );
     }
 }

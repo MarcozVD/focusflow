@@ -22,9 +22,7 @@ pub fn email_system_prompt() -> String {
 }
 
 pub fn email_user_prompt(subject: &str, sender: &str, date: &str, body: &str) -> String {
-    format!(
-        "CORREO\nDe: {sender}\nFecha: {date}\nAsunto: {subject}\n\nCuerpo:\n{body}"
-    )
+    format!("CORREO\nDe: {sender}\nFecha: {date}\nAsunto: {subject}\n\nCuerpo:\n{body}")
 }
 
 /// Envía el correo a la IA y valida el resultado.
@@ -51,10 +49,8 @@ pub fn html_to_text(html: &str) -> String {
     let without_scripts = re_scripts.replace_all(html, " ").to_string();
 
     // conservar hrefs de anchors antes del strip de tags
-    let re_anchor = regex::Regex::new(
-        r#"<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)</a>"#,
-    )
-    .unwrap();
+    let re_anchor =
+        regex::Regex::new(r#"<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)</a>"#).unwrap();
     let re_tag = regex::Regex::new(r"<[^>]+>").unwrap();
     let mut anchored = String::with_capacity(without_scripts.len());
     let mut last = 0;
@@ -62,7 +58,9 @@ pub fn html_to_text(html: &str) -> String {
         let m = cap.get(0).unwrap();
         anchored.push_str(&without_scripts[last..m.start()]);
         let href = cap.get(1).unwrap().as_str().trim();
-        let inner = re_tag.replace_all(cap.get(2).unwrap().as_str(), " ").to_string();
+        let inner = re_tag
+            .replace_all(cap.get(2).unwrap().as_str(), " ")
+            .to_string();
         let inner = inner.split_whitespace().collect::<Vec<_>>().join(" ");
         let safe_href: String = if (href.starts_with("http://") || href.starts_with("https://"))
             && !href.contains(char::is_whitespace)
@@ -108,9 +106,13 @@ mod tests {
 
     #[test]
     fn preserves_http_links() {
-        let html = r#"<p>Instructivo: <a href="https://unab.edu.co/guia.pdf">guía de la materia</a>.</p>"#;
+        let html =
+            r#"<p>Instructivo: <a href="https://unab.edu.co/guia.pdf">guía de la materia</a>.</p>"#;
         let t = html_to_text(html);
-        assert!(t.contains("guía de la materia (https://unab.edu.co/guia.pdf)"), "{t}");
+        assert!(
+            t.contains("guía de la materia (https://unab.edu.co/guia.pdf)"),
+            "{t}"
+        );
     }
 
     #[test]
@@ -122,7 +124,10 @@ mod tests {
         let t = html_to_text(&html);
         assert!(!t.contains("javascript"), "{t}");
         assert!(!t.contains("malo (javascript"), "{t}");
-        assert!(t.contains("largo (https://x.com/") && t.contains("…"), "{t}");
+        assert!(
+            t.contains("largo (https://x.com/") && t.contains("…"),
+            "{t}"
+        );
         assert!(t.len() < long.len() + 200, "url truncada: {}", t.len());
     }
 }

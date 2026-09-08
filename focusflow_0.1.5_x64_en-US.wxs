@@ -1,0 +1,95 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product Id="{8A5D41A9-C5A9-4E62-82D8-BB032F58CA2E}" Codepage="1252" Language="1033" Manufacturer="focusflow" Name="focusflow" UpgradeCode="{6837C97E-D92D-5CD4-9EC2-DDD2B6F012EE}" Version="0.1.5">
+        <Package Comments="This installer database contains the logic and data required to install focusflow." Compressed="yes" Description="focusflow" InstallerVersion="450" Languages="0" Manufacturer="focusflow" Platform="x64" />
+        <CustomAction Id="LaunchApplication" FileKey="Path" ExeCommand="[LAUNCHAPPARGS]" Return="asyncNoWait" />
+        <CustomAction Id="SetARPNOMODIFY" Property="ARPNOMODIFY" Value="1" />
+        <CustomAction Id="DownloadAndInvokeBootstrapper" Directory="INSTALLDIR" ExeCommand="powershell.exe -NoProfile -windowstyle hidden try [\{] [\[]Net.ServicePointManager[\]]::SecurityProtocol = [\[]Net.SecurityProtocolType[\]]::Tls12 [\}] catch [\{][\}]; Invoke-WebRequest -Uri &quot;https://go.microsoft.com/fwlink/p/?LinkId=2124703&quot; -OutFile &quot;$env:TEMP\MicrosoftEdgeWebview2Setup.exe&quot; ; Start-Process -FilePath &quot;$env:TEMP\MicrosoftEdgeWebview2Setup.exe&quot; -ArgumentList ('/silent', '/install') -Wait" Execute="deferred" />
+        <CustomAction Id="SetARPINSTALLLOCATION" Property="ARPINSTALLLOCATION" Value="[INSTALLDIR]" />
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="DesktopFolder" Name="Desktop">
+                <Component Id="ApplicationShortcutDesktop" Guid="{041B5D14-71B3-529C-8139-16CA7AD8056B}" Win64="yes">
+                    <RegistryValue Id="regAE60B140232CF611904D8BD429BF18BB" Root="HKCU" Key="Software\focusflow\focusflow" Name="Desktop Shortcut" Value="1" Type="integer" KeyPath="yes" />
+                    <RemoveFolder Id="DesktopFolder" Directory="DesktopFolder" On="uninstall" />
+                    <Shortcut Id="ApplicationDesktopShortcut" Directory="DesktopFolder" Name="focusflow" ShortName="aw5ltklz" Target="[!Path]" Description="Runs focusflow" WorkingDirectory="INSTALLDIR" />
+                </Component>
+            </Directory>
+            <Directory Id="ProgramFiles64Folder" Name="PFiles">
+                <Directory Id="INSTALLDIR" Name="focusflow" ShortName="4c4t_2hr">
+                    <Component Id="RegistryEntries" Guid="{4CC55E2F-6A8D-57CD-A411-ABC8268ED770}" Win64="yes">
+                        <RegistryValue Id="reg140CCE8274E9769D8DB6A58DB4B43484" Root="HKCU" Key="Software\focusflow\focusflow" Name="InstallDir" Value="[INSTALLDIR]" Type="string" KeyPath="yes" />
+                    </Component>
+                    <Component Id="Path" Guid="{6F5A5FFA-C665-5041-82C1-3EC35BE9F8C0}" Win64="yes">
+                        <File Id="Path" Name="focusflow-spike.exe" KeyPath="yes" ShortName="ojareqmb.exe" Checksum="yes" DiskId="1" Source="store/msix/msixout\File\Path" />
+                    </Component>
+                    <Component Id="I824928f03af845e3a17083310c305c2d" Guid="{1256D1BA-9629-4A5E-BCA5-AD205C8AC230}" KeyPath="yes" Win64="yes">
+                        <CreateFolder Directory="INSTALLDIR" />
+                        <File Id="PathFile_I824928f03af845e3a17083310c305c2d" Name="focusflow_spike_lib.dll" ShortName="hd8rhptk.dll" DiskId="1" Source="store/msix/msixout\File\PathFile_I824928f03af845e3a17083310c305c2d" />
+                    </Component>
+                    <Component Id="CMP_UninstallShortcut" Guid="{47366922-C9BC-5B51-AB2B-D7743C34AA11}" Win64="yes">
+                        <RegistryValue Id="regC3FFEFAD93B5610006705EC181C614F8" Root="HKCU" Key="Software\focusflow\focusflow" Name="Uninstaller Shortcut" Value="1" Type="integer" KeyPath="yes" />
+                        <RemoveFolder Id="INSTALLDIR" Directory="INSTALLDIR" On="uninstall" />
+                        <Shortcut Id="UninstallShortcut" Directory="INSTALLDIR" Name="Uninstall focusflow" ShortName="zyeei5qq" Description="Uninstalls focusflow" Arguments="/x [ProductCode]" Advertise="yes" />
+                    </Component>
+                </Directory>
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="focusflow" ShortName="nasu9srj">
+                    <Component Id="ApplicationShortcut" Guid="{D24FAADD-361E-5A14-961F-803DFD328B74}" Win64="yes">
+                        <RegistryValue Id="reg2CBF9880465413B77103C8F0791900CF" Root="HKCU" Key="Software\focusflow\focusflow" Name="Start Menu Shortcut" Value="1" Type="integer" KeyPath="yes" />
+                        <RemoveFolder Id="ApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+                        <Shortcut Id="ApplicationStartMenuShortcut" Directory="ApplicationProgramsFolder" Name="focusflow" ShortName="iqloearz" Target="[!Path]" Description="Runs focusflow" Icon="ProductIcon" WorkingDirectory="INSTALLDIR">
+                            <ShortcutProperty Id="scpA928DBE89B302EBC9C3D7CA666BC5A03" Key="System.AppUserModel.ID" Value="com.focusflow.spike" />
+                        </Shortcut>
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+        <Feature Id="MainProgram" Absent="disallow" AllowAdvertise="no" ConfigurableDirectory="INSTALLDIR" Description="Installs focusflow." Display="expand" Level="1" Title="Application">
+            <ComponentRef Id="RegistryEntries" />
+            <ComponentRef Id="I824928f03af845e3a17083310c305c2d" />
+            <Feature Id="ShortcutsFeature" Level="1" Title="Shortcuts">
+                <ComponentRef Id="ApplicationShortcutDesktop" />
+                <ComponentRef Id="Path" />
+                <ComponentRef Id="CMP_UninstallShortcut" />
+                <ComponentRef Id="ApplicationShortcut" />
+            </Feature>
+            <Feature Id="Environment" Description="Add the install location of the focusflow executable to the PATH system environment variable. This allows the focusflow executable to be called from any location." Level="1" Title="PATH Environment Variable">
+                <ComponentRef Id="Path" />
+            </Feature>
+        </Feature>
+        <Feature Id="External" Absent="disallow" AllowAdvertise="no" Level="1" />
+        <Icon Id="ProductIcon" SourceFile="store/msix/msixout\Icon\ProductIcon" />
+        <MajorUpgrade AllowDowngrades="yes" Schedule="afterInstallFinalize" />
+        <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
+        <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+        <Property Id="ALLUSERS" Value="1" />
+        <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+        <Property Id="REINSTALLMODE" Value="amus" />
+        <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+        <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch focusflow" />
+        <Property Id="AUTOLAUNCHAPP" Secure="yes" />
+        <Property Id="LAUNCHAPPARGS" Secure="yes" />
+        <Property Id="WIX_UPGRADE_DETECTED" Secure="yes" />
+        <Property Id="INSTALLDIR">
+            <RegistrySearch Id="PrevInstallDirNoName" Root="HKCU" Key="Software\focusflow\focusflow" Type="raw" Win64="yes" />
+            <RegistrySearch Id="PrevInstallDirWithName" Root="HKCU" Key="Software\focusflow\focusflow" Name="InstallDir" Type="raw" Win64="yes" />
+        </Property>
+        <Property Id="INSTALLED_WEBVIEW2_VERSION">
+            <RegistrySearch Id="Webview2VersionSystemx64" Root="HKLM" Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" Name="pv" Type="raw" Win64="yes" />
+            <RegistrySearch Id="Webview2VersionUser" Root="HKCU" Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" Name="pv" Type="raw" Win64="yes" />
+            <RegistrySearch Id="Webview2VersionSystemx86" Root="HKLM" Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" Name="pv" Type="raw" Win64="yes" />
+        </Property>
+        <UIRef Id="WixUI_InstallDir" />
+        <InstallExecuteSequence>
+            <Custom Action="SetARPINSTALLLOCATION" After="CostFinalize" />
+            <Custom Action="SetARPNOMODIFY" After="InstallValidate" />
+            <Custom Action="DownloadAndInvokeBootstrapper" Before="InstallFinalize">NOT(REMOVE OR INSTALLED_WEBVIEW2_VERSION)</Custom>
+            <Custom Action="LaunchApplication" After="InstallFinalize">AUTOLAUNCHAPP AND NOT Installed</Custom>
+            <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
+        </InstallExecuteSequence>
+        <InstallUISequence>
+            <Custom Action="SetARPINSTALLLOCATION" After="CostFinalize" />
+        </InstallUISequence>
+    </Product>
+</Wix>

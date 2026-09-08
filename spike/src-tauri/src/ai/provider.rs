@@ -28,7 +28,10 @@ pub enum AiError {
     /// HTTP 429 / límite de peticiones alcanzado (p. ej. FreeUsageLimitError
     /// de Zen). `retry_after` es el `Retry-After` del servidor, si viene.
     /// `detail` es el cuerpo técnico (solo para logs internos, no al usuario).
-    RateLimited { retry_after: Option<u64>, detail: String },
+    RateLimited {
+        retry_after: Option<u64>,
+        detail: String,
+    },
     BadResponse(String),
     InvalidJson(String),
 }
@@ -156,7 +159,12 @@ impl OpenAiCompatProvider {
             .timeout(std::time::Duration::from_secs(90))
             .build()
             .unwrap_or_default();
-        OpenAiCompatProvider { endpoint, model, api_key, http }
+        OpenAiCompatProvider {
+            endpoint,
+            model,
+            api_key,
+            http,
+        }
     }
 }
 
@@ -208,8 +216,7 @@ impl AiProvider for OpenAiCompatProvider {
                 .ok_or_else(|| AiError::BadResponse("falta choices[0].message.content".into()))?;
             let parsed = super::validation::extract_json(content)
                 .ok_or_else(|| AiError::InvalidJson("no se encontró objeto JSON".into()))?;
-            serde_json::from_value(parsed)
-                .map_err(|e| AiError::InvalidJson(e.to_string()))
+            serde_json::from_value(parsed).map_err(|e| AiError::InvalidJson(e.to_string()))
         })
     }
 }
@@ -238,7 +245,11 @@ impl GeminiProvider {
     }
 
     fn url(&self) -> String {
-        format!("{}/models/{}:generateContent", self.base_url.trim_end_matches('/'), self.model)
+        format!(
+            "{}/models/{}:generateContent",
+            self.base_url.trim_end_matches('/'),
+            self.model
+        )
     }
 }
 
@@ -267,8 +278,7 @@ impl AiProvider for GeminiProvider {
             "generationConfig": generation_config,
         });
         if !system.trim().is_empty() {
-            body["system_instruction"] =
-                serde_json::json!({"parts": [{"text": system}]});
+            body["system_instruction"] = serde_json::json!({"parts": [{"text": system}]});
         }
         let url = self.url();
         chat_with_retry(|| {
@@ -291,11 +301,12 @@ impl AiProvider for GeminiProvider {
             let text = json
                 .pointer("/candidates/0/content/parts/0/text")
                 .and_then(|t| t.as_str())
-                .ok_or_else(|| AiError::BadResponse("falta candidates[0].content.parts[0].text".into()))?;
+                .ok_or_else(|| {
+                    AiError::BadResponse("falta candidates[0].content.parts[0].text".into())
+                })?;
             let parsed = super::validation::extract_json(text)
                 .ok_or_else(|| AiError::InvalidJson("no se encontró objeto JSON".into()))?;
-            serde_json::from_value(parsed)
-                .map_err(|e| AiError::InvalidJson(e.to_string()))
+            serde_json::from_value(parsed).map_err(|e| AiError::InvalidJson(e.to_string()))
         })
     }
 }
@@ -337,7 +348,10 @@ pub fn default_model() -> String {
 /// Clave de IA incrustada en el binario en tiempo de compilación (build.rs lee
 /// `spike/src-tauri/.env`). Si no está definida, el build falla (ver build.rs).
 pub fn get_ai_key() -> Option<String> {
-    let key = env!("AI_API_KEY", "ERROR: AI_API_KEY no definida en build-time (ver build.rs)");
+    let key = env!(
+        "AI_API_KEY",
+        "ERROR: AI_API_KEY no definida en build-time (ver build.rs)"
+    );
     if key.trim().is_empty() {
         None
     } else {
@@ -362,15 +376,27 @@ pub fn provider_from_config(cfg: &AiConfig) -> AiResult<Box<dyn AiProvider>> {
 
     let key = get_ai_key().ok_or_else(|| AiError::NotConfigured("no hay clave de API".into()))?;
     if provider == PROVIDER_GEMINI {
-        let model = if cfg.model.is_empty() { default_model() } else { cfg.model.clone() };
+        let model = if cfg.model.is_empty() {
+            default_model()
+        } else {
+            cfg.model.clone()
+        };
         if model.is_empty() {
             return Err(AiError::NotConfigured("falta modelo de Gemini".into()));
         }
         return Ok(Box::new(GeminiProvider::new(model, key)));
     }
 
-    let endpoint = if cfg.endpoint.is_empty() { default_endpoint() } else { cfg.endpoint.clone() };
-    let model = if cfg.model.is_empty() { default_model() } else { cfg.model.clone() };
+    let endpoint = if cfg.endpoint.is_empty() {
+        default_endpoint()
+    } else {
+        cfg.endpoint.clone()
+    };
+    let model = if cfg.model.is_empty() {
+        default_model()
+    } else {
+        cfg.model.clone()
+    };
     if endpoint.is_empty() {
         return Err(AiError::NotConfigured("falta endpoint de la API".into()));
     }
@@ -386,14 +412,22 @@ mod tests {
 
     #[test]
     fn local_provider_needs_no_key() {
-        let cfg = AiConfig { endpoint: String::new(), model: String::new(), provider: PROVIDER_LOCAL.into() };
+        let cfg = AiConfig {
+            endpoint: String::new(),
+            model: String::new(),
+            provider: PROVIDER_LOCAL.into(),
+        };
         let p = provider_from_config(&cfg).expect("local sin clave");
         assert_eq!(p.id(), "rule-based");
     }
 
     #[test]
     fn openai_provider_without_key_is_not_configured() {
-        let cfg = AiConfig { endpoint: "http://x".into(), model: "m".into(), provider: String::new() };
+        let cfg = AiConfig {
+            endpoint: "http://x".into(),
+            model: "m".into(),
+            provider: String::new(),
+        };
         // la clave build-time existe en el entorno CI; con ella debe construir el proveedor
         match provider_from_config(&cfg) {
             Ok(p) => assert_eq!(p.id(), "openai-compat"),
@@ -403,9 +437,17 @@ mod tests {
 
     #[test]
     fn provider_name_fallback() {
-        let cfg = AiConfig { endpoint: String::new(), model: String::new(), provider: String::new() };
+        let cfg = AiConfig {
+            endpoint: String::new(),
+            model: String::new(),
+            provider: String::new(),
+        };
         assert_eq!(cfg.provider_name(), PROVIDER_OPENAI);
-        let cfg = AiConfig { endpoint: String::new(), model: String::new(), provider: "gemini".into() };
+        let cfg = AiConfig {
+            endpoint: String::new(),
+            model: String::new(),
+            provider: "gemini".into(),
+        };
         assert_eq!(cfg.provider_name(), PROVIDER_GEMINI);
     }
 
@@ -456,7 +498,10 @@ mod tests {
             &headers,
         );
         match rl {
-            AiError::RateLimited { detail, retry_after } => {
+            AiError::RateLimited {
+                detail,
+                retry_after,
+            } => {
                 assert!(detail.contains("FreeUsageLimitError"));
                 assert_eq!(retry_after, None);
             }

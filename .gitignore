@@ -58,3 +58,10 @@ opencode.jsonc
 
 *.bat
 *.png
+# Binarios compilados / payloads MSIX (contienen secretos embebidos al compilar)
+store/msix/pkg/
+store/msix/msix-payload/
+store/msix/msixout/
+*.exe
+*.msix
+*.msi

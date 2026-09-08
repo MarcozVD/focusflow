@@ -102,7 +102,11 @@ pub fn parse_batch_json(v: &Value) -> AiResult<IntentBatch> {
             .get("intents")
             .and_then(|x| x.as_array())
             .ok_or_else(|| AiError::InvalidJson("falta el array 'intents'".into()))?,
-        _ => return Err(AiError::InvalidJson("la respuesta debe ser un objeto o array".into())),
+        _ => {
+            return Err(AiError::InvalidJson(
+                "la respuesta debe ser un objeto o array".into(),
+            ))
+        }
     };
     // tope de tamaño: la IA (o un correo inyectado) no puede generar spam
     // de sugerencias ilimitado
@@ -128,7 +132,10 @@ pub fn parse_batch_json(v: &Value) -> AiResult<IntentBatch> {
     if !errors.is_empty() {
         return Err(AiError::BadResponse(errors.join("; ")));
     }
-    Ok(IntentBatch { intents, source: "ai".into() })
+    Ok(IntentBatch {
+        intents,
+        source: "ai".into(),
+    })
 }
 
 /// Punto de entrada único. `configured` + `provider` = IA; si no, heurística
@@ -139,8 +146,8 @@ pub fn parse_intent(
     configured: bool,
 ) -> AiResult<IntentBatch> {
     if configured {
-        let provider = provider
-            .ok_or_else(|| AiError::NotConfigured("sin proveedor configurado".into()))?;
+        let provider =
+            provider.ok_or_else(|| AiError::NotConfigured("sin proveedor configurado".into()))?;
         let user = format!(
             "Texto del usuario (hoy: {}):\n{text}",
             chrono::Local::now().format("%Y-%m-%d %A")
@@ -149,7 +156,10 @@ pub fn parse_intent(
         return parse_batch_json(&v);
     }
     match super::nl::parse_task_nl(text) {
-        Some(t) => Ok(IntentBatch { intents: vec![from_task(&t)], source: "local".into() }),
+        Some(t) => Ok(IntentBatch {
+            intents: vec![from_task(&t)],
+            source: "local".into(),
+        }),
         None => Err(AiError::NotConfigured(
             "IA no configurada y la heurística local no entendió el texto".into(),
         )),
@@ -224,9 +234,23 @@ mod tests {
         ]});
         let batch = parse_batch_json(&v).expect("válido con campos truncados");
         assert_eq!(batch.intents[0].title.chars().count(), 200, "título ≤ 200");
-        assert_eq!(batch.intents[0].description.chars().count(), 600, "descripción ≤ 600");
+        assert_eq!(
+            batch.intents[0].description.chars().count(),
+            600,
+            "descripción ≤ 600"
+        );
         assert_eq!(batch.intents[0].reason.chars().count(), 200, "reason ≤ 200");
-        assert_eq!(batch.intents[0].preparation.as_ref().unwrap().note.chars().count(), 200, "nota ≤ 200");
+        assert_eq!(
+            batch.intents[0]
+                .preparation
+                .as_ref()
+                .unwrap()
+                .note
+                .chars()
+                .count(),
+            200,
+            "nota ≤ 200"
+        );
     }
 
     #[test]
@@ -246,8 +270,12 @@ mod tests {
 
     #[test]
     fn parse_intent_without_ai_falls_back_to_heuristic() {
-        let batch = parse_intent("mañana a las 6 pm estudiar programación por 2 horas", None, false)
-            .expect("local");
+        let batch = parse_intent(
+            "mañana a las 6 pm estudiar programación por 2 horas",
+            None,
+            false,
+        )
+        .expect("local");
         assert_eq!(batch.source, "local");
         let i = &batch.intents[0];
         assert_eq!(i.intent_type, IntentType::Task);

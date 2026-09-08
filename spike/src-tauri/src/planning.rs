@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::intent::{Duration, Intent, IntentType, Preparation, Priority, TimeWindow};
 use crate::engine::planner::{PlannedItem, Planner};
-use crate::engine::{ConstraintEngine, DAY_MS, local_midnight};
+use crate::engine::{local_midnight, ConstraintEngine, DAY_MS};
 use crate::store::{Db, TaskRow};
 
 /// Sesión propuesta, tal como llega al frontend.
@@ -115,7 +115,9 @@ fn flex_min(db: &Db) -> u32 {
 /// ("organiza mi semana", "planifica mi día", ...).
 fn is_organize_directive(text: &str) -> bool {
     let t = text.to_lowercase();
-    ["organiz", "planific", "estructur", "distribu"].iter().any(|k| t.contains(k))
+    ["organiz", "planific", "estructur", "distribu"]
+        .iter()
+        .any(|k| t.contains(k))
 }
 
 /// ¿La directiva de organizar apunta a la semana actual?
@@ -147,7 +149,9 @@ fn days_until_sunday() -> u32 {
 /// solo entran las tareas con `start_at` dentro de la semana o atrasadas
 /// (anteriores al lunes); las de semanas futuras quedan fuera.
 fn flexible_backlog(db: &Db, week: Option<(i64, i64)>) -> Vec<Intent> {
-    let Ok(tasks) = db.list() else { return Vec::new() };
+    let Ok(tasks) = db.list() else {
+        return Vec::new();
+    };
     let rank = |p: &str| match p {
         "alta" => 0u8,
         "media" => 1,
@@ -174,8 +178,14 @@ fn flexible_backlog(db: &Db, week: Option<(i64, i64)>) -> Vec<Intent> {
                 "media" => Priority::Media,
                 _ => Priority::Baja,
             },
-            window: TimeWindow { start: None, end: None, all_day: false },
-            duration: Some(Duration { minutes: flex_min(db) }),
+            window: TimeWindow {
+                start: None,
+                end: None,
+                all_day: false,
+            },
+            duration: Some(Duration {
+                minutes: flex_min(db),
+            }),
             deadline: None,
             preparation: None,
             recurrence: None,
@@ -196,9 +206,19 @@ pub const DEFAULT_ASSESSMENT_PREP_MIN: u32 = 120;
 /// ¿El título suena a evaluación? (quiz, examen, parcial, …)
 fn is_assessment(title: &str) -> bool {
     let t = title.to_lowercase();
-    ["quiz", "examen", "parcial", "prueba", "test", "cuestionario", "sustentación", "sustentacion", "final"]
-        .iter()
-        .any(|k| t.contains(k))
+    [
+        "quiz",
+        "examen",
+        "parcial",
+        "prueba",
+        "test",
+        "cuestionario",
+        "sustentación",
+        "sustentacion",
+        "final",
+    ]
+    .iter()
+    .any(|k| t.contains(k))
 }
 
 /// Enriquece intents de evaluación que llegan sin preparación ni duración:
@@ -240,19 +260,36 @@ fn day_name(d: &chrono::DateTime<Local>) -> &'static str {
 }
 
 fn fmt_when(start: i64, end: i64) -> String {
-    let s = Local.timestamp_millis_opt(start).earliest().unwrap_or_else(|| Local::now());
-    let e = Local.timestamp_millis_opt(end).earliest().unwrap_or_else(|| Local::now());
+    let s = Local
+        .timestamp_millis_opt(start)
+        .earliest()
+        .unwrap_or_else(|| Local::now());
+    let e = Local
+        .timestamp_millis_opt(end)
+        .earliest()
+        .unwrap_or_else(|| Local::now());
     if s.hour() == 0 && s.minute() == 0 && e.hour() == 0 && e.minute() == 0 {
         let days = (e.date_naive() - s.date_naive()).num_days();
         if days >= 2 {
             // multi-día: "lunes 07/09 – viernes 11/09" (el fin es el día de
             // cierre, fecha límite al final de ese día)
-            format!("{} {} – {} {}", day_name(&s), s.format("%d/%m"), day_name(&e), e.format("%d/%m"))
+            format!(
+                "{} {} – {} {}",
+                day_name(&s),
+                s.format("%d/%m"),
+                day_name(&e),
+                e.format("%d/%m")
+            )
         } else {
             format!("{} {}", day_name(&s), s.format("%d/%m"))
         }
     } else {
-        format!("{} {}–{}", day_name(&s), s.format("%H:%M"), e.format("%H:%M"))
+        format!(
+            "{} {}–{}",
+            day_name(&s),
+            s.format("%H:%M"),
+            e.format("%H:%M")
+        )
     }
 }
 
@@ -264,7 +301,10 @@ fn understanding(intents: &[Intent]) -> Vec<UnderstoodView> {
                 IntentType::Event | IntentType::Task => match (i.window.start, i.window.end) {
                     (Some(s), Some(e)) => fmt_when(s, e),
                     (Some(s), None) => {
-                        let dt = Local.timestamp_millis_opt(s).earliest().unwrap_or_else(Local::now);
+                        let dt = Local
+                            .timestamp_millis_opt(s)
+                            .earliest()
+                            .unwrap_or_else(Local::now);
                         format!("{} {}", day_name(&dt), dt.format("%d/%m %H:%M"))
                     }
                     _ => "sin horario fijo".into(),
@@ -324,7 +364,11 @@ fn fill_fixed_item(i: &Intent, start: i64, end: i64) -> PlannedItem {
         task_min: mins,
         required_min: mins,
         planned_min: mins,
-        sessions: vec![crate::engine::planner::PlanSession { start_ms: start, end_ms: end, is_prep: false }],
+        sessions: vec![crate::engine::planner::PlanSession {
+            start_ms: start,
+            end_ms: end,
+            is_prep: false,
+        }],
         complete: true,
         notes: Vec::new(),
     }
@@ -359,7 +403,11 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
             // registra nada en el calendario.
             if i.window.start.is_some() && i.window.end.is_none() {
                 let s = i.window.start.unwrap();
-                i.window = TimeWindow { start: Some(s), end: Some(s + HOUR), all_day: false };
+                i.window = TimeWindow {
+                    start: Some(s),
+                    end: Some(s + HOUR),
+                    all_day: false,
+                };
             }
             if let (Some(s), Some(e)) = (i.window.start, i.window.end) {
                 if e > s {
@@ -368,27 +416,51 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
                     if e_day > s_day {
                         // inicio
                         i.window = if s > s_day {
-                            TimeWindow { start: Some(s), end: Some(s + 2 * HOUR), all_day: false }
+                            TimeWindow {
+                                start: Some(s),
+                                end: Some(s + 2 * HOUR),
+                                all_day: false,
+                            }
                         } else if s_day <= today {
-                            TimeWindow { start: Some(now), end: Some(now + 2 * HOUR), all_day: false }
+                            TimeWindow {
+                                start: Some(now),
+                                end: Some(now + 2 * HOUR),
+                                all_day: false,
+                            }
                         } else {
-                            TimeWindow { start: Some(s_day), end: Some(s_day + DAY_MS), all_day: true }
+                            TimeWindow {
+                                start: Some(s_day),
+                                end: Some(s_day + DAY_MS),
+                                all_day: true,
+                            }
                         };
                         out.push(i);
                         // cierre
                         let mut c = out.last().unwrap().clone();
                         c.title = format!("{} (entrega)", c.title);
                         c.window = if e > e_day {
-                            TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false }
+                            TimeWindow {
+                                start: Some(e),
+                                end: Some(e + 2 * HOUR),
+                                all_day: false,
+                            }
                         } else {
-                            TimeWindow { start: Some(e_day), end: Some(e_day + DAY_MS), all_day: true }
+                            TimeWindow {
+                                start: Some(e_day),
+                                end: Some(e_day + DAY_MS),
+                                all_day: true,
+                            }
                         };
                         out.push(c);
                         continue;
                     }
                     if !i.window.all_day && s == s_day {
                         // "00:00–16:00" del mismo día: es un cierre, no un bloque
-                        i.window = TimeWindow { start: Some(e), end: Some(e + 2 * HOUR), all_day: false };
+                        i.window = TimeWindow {
+                            start: Some(e),
+                            end: Some(e + 2 * HOUR),
+                            all_day: false,
+                        };
                     }
                 }
             }
@@ -468,9 +540,16 @@ pub fn plan_from_text(
     // horizonte por defecto.
     let week_mode = is_week_directive(text);
     let planner = if week_mode {
-        Planner { engine: engine.clone(), horizon_days: days_until_sunday(), ..Planner::default() }
+        Planner {
+            engine: engine.clone(),
+            horizon_days: days_until_sunday(),
+            ..Planner::default()
+        }
     } else {
-        Planner { engine: engine.clone(), ..Planner::default() }
+        Planner {
+            engine: engine.clone(),
+            ..Planner::default()
+        }
     };
     let mut all = intents.to_vec();
     let mut report = planner.plan(intents);
@@ -480,7 +559,14 @@ pub fn plan_from_text(
     if report.items.is_empty() && is_organize_directive(text) {
         // modo semana: solo el backlog de esta semana (o atrasado); las
         // flexibles de semanas futuras no entran en el plan
-        let backlog = flexible_backlog(db, if week_mode { Some(current_week_bounds()) } else { None });
+        let backlog = flexible_backlog(
+            db,
+            if week_mode {
+                Some(current_week_bounds())
+            } else {
+                None
+            },
+        );
         if !backlog.is_empty() {
             let extra = planner.plan(&backlog);
             report.items.extend(extra.items);
@@ -497,7 +583,9 @@ pub fn plan_from_text(
         if i.duration.is_some() || i.preparation.is_some() {
             continue;
         }
-        let (Some(s), Some(en)) = (i.window.start, i.window.end) else { continue };
+        let (Some(s), Some(en)) = (i.window.start, i.window.end) else {
+            continue;
+        };
         if i.window.all_day || en <= s || en - s > DAY_MS {
             continue;
         }
@@ -513,7 +601,9 @@ pub fn plan_from_text(
         .map(|it| {
             let intent = intent_for(&all, &it.title);
             PlanItemView {
-                category_id: intent.map(|i| i.category_id.clone()).unwrap_or_else(|| "otr".into()),
+                category_id: intent
+                    .map(|i| i.category_id.clone())
+                    .unwrap_or_else(|| "otr".into()),
                 title: it.title,
                 intent_type: it.intent_type,
                 priority: it.priority,
@@ -527,7 +617,11 @@ pub fn plan_from_text(
                 sessions: it
                     .sessions
                     .into_iter()
-                    .map(|s| SessionView { start_ms: s.start_ms, end_ms: s.end_ms, is_prep: s.is_prep })
+                    .map(|s| SessionView {
+                        start_ms: s.start_ms,
+                        end_ms: s.end_ms,
+                        is_prep: s.is_prep,
+                    })
                     .collect(),
             }
         })
@@ -543,9 +637,19 @@ pub fn plan_from_text(
         created_at: 0,
     };
     let payload = serde_json::to_string(&view).map_err(|e| e.to_string())?;
-    let id = db.insert_plan_proposal(text, &payload, source).map_err(|e| e.to_string())?;
-    let created = db.get_plan_proposal(id).map_err(|e| e.to_string())?.map(|p| p.created_at).unwrap_or(0);
-    Ok(PlanProposalView { id, created_at: created, ..view })
+    let id = db
+        .insert_plan_proposal(text, &payload, source)
+        .map_err(|e| e.to_string())?;
+    let created = db
+        .get_plan_proposal(id)
+        .map_err(|e| e.to_string())?
+        .map(|p| p.created_at)
+        .unwrap_or(0);
+    Ok(PlanProposalView {
+        id,
+        created_at: created,
+        ..view
+    })
 }
 
 /// Propuesta guardada, reconstruida para el frontend.
@@ -553,7 +657,8 @@ pub fn get_plan(db: &Db, id: i64) -> Result<Option<PlanProposalView>, String> {
     let Some(row) = db.get_plan_proposal(id).map_err(|e| e.to_string())? else {
         return Ok(None);
     };
-    let mut view: PlanProposalView = serde_json::from_str(&row.payload).map_err(|e| e.to_string())?;
+    let mut view: PlanProposalView =
+        serde_json::from_str(&row.payload).map_err(|e| e.to_string())?;
     view.id = row.id;
     view.text = row.text;
     view.status = row.status;
@@ -564,7 +669,10 @@ pub fn get_plan(db: &Db, id: i64) -> Result<Option<PlanProposalView>, String> {
 
 /// Sesiones efectivas a crear: las editadas por ítem si las hay, si no las
 /// de la propuesta original.
-fn effective_sessions(plan: &PlanProposalView, edit: &EditedPlan) -> Result<Vec<(usize, SessionView)>, String> {
+fn effective_sessions(
+    plan: &PlanProposalView,
+    edit: &EditedPlan,
+) -> Result<Vec<(usize, SessionView)>, String> {
     let mut out: Vec<(usize, SessionView)> = Vec::new();
     for (idx, item) in plan.items.iter().enumerate() {
         let edited = edit.items.get(idx);
@@ -574,12 +682,22 @@ fn effective_sessions(plan: &PlanProposalView, edit: &EditedPlan) -> Result<Vec<
             }
             for s in ed {
                 if s.end_ms <= s.start_ms {
-                    return Err(format!("'{}': el bloque debe terminar después de empezar", item.title));
+                    return Err(format!(
+                        "'{}': el bloque debe terminar después de empezar",
+                        item.title
+                    ));
                 }
                 if (s.end_ms - s.start_ms) < 15 * 60_000 {
                     return Err(format!("'{}': bloque de menos de 15 minutos", item.title));
                 }
-                out.push((idx, SessionView { start_ms: s.start_ms, end_ms: s.end_ms, is_prep: false }));
+                out.push((
+                    idx,
+                    SessionView {
+                        start_ms: s.start_ms,
+                        end_ms: s.end_ms,
+                        is_prep: false,
+                    },
+                ));
             }
         } else {
             out.extend(item.sessions.iter().map(|s| (idx, s.clone())));
@@ -646,8 +764,10 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         .filter(|(idx, _)| matches!(edit.items.get(*idx), Some(ed) if !ed.is_empty()))
         .map(|(idx, _)| idx)
         .collect();
-    let edited_event_titles: Vec<String> =
-        edited_event_idx.iter().map(|idx| plan.items[*idx].title.clone()).collect();
+    let edited_event_titles: Vec<String> = edited_event_idx
+        .iter()
+        .map(|idx| plan.items[*idx].title.clone())
+        .collect();
     let mut event_spans: Vec<(i64, i64, String, bool)> = Vec::new();
     for (idx, s) in &sessions {
         if edited_event_idx.contains(idx) {
@@ -700,12 +820,27 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     // los conozca (los excluimos: las sesiones del plan ya los rodean)
     let mut event_ids: Vec<i64> = Vec::new();
     for (start, end, title, _) in &event_spans {
-        let u = plan.understanding.iter().find(|u| u.title == *title).expect("evento");
+        let u = plan
+            .understanding
+            .iter()
+            .find(|u| u.title == *title)
+            .expect("evento");
         let t = db
-            .create(title, &u.category_id, priority_str(u.priority), *start, *end, u.all_day)
+            .create(
+                title,
+                &u.category_id,
+                priority_str(u.priority),
+                *start,
+                *end,
+                u.all_day,
+            )
             .map_err(|e| e.to_string())?;
-        db.set_task_metadata(t.id, &plan_link_meta(id, "event")).map_err(|e| e.to_string())?;
-        let t = db.get_task(t.id).map_err(|e| e.to_string())?.ok_or("tarea no creada")?;
+        db.set_task_metadata(t.id, &plan_link_meta(id, "event"))
+            .map_err(|e| e.to_string())?;
+        let t = db
+            .get_task(t.id)
+            .map_err(|e| e.to_string())?
+            .ok_or("tarea no creada")?;
         event_ids.push(t.id);
         created.push(t);
     }
@@ -715,7 +850,10 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     let result = (|| -> Result<(), String> {
         for (item_idx, s) in &sessions {
             let item = &plan.items[*item_idx];
-            if let Some((_, other)) = db.find_overlap_excluding(&event_ids, s.start_ms, s.end_ms).map_err(|e| e.to_string())? {
+            if let Some((_, other)) = db
+                .find_overlap_excluding(&event_ids, s.start_ms, s.end_ms)
+                .map_err(|e| e.to_string())?
+            {
                 return Err(format!(
                     "'{}' ({}) se solapa con '{}'. Edita los bloques o cancela.",
                     item.title,
@@ -737,16 +875,30 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
                 continue;
             }
             let t = db
-                .create(&item.title, &item.category_id, priority_str(item.priority), s.start_ms, s.end_ms, false)
+                .create(
+                    &item.title,
+                    &item.category_id,
+                    priority_str(item.priority),
+                    s.start_ms,
+                    s.end_ms,
+                    false,
+                )
                 .map_err(|e| e.to_string())?;
-            db.set_task_metadata(t.id, &plan_link_meta(id, "session")).map_err(|e| e.to_string())?;
+            db.set_task_metadata(t.id, &plan_link_meta(id, "session"))
+                .map_err(|e| e.to_string())?;
             let u = plan.understanding.iter().find(|u| u.title == item.title);
             if s.is_prep {
-                if let Some(min) = u.and_then(|u| u.reminders_min_before.first()).map(|m| *m as i64) {
+                if let Some(min) = u
+                    .and_then(|u| u.reminders_min_before.first())
+                    .map(|m| *m as i64)
+                {
                     db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
                 }
             }
-            let t = db.get_task(t.id).map_err(|e| e.to_string())?.ok_or("tarea no creada")?;
+            let t = db
+                .get_task(t.id)
+                .map_err(|e| e.to_string())?
+                .ok_or("tarea no creada")?;
             created.push(t);
         }
         Ok(())
@@ -760,7 +912,8 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         return Err(e);
     }
 
-    db.set_plan_proposal_status(id, "accepted").map_err(|e| e.to_string())?;
+    db.set_plan_proposal_status(id, "accepted")
+        .map_err(|e| e.to_string())?;
     Ok(created)
 }
 
@@ -776,7 +929,8 @@ pub fn reject_plan(db: &Db, id: i64) -> Result<(), String> {
     if plan.status != "pending" {
         return Err(format!("propuesta ya procesada (estado: {})", plan.status));
     }
-    db.set_plan_proposal_status(id, "rejected").map_err(|e| e.to_string())
+    db.set_plan_proposal_status(id, "rejected")
+        .map_err(|e| e.to_string())
 }
 
 /// Propuesta pendiente sin interpretar (borrador de texto) — no se usa.
@@ -803,8 +957,16 @@ mod tests {
             description: String::new(),
             category_id: "uni".into(),
             priority: Priority::Media,
-            window: TimeWindow { start: None, end: None, all_day: false },
-            duration: if minutes > 0 { Some(Duration { minutes }) } else { None },
+            window: TimeWindow {
+                start: None,
+                end: None,
+                all_day: false,
+            },
+            duration: if minutes > 0 {
+                Some(Duration { minutes })
+            } else {
+                None
+            },
             deadline: None,
             preparation: None,
             recurrence: None,
@@ -818,9 +980,16 @@ mod tests {
 
     fn exam_intent(title: &str, deadline: i64) -> Intent {
         let mut i = intent(title, IntentType::Event, 0);
-        i.preparation = Some(Preparation { minutes: 240, note: String::new() });
+        i.preparation = Some(Preparation {
+            minutes: 240,
+            note: String::new(),
+        });
         i.deadline = Some(deadline);
-        i.window = TimeWindow { start: Some(deadline), end: Some(deadline + 2 * 3_600_000), all_day: false };
+        i.window = TimeWindow {
+            start: Some(deadline),
+            end: Some(deadline + 2 * 3_600_000),
+            all_day: false,
+        };
         i
     }
 
@@ -834,12 +1003,21 @@ mod tests {
     fn pipeline_produces_pending_proposal() {
         let d = db();
         let intents = vec![exam_intent("Examen de cálculo", day(6) + 12 * 3_600_000)];
-        let view = plan_from_text(&d, "tengo examen el viernes y necesito 4 horas", &intents, "ai").unwrap();
+        let view = plan_from_text(
+            &d,
+            "tengo examen el viernes y necesito 4 horas",
+            &intents,
+            "ai",
+        )
+        .unwrap();
         assert_eq!(view.status, "pending");
         assert_eq!(view.understanding.len(), 1);
         assert_eq!(view.understanding[0].prep_min, 240);
         assert!(!view.items.is_empty(), "planifica la preparación");
-        assert!(view.items[0].sessions.len() >= 2, "se divide en varias sesiones");
+        assert!(
+            view.items[0].sessions.len() >= 2,
+            "se divide en varias sesiones"
+        );
         let row = d.get_plan_proposal(view.id).unwrap().unwrap();
         assert_eq!(row.status, "pending");
         assert!(row.payload.contains("Examen de cálculo"));
@@ -850,13 +1028,24 @@ mod tests {
         let d = db();
         // lunes completo ocupado con una tarea real del calendario
         let start = day(1);
-        d.create("Reunión", "trab", "alta", start, start + 9 * 3_600_000, false).unwrap();
+        d.create(
+            "Reunión",
+            "trab",
+            "alta",
+            start,
+            start + 9 * 3_600_000,
+            false,
+        )
+        .unwrap();
         let intents = vec![intent("Escribir informe", IntentType::Task, 120)];
         let view = plan_from_text(&d, "escribir informe 2 horas", &intents, "local").unwrap();
         let item = &view.items[0];
         assert!(item.complete, "120 min caben fuera del lunes");
         for s in &item.sessions {
-            assert!(s.end_ms <= start || s.start_ms >= start + 9 * 3_600_000, "nunca choca con la reunión");
+            assert!(
+                s.end_ms <= start || s.start_ms >= start + 9 * 3_600_000,
+                "nunca choca con la reunión"
+            );
         }
     }
 
@@ -867,21 +1056,32 @@ mod tests {
         // marcadores all-day NO bloquean horas: todos los días quedan
         // libres para añadir tareas independientes; solo se registra la
         // fecha límite del día de fin (22:00).
-        d.create("Proyecto", "trab", "alta", day(1), day(4), true).unwrap();
+        d.create("Proyecto", "trab", "alta", day(1), day(4), true)
+            .unwrap();
         let e = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
         // ningún día bloqueado: 06:00–22:00 = 16h de trabajo
         assert_eq!(e.available_minutes(day(1), day(1) + 24 * hour), 16 * 60);
-        assert_eq!(e.available_minutes(day(1) + 9 * hour, day(1) + 10 * hour), 60);
+        assert_eq!(
+            e.available_minutes(day(1) + 9 * hour, day(1) + 10 * hour),
+            60
+        );
         assert_eq!(e.available_minutes(day(2), day(2) + 24 * hour), 16 * 60);
-        assert_eq!(e.available_minutes(day(3) + 9 * hour, day(3) + 10 * hour), 60);
+        assert_eq!(
+            e.available_minutes(day(3) + 9 * hour, day(3) + 10 * hour),
+            60
+        );
         assert_eq!(e.available_minutes(day(4), day(4) + 24 * hour), 16 * 60);
         let dl = e
             .deadlines
             .iter()
             .find(|x| x.label == "Proyecto")
             .expect("deadline del día de fin");
-        assert_eq!(dl.at_ms, day(4) + 22 * hour, "fecha límite al final del día (22:00)");
+        assert_eq!(
+            dl.at_ms,
+            day(4) + 22 * hour,
+            "fecha límite al final del día (22:00)"
+        );
     }
 
     #[test]
@@ -892,33 +1092,72 @@ mod tests {
         let d = clean_db();
         let hour = crate::engine::HOUR_MS;
         // algo a mitad del rango: no debe chocar con nada
-        d.create("Otra cosa", "otr", "media", day(2) + 10 * hour, day(2) + 11 * hour, false).unwrap();
+        d.create(
+            "Otra cosa",
+            "otr",
+            "media",
+            day(2) + 10 * hour,
+            day(2) + 11 * hour,
+            false,
+        )
+        .unwrap();
         let before = chrono::Local::now().timestamp_millis();
         let mut i = intent("Proyecto de programación", IntentType::Event, 0);
-        i.window = TimeWindow { start: Some(day(0)), end: Some(day(5) + 16 * hour), all_day: false };
-        let view = plan_from_text(&d, "proyecto, inicia hoy y finaliza el lunes a las 4pm", &[i], "ai").unwrap();
+        i.window = TimeWindow {
+            start: Some(day(0)),
+            end: Some(day(5) + 16 * hour),
+            all_day: false,
+        };
+        let view = plan_from_text(
+            &d,
+            "proyecto, inicia hoy y finaliza el lunes a las 4pm",
+            &[i],
+            "ai",
+        )
+        .unwrap();
         let inicio = view
             .understanding
             .iter()
             .find(|u| u.title == "Proyecto de programación")
             .expect("bloque de inicio");
-        assert!(!inicio.all_day, "el inicio es un bloque con hora, no todo el día");
+        assert!(
+            !inicio.all_day,
+            "el inicio es un bloque con hora, no todo el día"
+        );
         let s0 = inicio.window_start.unwrap();
-        assert!(s0 >= before && s0 <= before + 60_000, "inicia ahora: {s0} vs {before}");
+        assert!(
+            s0 >= before && s0 <= before + 60_000,
+            "inicia ahora: {s0} vs {before}"
+        );
         assert_eq!(inicio.window_end, Some(s0 + 2 * hour), "bloque de 2 h");
         let cierre = view
             .understanding
             .iter()
             .find(|u| u.title == "Proyecto de programación (entrega)")
             .expect("bloque de cierre");
-        assert_eq!(cierre.window_start, Some(day(5) + 16 * hour), "el cierre empieza a la hora dicha");
-        assert_eq!(cierre.window_end, Some(day(5) + 18 * hour), "y dura 2 h (16:00–18:00)");
+        assert_eq!(
+            cierre.window_start,
+            Some(day(5) + 16 * hour),
+            "el cierre empieza a la hora dicha"
+        );
+        assert_eq!(
+            cierre.window_end,
+            Some(day(5) + 18 * hour),
+            "y dura 2 h (16:00–18:00)"
+        );
         // aceptar: solo 2 eventos; nada en los días intermedios
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
         assert_eq!(created.len(), 2, "solo inicio + cierre");
         assert!(created.iter().all(|t| !t.all_day));
-        let cierres: Vec<_> = created.iter().filter(|t| t.title == "Proyecto de programación (entrega)").collect();
-        assert_eq!(cierres.len(), 1, "el cierre se crea una sola vez (evento, no sesión duplicada)");
+        let cierres: Vec<_> = created
+            .iter()
+            .filter(|t| t.title == "Proyecto de programación (entrega)")
+            .collect();
+        assert_eq!(
+            cierres.len(),
+            1,
+            "el cierre se crea una sola vez (evento, no sesión duplicada)"
+        );
     }
 
     #[test]
@@ -928,7 +1167,11 @@ mod tests {
         let d = clean_db();
         let hour = crate::engine::HOUR_MS;
         let mut i = intent("Entrega", IntentType::Event, 0);
-        i.window = TimeWindow { start: Some(day(3)), end: Some(day(3) + 16 * hour), all_day: false };
+        i.window = TimeWindow {
+            start: Some(day(3)),
+            end: Some(day(3) + 16 * hour),
+            all_day: false,
+        };
         let view = plan_from_text(&d, "entrega el lunes hasta las 4pm", &[i], "ai").unwrap();
         let u = &view.understanding[0];
         assert_eq!(u.window_start, Some(day(3) + 16 * hour));
@@ -936,7 +1179,11 @@ mod tests {
         assert!(!u.all_day);
         assert_eq!(view.items.len(), 1, "el plan propone el bloque de cierre");
         let created = accept_plan(&d, view.id, &EditedPlan::default()).unwrap();
-        assert_eq!(created.len(), 1, "solo el evento; la sesión del ítem no se duplica");
+        assert_eq!(
+            created.len(),
+            1,
+            "solo el evento; la sesión del ítem no se duplica"
+        );
         assert_eq!(created[0].start_at, day(3) + 16 * hour);
     }
 
@@ -945,12 +1192,33 @@ mod tests {
         // el banner no valida solapes intermedios, pero el bloque de cierre SÍ
         let d = clean_db();
         let hour = crate::engine::HOUR_MS;
-        d.create("Primer encuentro virtual sincrónico", "uni", "alta", day(5) + 16 * hour, day(5) + 17 * hour, false).unwrap();
+        d.create(
+            "Primer encuentro virtual sincrónico",
+            "uni",
+            "alta",
+            day(5) + 16 * hour,
+            day(5) + 17 * hour,
+            false,
+        )
+        .unwrap();
         let mut i = intent("Proyecto de programación", IntentType::Event, 0);
-        i.window = TimeWindow { start: Some(day(0)), end: Some(day(5) + 16 * hour), all_day: false };
-        let view = plan_from_text(&d, "proyecto, inicia hoy y finaliza el viernes a las 4pm", &[i], "ai").unwrap();
+        i.window = TimeWindow {
+            start: Some(day(0)),
+            end: Some(day(5) + 16 * hour),
+            all_day: false,
+        };
+        let view = plan_from_text(
+            &d,
+            "proyecto, inicia hoy y finaliza el viernes a las 4pm",
+            &[i],
+            "ai",
+        )
+        .unwrap();
         let err = accept_plan(&d, view.id, &EditedPlan::default()).unwrap_err();
-        assert!(err.contains("se solapa"), "el cierre 16:00–18:00 choca con el encuentro: {err}");
+        assert!(
+            err.contains("se solapa"),
+            "el cierre 16:00–18:00 choca con el encuentro: {err}"
+        );
         assert!(err.contains("(entrega)"));
     }
 
@@ -961,7 +1229,11 @@ mod tests {
         let d = clean_db();
         let mut i = intent("Viaje", IntentType::Task, 0);
         let s = day(3) + 7 * 3_600_000;
-        i.window = TimeWindow { start: Some(s), end: Some(s + 3_600_000), all_day: false };
+        i.window = TimeWindow {
+            start: Some(s),
+            end: Some(s + 3_600_000),
+            all_day: false,
+        };
         let view = plan_from_text(&d, "domingo viaje 7am", &[i], "local").unwrap();
         assert_eq!(view.items.len(), 1);
         let it = &view.items[0];
@@ -980,7 +1252,11 @@ mod tests {
         // (jueves, todo el día). Los días intermedios quedan libres.
         let d = clean_db();
         let mut i = intent("Proyecto", IntentType::Event, 0);
-        i.window = TimeWindow { start: Some(day(1)), end: Some(day(4)), all_day: true };
+        i.window = TimeWindow {
+            start: Some(day(1)),
+            end: Some(day(4)),
+            all_day: true,
+        };
         let view = plan_from_text(&d, "proyecto del lunes al jueves", &[i], "local").unwrap();
         assert!(view.items.is_empty(), "sin relleno de los días intermedios");
         let u = &view.understanding;
@@ -999,9 +1275,16 @@ mod tests {
     fn single_day_allday_without_duration_no_sessions() {
         let d = clean_db();
         let mut i = intent("Clase", IntentType::Event, 0);
-        i.window = TimeWindow { start: Some(day(1)), end: Some(day(2)), all_day: true };
+        i.window = TimeWindow {
+            start: Some(day(1)),
+            end: Some(day(2)),
+            all_day: true,
+        };
         let view = plan_from_text(&d, "clase el lunes", &[i], "local").unwrap();
-        assert!(view.items.is_empty(), "un solo día no se llena con sesiones");
+        assert!(
+            view.items.is_empty(),
+            "un solo día no se llena con sesiones"
+        );
     }
 
     #[test]
@@ -1011,48 +1294,108 @@ mod tests {
         // se planifica DENTRO del rango, en los días libres.
         let d = clean_db();
         let mut ev = intent("Vacaciones", IntentType::Event, 0);
-        ev.window = TimeWindow { start: Some(day(1)), end: Some(day(4)), all_day: true };
+        ev.window = TimeWindow {
+            start: Some(day(1)),
+            end: Some(day(4)),
+            all_day: true,
+        };
         let mut inf = intent("Informe", IntentType::Task, 120);
         inf.priority = Priority::Alta;
         inf.deadline = Some(day(3) + 12 * 3_600_000); // miércoles 12:00
         let dline = inf.deadline;
-        let view = plan_from_text(&d, "vacaciones e informe del miércoles", &[ev, inf], "local").unwrap();
-        let informe = view.items.iter().find(|i| i.title == "Informe").expect("informe planificado");
-        assert!(informe.complete, "el informe se agenda: {:?}", informe.notes);
+        let view = plan_from_text(
+            &d,
+            "vacaciones e informe del miércoles",
+            &[ev, inf],
+            "local",
+        )
+        .unwrap();
+        let informe = view
+            .items
+            .iter()
+            .find(|i| i.title == "Informe")
+            .expect("informe planificado");
+        assert!(
+            informe.complete,
+            "el informe se agenda: {:?}",
+            informe.notes
+        );
         let d1 = Local::now().date_naive() + chrono::Duration::days(1);
         for s in &informe.sessions {
             let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
-            assert_ne!(st.date_naive(), d1, "nunca dentro del día 1 (bloqueado por el evento): {s:?}");
-            assert!(s.end_ms <= dline.unwrap(), "respeta el vencimiento del miércoles: {s:?}");
+            assert_ne!(
+                st.date_naive(),
+                d1,
+                "nunca dentro del día 1 (bloqueado por el evento): {s:?}"
+            );
+            assert!(
+                s.end_ms <= dline.unwrap(),
+                "respeta el vencimiento del miércoles: {s:?}"
+            );
         }
         // el evento multi-día NO genera sesiones de relleno: los días
         // intermedios quedan libres para otras tareas
-        assert!(view.items.iter().all(|i| i.title != "Vacaciones"), "sin relleno del rango");
+        assert!(
+            view.items.iter().all(|i| i.title != "Vacaciones"),
+            "sin relleno del rango"
+        );
     }
 
     #[test]
     fn multiday_allday_with_close_time_blocks_two_hours_before() {
         let d = clean_db();
         // cierra el jueves a las 22:00 → solo deadline, sin bloqueo
-        d.create("Proyecto", "trab", "alta", day(1), day(4) + 22 * 3_600_000, true).unwrap();
+        d.create(
+            "Proyecto",
+            "trab",
+            "alta",
+            day(1),
+            day(4) + 22 * 3_600_000,
+            true,
+        )
+        .unwrap();
         let e = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
-        assert_eq!(e.available_minutes(day(4) + 20 * hour, day(4) + 22 * hour), 120, "sin bloqueo: 2 h libres");
-        assert_eq!(e.available_minutes(day(4) + 14 * hour, day(4) + 15 * hour), 60, "resto del día libre");
-        let dl = e.deadlines.iter().find(|x| x.label == "Proyecto").expect("deadline = hora de cierre");
+        assert_eq!(
+            e.available_minutes(day(4) + 20 * hour, day(4) + 22 * hour),
+            120,
+            "sin bloqueo: 2 h libres"
+        );
+        assert_eq!(
+            e.available_minutes(day(4) + 14 * hour, day(4) + 15 * hour),
+            60,
+            "resto del día libre"
+        );
+        let dl = e
+            .deadlines
+            .iter()
+            .find(|x| x.label == "Proyecto")
+            .expect("deadline = hora de cierre");
         assert_eq!(dl.at_ms, day(4) + 22 * hour);
     }
 
     #[test]
     fn single_day_allday_is_marker_free() {
         let d = clean_db();
-        d.create("Examen", "uni", "alta", day(2), day(3), true).unwrap();
+        d.create("Examen", "uni", "alta", day(2), day(3), true)
+            .unwrap();
         let engine = engine_with_calendar(&d);
         let hour = crate::engine::HOUR_MS;
         // all-day de un solo día es marcador visual: no bloquea horas
-        assert_eq!(engine.available_minutes(day(2), day(2) + 24 * hour), 16 * 60, "día libre (06:00–22:00)");
-        assert_eq!(engine.available_minutes(day(1) + 12 * hour, day(2)), 10 * 60, "día anterior libre (12:00–22:00)");
-        assert!(engine.deadlines.is_empty(), "todo el día simple no crea fecha límite");
+        assert_eq!(
+            engine.available_minutes(day(2), day(2) + 24 * hour),
+            16 * 60,
+            "día libre (06:00–22:00)"
+        );
+        assert_eq!(
+            engine.available_minutes(day(1) + 12 * hour, day(2)),
+            10 * 60,
+            "día anterior libre (12:00–22:00)"
+        );
+        assert!(
+            engine.deadlines.is_empty(),
+            "todo el día simple no crea fecha límite"
+        );
     }
 
     #[test]
@@ -1068,12 +1411,23 @@ mod tests {
         assert_eq!(row.status, "accepted");
         // evento fijo (el examen) + sesiones de prep
         // evento fijo (el examen) + sesiones de prep
-        eprintln!("DBG tasks: {:?}", tasks.iter().map(|t| (&t.title, t.start_at, &t.metadata)).collect::<Vec<_>>());
-        let ev = tasks.iter().find(|t| t.metadata.contains("plan_kind")).unwrap();
+        eprintln!(
+            "DBG tasks: {:?}",
+            tasks
+                .iter()
+                .map(|t| (&t.title, t.start_at, &t.metadata))
+                .collect::<Vec<_>>()
+        );
+        let ev = tasks
+            .iter()
+            .find(|t| t.metadata.contains("plan_kind"))
+            .unwrap();
         assert_eq!(ev.start_at, view.understanding[0].window_start.unwrap());
         // todas las tareas enlazadas a la propuesta
         for t in &tasks {
-            assert!(t.metadata.contains(&format!(r#""plan_proposal_id":{}"#, view.id)));
+            assert!(t
+                .metadata
+                .contains(&format!(r#""plan_proposal_id":{}"#, view.id)));
         }
     }
 
@@ -1108,7 +1462,10 @@ mod tests {
         let view = plan_from_text(&d, "estudiar 2 horas", &intents, "local").unwrap();
         let slot = day(2) + 20 * 3_600_000; // 20:00 del día 2
         let edit = EditedPlan {
-            items: vec![vec![EditedSession { start_ms: slot, end_ms: slot + 120 * MIN_MS }]],
+            items: vec![vec![EditedSession {
+                start_ms: slot,
+                end_ms: slot + 120 * MIN_MS,
+            }]],
         };
         let tasks = accept_plan(&d, view.id, &edit).unwrap();
         assert_eq!(tasks.len(), 1, "una sola sesión editada");
@@ -1124,9 +1481,13 @@ mod tests {
         let intents = vec![intent("Estudiar", IntentType::Task, 60)];
         let view = plan_from_text(&d, "estudiar", &intents, "local").unwrap();
         let slot = day(1) + 10 * 3_600_000;
-        d.create("Clase", "uni", "alta", slot, slot + 3_600_000, false).unwrap();
+        d.create("Clase", "uni", "alta", slot, slot + 3_600_000, false)
+            .unwrap();
         let edit = EditedPlan {
-            items: vec![vec![EditedSession { start_ms: slot, end_ms: slot + 3_600_000 }]],
+            items: vec![vec![EditedSession {
+                start_ms: slot,
+                end_ms: slot + 3_600_000,
+            }]],
         };
         let err = accept_plan(&d, view.id, &edit).unwrap_err();
         assert!(err.contains("se solapa"), "{err}");
@@ -1142,8 +1503,14 @@ mod tests {
         let a = day(2) + 10 * 3_600_000;
         let edit = EditedPlan {
             items: vec![vec![
-                EditedSession { start_ms: a, end_ms: a + 3_600_000 },
-                EditedSession { start_ms: a + 1_800_000, end_ms: a + 3_600_000 },
+                EditedSession {
+                    start_ms: a,
+                    end_ms: a + 3_600_000,
+                },
+                EditedSession {
+                    start_ms: a + 1_800_000,
+                    end_ms: a + 3_600_000,
+                },
             ]],
         };
         let err = accept_plan(&d, view.id, &edit).unwrap_err();
@@ -1158,11 +1525,16 @@ mod tests {
         let intents = vec![intent("Estudiar", IntentType::Task, 60)];
         let view = plan_from_text(&d, "estudiar", &intents, "local").unwrap();
         let slot = day(1) + 10 * 3_600_000;
-        let clash = d.create("Reunión", "trab", "alta", slot, slot + 3_600_000, false).unwrap();
+        let clash = d
+            .create("Reunión", "trab", "alta", slot, slot + 3_600_000, false)
+            .unwrap();
         // la reunión se borra → el hueco queda libre
         d.delete(clash.id).unwrap();
         let edit = EditedPlan {
-            items: vec![vec![EditedSession { start_ms: slot, end_ms: slot + 3_600_000 }]],
+            items: vec![vec![EditedSession {
+                start_ms: slot,
+                end_ms: slot + 3_600_000,
+            }]],
         };
         let tasks = accept_plan(&d, view.id, &edit).unwrap();
         assert_eq!(tasks.len(), 1, "se acepta con el hueco liberado");
@@ -1177,12 +1549,26 @@ mod tests {
         let d = clean_db();
         // flexibles = sin horario fijo (end_at <= start_at); fechas dentro de
         // la semana actual (hoy / atrasada) para el filtro de semana
-        d.create("Pagar internet", "otr", "media", day(0), day(0), false).unwrap();
-        d.create("Estudiar cálculo", "uni", "alta", day(-1), day(-1), false).unwrap();
+        d.create("Pagar internet", "otr", "media", day(0), day(0), false)
+            .unwrap();
+        d.create("Estudiar cálculo", "uni", "alta", day(-1), day(-1), false)
+            .unwrap();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
-        assert_eq!(view.items.len(), 2, "planifica el backlog: {:?}", view.items.iter().map(|i| &i.title).collect::<Vec<_>>());
-        assert_eq!(view.items[0].title, "Estudiar cálculo", "prioridad Alta primero");
-        assert_eq!(view.understanding.len(), 2, "el backlog aparece en 'Entendido'");
+        assert_eq!(
+            view.items.len(),
+            2,
+            "planifica el backlog: {:?}",
+            view.items.iter().map(|i| &i.title).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            view.items[0].title, "Estudiar cálculo",
+            "prioridad Alta primero"
+        );
+        assert_eq!(
+            view.understanding.len(),
+            2,
+            "el backlog aparece en 'Entendido'"
+        );
         for it in &view.items {
             assert!(it.complete);
             assert_eq!(it.task_min, DEFAULT_FLEX_MIN, "duración por defecto 60");
@@ -1196,12 +1582,22 @@ mod tests {
     fn organize_week_respects_fixed_commitments() {
         let d = clean_db();
         // compromiso fijo 10:00-12:00 bloquea; el flexible se planifica fuera
-        d.create("Clase", "uni", "alta", day(1) + 10 * 3_600_000, day(1) + 12 * 3_600_000, false).unwrap();
-        d.create("Estudiar", "uni", "media", day(1), day(1), false).unwrap();
+        d.create(
+            "Clase",
+            "uni",
+            "alta",
+            day(1) + 10 * 3_600_000,
+            day(1) + 12 * 3_600_000,
+            false,
+        )
+        .unwrap();
+        d.create("Estudiar", "uni", "media", day(1), day(1), false)
+            .unwrap();
         let view = plan_from_text(&d, "organiza mi día", &[], "local").unwrap();
         assert_eq!(view.items.len(), 1);
         for s in &view.items[0].sessions {
-            let in_clase = s.start_ms < day(1) + 12 * 3_600_000 && s.end_ms > day(1) + 10 * 3_600_000;
+            let in_clase =
+                s.start_ms < day(1) + 12 * 3_600_000 && s.end_ms > day(1) + 10 * 3_600_000;
             assert!(!in_clase, "sesión solapa la clase fija");
         }
     }
@@ -1210,7 +1606,10 @@ mod tests {
     fn organize_week_without_flexible_keeps_empty() {
         let d = clean_db();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
-        assert!(view.items.is_empty(), "sin backlog no hay nada que planificar");
+        assert!(
+            view.items.is_empty(),
+            "sin backlog no hay nada que planificar"
+        );
         assert!(view.understanding.is_empty());
     }
 
@@ -1218,7 +1617,8 @@ mod tests {
     fn organize_week_uses_configured_duration() {
         let d = clean_db();
         d.settings_set("plan.default_task_min", "90").unwrap();
-        d.create("Escribir informe", "trab", "media", day(0), day(0), false).unwrap();
+        d.create("Escribir informe", "trab", "media", day(0), day(0), false)
+            .unwrap();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
         assert_eq!(view.items.len(), 1);
         let it = &view.items[0];
@@ -1232,10 +1632,15 @@ mod tests {
     fn organize_week_caps_backlog_at_max() {
         let d = clean_db();
         for i in 0..15 {
-            d.create(&format!("Tarea {i}"), "otr", "media", day(0), day(0), false).unwrap();
+            d.create(&format!("Tarea {i}"), "otr", "media", day(0), day(0), false)
+                .unwrap();
         }
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
-        assert_eq!(view.items.len(), MAX_BACKLOG_ITEMS, "el backlog se recorta al tope");
+        assert_eq!(
+            view.items.len(),
+            MAX_BACKLOG_ITEMS,
+            "el backlog se recorta al tope"
+        );
     }
 
     #[test]
@@ -1244,13 +1649,28 @@ mod tests {
         let (monday, sunday_end) = current_week_bounds();
         // flexible con start_at dentro de la semana actual (miércoles 10:00)
         let mid = monday + 2 * DAY_MS + 10 * 3_600_000;
-        d.create("Estudiar cálculo", "uni", "alta", mid, mid, false).unwrap();
+        d.create("Estudiar cálculo", "uni", "alta", mid, mid, false)
+            .unwrap();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
-        assert_eq!(view.items.len(), 1, "la tarea de esta semana entra en el plan");
-        assert!(!view.items[0].sessions.is_empty(), "se planifica: {:?}", view.items[0].notes);
+        assert_eq!(
+            view.items.len(),
+            1,
+            "la tarea de esta semana entra en el plan"
+        );
+        assert!(
+            !view.items[0].sessions.is_empty(),
+            "se planifica: {:?}",
+            view.items[0].notes
+        );
         for s in &view.items[0].sessions {
-            assert!(s.end_ms - 1 <= sunday_end, "sesión dentro de la semana (<= domingo 23:59): {s:?}");
-            assert!(s.start_ms >= monday, "nunca antes del lunes de esta semana: {s:?}");
+            assert!(
+                s.end_ms - 1 <= sunday_end,
+                "sesión dentro de la semana (<= domingo 23:59): {s:?}"
+            );
+            assert!(
+                s.start_ms >= monday,
+                "nunca antes del lunes de esta semana: {s:?}"
+            );
         }
     }
 
@@ -1259,20 +1679,39 @@ mod tests {
         let d = clean_db();
         let (monday, _) = current_week_bounds();
         // atrasada (antes del lunes de esta semana) → entra
-        d.create("Atrasada", "otr", "alta", monday - 2 * DAY_MS, monday - 2 * DAY_MS, false).unwrap();
+        d.create(
+            "Atrasada",
+            "otr",
+            "alta",
+            monday - 2 * DAY_MS,
+            monday - 2 * DAY_MS,
+            false,
+        )
+        .unwrap();
         // dentro de la semana actual → entra
         let mid = monday + 2 * DAY_MS + 10 * 3_600_000;
-        d.create("De esta semana", "otr", "media", mid, mid, false).unwrap();
+        d.create("De esta semana", "otr", "media", mid, mid, false)
+            .unwrap();
         // semana próxima y dentro de 3 semanas → fuera del plan
         let next = monday + 8 * DAY_MS;
-        d.create("Semana próxima", "otr", "alta", next, next, false).unwrap();
+        d.create("Semana próxima", "otr", "alta", next, next, false)
+            .unwrap();
         let far = monday + 17 * DAY_MS;
         d.create("Lejana", "otr", "media", far, far, false).unwrap();
         let view = plan_from_text(&d, "organiza mi semana", &[], "local").unwrap();
         let titles: Vec<&str> = view.items.iter().map(|i| i.title.as_str()).collect();
-        assert!(titles.contains(&"Atrasada"), "entra la atrasada: {titles:?}");
-        assert!(titles.contains(&"De esta semana"), "entra la de esta semana: {titles:?}");
-        assert!(!titles.contains(&"Semana próxima"), "semana futura fuera: {titles:?}");
+        assert!(
+            titles.contains(&"Atrasada"),
+            "entra la atrasada: {titles:?}"
+        );
+        assert!(
+            titles.contains(&"De esta semana"),
+            "entra la de esta semana: {titles:?}"
+        );
+        assert!(
+            !titles.contains(&"Semana próxima"),
+            "semana futura fuera: {titles:?}"
+        );
         assert!(!titles.contains(&"Lejana"), "a 3 semanas fuera: {titles:?}");
     }
 
@@ -1339,7 +1778,11 @@ mod tests {
         let hour = crate::engine::HOUR_MS;
         let s = day(1) + 19 * hour; // lunes 19:00
         let mut i = intent("Futbol", IntentType::Event, 0);
-        i.window = TimeWindow { start: Some(s), end: None, all_day: false };
+        i.window = TimeWindow {
+            start: Some(s),
+            end: None,
+            all_day: false,
+        };
         let view = plan_from_text(&d, "7pm lunes futbol", &[i], "local").unwrap();
         // el entendimiento hereda 1 h
         assert_eq!(view.understanding[0].window_start, Some(s));
@@ -1357,4 +1800,3 @@ mod tests {
         assert_eq!(created[0].title, "Futbol");
     }
 }
-

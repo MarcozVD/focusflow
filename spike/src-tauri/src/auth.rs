@@ -133,7 +133,8 @@ pub fn perform_login() -> Result<AuthSession, String> {
     let challenge = base64url(Sha256::digest(verifier.as_bytes()));
     let state = base64url(rand_bytes(16));
 
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("no se pudo abrir el puerto de callback: {e}"))?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("no se pudo abrir el puerto de callback: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
@@ -169,7 +170,9 @@ pub fn perform_login() -> Result<AuthSession, String> {
         if cmd_start {
             return Ok(());
         }
-        Err(format!("no se pudo abrir el navegador — abre manualmente: {url}"))
+        Err(format!(
+            "no se pudo abrir el navegador — abre manualmente: {url}"
+        ))
     }
 
     open_browser(&auth_url)?;
@@ -182,9 +185,10 @@ pub fn perform_login() -> Result<AuthSession, String> {
         .id_token
         .ok_or_else(|| "Google no devolvió id_token".to_string())?;
     let profile = parse_id_token(&id_token)?;
-    let refresh_token = tokens
-        .refresh_token
-        .ok_or_else(|| "Google no concedió refresh_token (revisa access_type=offline y el consentimiento)".to_string())?;
+    let refresh_token = tokens.refresh_token.ok_or_else(|| {
+        "Google no concedió refresh_token (revisa access_type=offline y el consentimiento)"
+            .to_string()
+    })?;
 
     let session = AuthSession {
         user_id: profile.sub,
@@ -247,9 +251,7 @@ fn post_token(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
         .send()
         .map_err(|e| format!("token request: {e}"))?;
     let status = resp.status();
-    let text = resp
-        .text()
-        .map_err(|e| format!("token response: {e}"))?;
+    let text = resp.text().map_err(|e| format!("token response: {e}"))?;
     if !status.is_success() {
         return Err(format!("Google devolvió {status}: {text}"));
     }
@@ -295,7 +297,10 @@ fn handle_connection(mut stream: TcpStream, expected_state: &str) -> Result<Stri
             "400 Bad Request",
             error_page("state no coincide. Cierra esta pestaña e inténtalo de nuevo."),
         ),
-        _ => ("400 Bad Request", error_page("Callback sin código de autorización.")),
+        _ => (
+            "400 Bad Request",
+            error_page("Callback sin código de autorización."),
+        ),
     };
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -401,7 +406,9 @@ fn parse_callback_query(path: &str) -> (Option<String>, Option<String>) {
     let mut code = None;
     let mut state = None;
     for kv in q.1.split('&') {
-        let Some((k, v)) = kv.split_once('=') else { continue };
+        let Some((k, v)) = kv.split_once('=') else {
+            continue;
+        };
         match k {
             "code" => code = Some(url_decode(v)),
             "state" => state = Some(url_decode(v)),
@@ -550,7 +557,10 @@ mod tests {
         assert!(ok.contains("window.close"), "autocierre");
         assert!(ok.contains("</html>"), "cierre del documento");
         let err = error_page("estado inválido");
-        assert!(err.contains("estado inválido"), "mensaje de error interpolado");
+        assert!(
+            err.contains("estado inválido"),
+            "mensaje de error interpolado"
+        );
         assert!(err.contains("</html>"));
     }
 }

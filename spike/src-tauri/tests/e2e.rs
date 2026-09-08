@@ -17,7 +17,8 @@ fn temp_data_dir() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("ff-e2e-{}", std::process::id()))
+    let dir = std::env::temp_dir()
+        .join(format!("ff-e2e-{}", std::process::id()))
         .join(stamp.to_string());
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -52,7 +53,16 @@ fn s1_task_survives_app_restart() {
     // sesión 1: crear
     {
         let d = open_clean(&dir);
-        let t = d.create("Entregar informe de prácticas", "uni", "alta", now + 86_400_000, now + 86_400_000 + 3_600_000, false).unwrap();
+        let t = d
+            .create(
+                "Entregar informe de prácticas",
+                "uni",
+                "alta",
+                now + 86_400_000,
+                now + 86_400_000 + 3_600_000,
+                false,
+            )
+            .unwrap();
         assert!(t.id > 0);
     } // cierra (drop)
 
@@ -97,9 +107,15 @@ fn s2_nl_plan_accept_persists_to_calendar() {
         .expect("el evento del examen está");
     let engine = focusflow_spike_lib::planning::engine_with_calendar(&d);
     let free = engine.available_minutes(ev.start_at - 3_600_000, ev.start_at + 3_600_000);
-    assert!(free < 120, "el examen ocupa su hueco tras el reinicio (libre={free})");
+    assert!(
+        free < 120,
+        "el examen ocupa su hueco tras el reinicio (libre={free})"
+    );
     let row = d.get_plan_proposal(view.id).unwrap().unwrap();
-    assert_eq!(row.status, "accepted", "el estado de la propuesta persistió");
+    assert_eq!(
+        row.status, "accepted",
+        "el estado de la propuesta persistió"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -112,7 +128,12 @@ impl focusflow_spike_lib::ai::AiProvider for MockEmailAi {
     fn id(&self) -> &str {
         "mock"
     }
-    fn chat_json(&self, _s: &str, _u: &str, _schema: &str) -> focusflow_spike_lib::ai::AiResult<serde_json::Value> {
+    fn chat_json(
+        &self,
+        _s: &str,
+        _u: &str,
+        _schema: &str,
+    ) -> focusflow_spike_lib::ai::AiResult<serde_json::Value> {
         Ok(self.0.clone())
     }
 }
@@ -139,7 +160,12 @@ fn s3_email_suggestion_accept_persists() {
         date: "2026-08-08".into(),
         body: "Nos vemos mañana a las 9 para la tutoría de tesis.".into(),
     };
-    let batch = focusflow_spike_lib::ai::email_intent::parse_email_intent(&raw, &MockEmailAi(fixture), true).unwrap();
+    let batch = focusflow_spike_lib::ai::email_intent::parse_email_intent(
+        &raw,
+        &MockEmailAi(fixture),
+        true,
+    )
+    .unwrap();
     let it = &batch.intents[0];
     assert_eq!(it.intent_type, IntentType::Event);
     let start = it.window.start.unwrap();
@@ -148,22 +174,46 @@ fn s3_email_suggestion_accept_persists() {
     // sugerencia pendiente → aceptar → tarea
     let sid = d
         .insert_suggestion(
-            "email", Some(&raw.message_id), Some(&raw.sender), &raw.subject, "event",
-            &it.title, &it.description, &it.category_id, "alta",
-            Some(start), Some(end), None, 0, "", "[]", it.confidence, &it.reason,
-            None, "", "pending",
+            "email",
+            Some(&raw.message_id),
+            Some(&raw.sender),
+            &raw.subject,
+            "event",
+            &it.title,
+            &it.description,
+            &it.category_id,
+            "alta",
+            Some(start),
+            Some(end),
+            None,
+            0,
+            "",
+            "[]",
+            it.confidence,
+            &it.reason,
+            None,
+            "",
+            "pending",
         )
         .unwrap();
-    let task = accept_suggestion(&d, sid).unwrap();
+    let tasks = accept_suggestion(&d, sid).unwrap();
+    let task = tasks.first().expect("al menos una tarea").clone();
     assert_eq!(task.start_at, start, "la tarea usa la hora del correo");
     drop(d);
 
     // relanzar: tarea y estado de la sugerencia persisten
     let d = open(&dir);
     let rows = d.list_range(start - 1, end + 1).unwrap();
-    assert!(rows.iter().any(|r| r.id == task.id), "la tutoría está en el calendario");
+    assert!(
+        rows.iter().any(|r| r.id == task.id),
+        "la tutoría está en el calendario"
+    );
     assert_eq!(d.get_suggestion(sid).unwrap().unwrap().status, "accepted");
-    assert_eq!(d.suggestion_count_for_email(&raw.message_id).unwrap(), 1, "dedupe por correo");
+    assert_eq!(
+        d.suggestion_count_for_email(&raw.message_id).unwrap(),
+        1,
+        "dedupe por correo"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -181,13 +231,28 @@ fn s4_conflict_blocked_then_alternative_lands() {
     let slot = view.items[0].sessions[0].start_ms;
 
     // el compromiso que llega después choca → aceptación bloqueada
-    d.create("Reunión urgente", "tra", "alta", slot, slot + 3_600_000, false).unwrap();
+    d.create(
+        "Reunión urgente",
+        "tra",
+        "alta",
+        slot,
+        slot + 3_600_000,
+        false,
+    )
+    .unwrap();
     let err = accept_plan(&d, view.id, &Default::default()).expect_err("conflicto");
     assert!(err.contains("se solapa"), "{err}");
 
     // alternativa: mover el compromiso → el plan se acepta y persiste
-    let clash_id = d.list().unwrap().iter().find(|t| t.title == "Reunión urgente").unwrap().id;
-    d.move_to(clash_id, slot + 48 * 3_600_000, slot + 49 * 3_600_000, None).unwrap();
+    let clash_id = d
+        .list()
+        .unwrap()
+        .iter()
+        .find(|t| t.title == "Reunión urgente")
+        .unwrap()
+        .id;
+    d.move_to(clash_id, slot + 48 * 3_600_000, slot + 49 * 3_600_000, None)
+        .unwrap();
     let tasks = accept_plan(&d, view.id, &Default::default()).expect("alternativa aceptada");
     drop(d);
 
@@ -196,7 +261,10 @@ fn s4_conflict_blocked_then_alternative_lands() {
     assert_eq!(all.len(), 2, "reunión + estudio persistieron");
     all.sort_by_key(|t| t.start_at);
     for w in all.windows(2) {
-        assert!(w[1].start_at >= w[0].end_at, "sin solapamientos tras reinicio");
+        assert!(
+            w[1].start_at >= w[0].end_at,
+            "sin solapamientos tras reinicio"
+        );
     }
     std::fs::remove_dir_all(&dir).ok();
 }

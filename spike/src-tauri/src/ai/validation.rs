@@ -26,15 +26,27 @@ pub fn extract_json(raw: &str) -> Option<serde_json::Value> {
 
 pub fn category_id_from_name(name: &str) -> String {
     let n = name.trim().to_lowercase();
-    if n.contains("universidad") || n.contains("uni") || n.contains("estudio") || n.contains("examen") {
+    if n.contains("universidad")
+        || n.contains("uni")
+        || n.contains("estudio")
+        || n.contains("examen")
+    {
         "uni".into()
-    } else if n.contains("trabajo") || n.contains("trab") || n.contains("reunión") || n.contains("reunion") {
+    } else if n.contains("trabajo")
+        || n.contains("trab")
+        || n.contains("reunión")
+        || n.contains("reunion")
+    {
         "trab".into()
     } else if n.contains("personal") {
         "per".into()
     } else if n.contains("finan") || n.contains("pagar") || n.contains("factura") {
         "fin".into()
-    } else if n.contains("salud") || n.contains("médico") || n.contains("medico") || n.contains("gimnasio") {
+    } else if n.contains("salud")
+        || n.contains("médico")
+        || n.contains("medico")
+        || n.contains("gimnasio")
+    {
         "sal".into()
     } else {
         "otr".into()
@@ -151,7 +163,11 @@ pub fn validate_task_json(v: &serde_json::Value) -> Result<ParsedTask, AiError> 
         .filter(|t| !t.is_empty())
         .ok_or_else(|| AiError::InvalidJson("falta campo 'title'".into()))?;
 
-    let description = obj.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
+    let description = obj
+        .get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_string();
     let category_id = obj
         .get("category")
         .and_then(|c| c.as_str())
@@ -162,17 +178,29 @@ pub fn validate_task_json(v: &serde_json::Value) -> Result<ParsedTask, AiError> 
         .and_then(|p| p.as_str())
         .map(priority_from_name)
         .unwrap_or_else(|| "media".into());
-    let location = obj.get("location").and_then(|l| l.as_str()).unwrap_or("").to_string();
+    let location = obj
+        .get("location")
+        .and_then(|l| l.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let tags: Vec<String> = obj
         .get("tags")
         .and_then(|t| t.as_array())
-        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     let reminders: Vec<String> = obj
         .get("reminders")
         .and_then(|r| r.as_array())
-        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     // "hoy" en la zona del usuario, no en UTC: la IA genera la fecha local.
@@ -188,8 +216,16 @@ pub fn validate_task_json(v: &serde_json::Value) -> Result<ParsedTask, AiError> 
         .and_then(parse_date)
         .unwrap_or(start_date);
 
-    let start_time_raw = obj.get("start_time").and_then(|s| s.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let end_time_raw = obj.get("end_time").and_then(|s| s.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let start_time_raw = obj
+        .get("start_time")
+        .and_then(|s| s.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let end_time_raw = obj
+        .get("end_time")
+        .and_then(|s| s.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     // Una hora presente pero ilegible se trata como AUSENTE: nunca se inventa una hora
     // arbitraria tipo 09:00. Sin hora de inicio → tarea de Todo el día.
     let start_time = start_time_raw.as_ref().and_then(|s| parse_time(s));
@@ -250,13 +286,20 @@ pub fn validate_email_json(v: &serde_json::Value) -> Result<EmailParseResult, Ai
     let obj = v
         .as_object()
         .ok_or_else(|| AiError::InvalidJson("la raíz debe ser un objeto".into()))?;
-    let mut is_relevant = obj.get("is_relevant").and_then(|b| b.as_bool()).unwrap_or(false);
+    let mut is_relevant = obj
+        .get("is_relevant")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
     let confidence = obj
         .get("confidence")
         .and_then(|c| c.as_f64())
         .map(|c| c.clamp(0.0, 1.0))
         .unwrap_or(0.0);
-    let mut reason = obj.get("reason").and_then(|r| r.as_str()).unwrap_or("").to_string();
+    let mut reason = obj
+        .get("reason")
+        .and_then(|r| r.as_str())
+        .unwrap_or("")
+        .to_string();
     let mut events = Vec::new();
     if let Some(arr) = obj.get("events").and_then(|e| e.as_array()) {
         // cordura: nunca más de 5 eventos por correo

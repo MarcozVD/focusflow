@@ -119,9 +119,16 @@ pub struct AssistantActionView {
 #[serde(tag = "type")]
 pub enum AssistantTurnView {
     /// Respuesta informativa (solo lectura).
-    Answer { text: String, #[serde(default)] tasks: Vec<TaskRefView> },
+    Answer {
+        text: String,
+        #[serde(default)]
+        tasks: Vec<TaskRefView>,
+    },
     /// Propuesta de planificación (flujo de la fase 7, nada mutado aún).
-    Plan { proposal: planning::PlanProposalView, note: String },
+    Plan {
+        proposal: planning::PlanProposalView,
+        note: String,
+    },
     /// Propuesta de acción concreta, pendiente de aprobación.
     Action { action: AssistantActionView },
     /// El asistente no puede/debe hacer nada con la petición.
@@ -167,7 +174,13 @@ pub fn context_snapshot(db: &Db) -> String {
             let day = chrono::Local
                 .timestamp_millis_opt(t.end_at)
                 .earliest()
-                .map(|d| d.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp())
+                .map(|d| {
+                    d.date_naive()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                        .and_utc()
+                        .timestamp()
+                })
                 .unwrap_or(0);
             seen.insert((t.title.trim().to_lowercase(), day))
         });
@@ -222,18 +235,24 @@ pub fn context_snapshot(db: &Db) -> String {
             .filter(|iv| iv.end - iv.start >= 30 * crate::engine::MIN_MS)
             .take(8)
             .map(|iv| {
-                let s = chrono::Local.timestamp_millis_opt(iv.start).earliest().unwrap();
-                let e = chrono::Local.timestamp_millis_opt(iv.end).earliest().unwrap();
+                let s = chrono::Local
+                    .timestamp_millis_opt(iv.start)
+                    .earliest()
+                    .unwrap();
+                let e = chrono::Local
+                    .timestamp_millis_opt(iv.end)
+                    .earliest()
+                    .unwrap();
                 serde_json::json!({
                     "from": s.format("%H:%M").to_string(),
                     "to": e.format("%H:%M").to_string(),
                 })
             })
             .collect();
-        free_windows
-            .as_object_mut()
-            .unwrap()
-            .insert(day.format("%Y-%m-%d").to_string(), serde_json::Value::Array(windows));
+        free_windows.as_object_mut().unwrap().insert(
+            day.format("%Y-%m-%d").to_string(),
+            serde_json::Value::Array(windows),
+        );
     }
 
     // Horario laboral y preferencia REALES del motor (no constantes).
@@ -452,14 +471,24 @@ fn resolve_category(cat: Option<&str>) -> String {
 }
 
 /// Construye la acción propuesta desde el JSON de la decisión.
-fn build_action(
-    db: &Db,
-    obj: &serde_json::Value,
-    note: &str,
-) -> Result<AssistantAction, String> {
-    let kind = obj.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let task_title = obj.get("task_title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+fn build_action(db: &Db, obj: &serde_json::Value, note: &str) -> Result<AssistantAction, String> {
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let task_title = obj
+        .get("task_title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let title = obj
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let date = obj.get("start_date").and_then(|v| v.as_str());
     let time = obj.get("start_time").and_then(|v| v.as_str());
     let duration_min = obj
@@ -467,10 +496,22 @@ fn build_action(
         .and_then(|v| v.as_u64())
         .unwrap_or(60)
         .clamp(15, 480);
-    let priority = obj.get("priority").and_then(|v| v.as_str()).unwrap_or("media").to_string();
+    let priority = obj
+        .get("priority")
+        .and_then(|v| v.as_str())
+        .unwrap_or("media")
+        .to_string();
     let category_id = resolve_category(obj.get("category").and_then(|v| v.as_str()));
     let summary = if note.trim().is_empty() {
-        format!("{}: {}", kind, if !title.is_empty() { &title } else { &task_title })
+        format!(
+            "{}: {}",
+            kind,
+            if !title.is_empty() {
+                &title
+            } else {
+                &task_title
+            }
+        )
     } else {
         note.to_string()
     };
@@ -497,9 +538,11 @@ fn build_action(
             let (id, real_title) = resolve_task(db, &task_title)?.ok_or_else(|| {
                 "No encontré ninguna tarea pendiente con ese nombre. Sé más específico.".to_string()
             })?;
-            let date = date.ok_or_else(|| "reschedule sin fecha: pide la fecha al usuario".to_string())?;
+            let date =
+                date.ok_or_else(|| "reschedule sin fecha: pide la fecha al usuario".to_string())?;
             let has_time = time.map(|t| !t.is_empty()).unwrap_or(false);
-            let start = parse_local(date, if has_time { time } else { None }).ok_or_else(|| "fecha inválida".to_string())?;
+            let start = parse_local(date, if has_time { time } else { None })
+                .ok_or_else(|| "fecha inválida".to_string())?;
             let (end, all_day) = if has_time {
                 (start + duration_min as i64 * 60_000, false)
             } else {
@@ -578,9 +621,7 @@ pub fn build_user_prompt(ctx: &str, text: &str, history: &[HistoryMsg]) -> Strin
 /// Error distinguible de límite de peticiones: `ia_429 [retry_after] [detalle]`.
 /// El detalle (p. ej. FreeUsageLimitError) es técnico: va al log, no al frontend.
 pub fn rate_limited_err(retry_after: Option<u64>, detail: String) -> String {
-    let wait = retry_after
-        .map(|s| format!(" {s}"))
-        .unwrap_or_default();
+    let wait = retry_after.map(|s| format!(" {s}")).unwrap_or_default();
     format!("ia_429{wait} {detail}")
 }
 
@@ -593,7 +634,10 @@ pub fn request_decision(
         provider.chat_json(DECISION_SYSTEM_PROMPT, user, ASSISTANT_DECISION_SCHEMA);
     match decision {
         Ok(v) => Ok(v),
-        Err(AiError::RateLimited { retry_after, detail }) => Err(rate_limited_err(retry_after, detail)),
+        Err(AiError::RateLimited {
+            retry_after,
+            detail,
+        }) => Err(rate_limited_err(retry_after, detail)),
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) | Err(AiError::BadResponse(e)) => {
             Err(format!("ia_fail {e}"))
         }
@@ -602,7 +646,11 @@ pub fn request_decision(
 }
 
 pub fn note_from_decision(decision: &serde_json::Value) -> String {
-    decision.get("note").and_then(|n| n.as_str()).unwrap_or("").to_string()
+    decision
+        .get("note")
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Modo "answer": respuesta conversacional con contexto (solo red).
@@ -617,7 +665,11 @@ pub fn answer_text(
         provider.chat_json(ANSWER_SYSTEM_PROMPT, user, r#"{"text":"string"}"#);
     match a {
         Ok(v) => {
-            let t = v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let t = v
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
             if t.trim().is_empty() {
                 Ok(AssistantTurnView::Nothing {
                     text: "No pude formular una respuesta. Intenta reformular la pregunta.".into(),
@@ -626,7 +678,10 @@ pub fn answer_text(
                 Ok(AssistantTurnView::Answer { text: t, tasks })
             }
         }
-        Err(AiError::RateLimited { retry_after, detail }) => Err(rate_limited_err(retry_after, detail)),
+        Err(AiError::RateLimited {
+            retry_after,
+            detail,
+        }) => Err(rate_limited_err(retry_after, detail)),
         Err(e) => Err(format!("ia_fail {e}")),
     }
 }
@@ -667,15 +722,25 @@ pub fn action_mode(
     decision: &serde_json::Value,
     note: &str,
 ) -> Result<AssistantTurnView, String> {
-    let action_obj = decision.get("action").cloned().unwrap_or(serde_json::json!({}));
+    let action_obj = decision
+        .get("action")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
     // no se pudo resolver (tarea desconocida/ambigua, datos incompletos)
     // → responder de forma conversacional, sin crear propuestas basura
     let action = match build_action(db, &action_obj, note) {
         Ok(a) => a,
-        Err(clarify) => return Ok(AssistantTurnView::Answer { text: clarify, tasks: Vec::new() }),
+        Err(clarify) => {
+            return Ok(AssistantTurnView::Answer {
+                text: clarify,
+                tasks: Vec::new(),
+            })
+        }
     };
     let payload = serde_json::to_string(&action).map_err(|e| e.to_string())?;
-    let proposal_id = db.insert_assistant_action(&action.kind, &payload).map_err(|e| e.to_string())?;
+    let proposal_id = db
+        .insert_assistant_action(&action.kind, &payload)
+        .map_err(|e| e.to_string())?;
     Ok(AssistantTurnView::Action {
         action: AssistantActionView {
             proposal_id,
@@ -715,7 +780,10 @@ pub fn assistant_turn(
     let decision = request_decision(provider, &user)?;
     let note = note_from_decision(&decision);
 
-    let mode = decision.get("mode").and_then(|m| m.as_str()).unwrap_or("answer");
+    let mode = decision
+        .get("mode")
+        .and_then(|m| m.as_str())
+        .unwrap_or("answer");
     match mode {
         "plan" => plan_mode(db, text, provider, note),
         "action" => action_mode(db, &decision, &note),
@@ -728,8 +796,13 @@ pub fn assistant_turn(
 pub fn apply_action(db: &Db, action: &AssistantAction) -> Result<String, String> {
     match action.kind.as_str() {
         "complete" => {
-            let id = action.task_id.ok_or_else(|| "tarea no resuelta".to_string())?;
-            let t = db.get_task(id).map_err(|e| e.to_string())?.ok_or_else(|| "tarea ya no existe".to_string())?;
+            let id = action
+                .task_id
+                .ok_or_else(|| "tarea no resuelta".to_string())?;
+            let t = db
+                .get_task(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "tarea ya no existe".to_string())?;
             if t.status == "completada" {
                 return Ok(format!("'{}' ya estaba completada.", t.title));
             }
@@ -737,16 +810,29 @@ pub fn apply_action(db: &Db, action: &AssistantAction) -> Result<String, String>
             Ok(format!("Marcada como completada: {}", t.title))
         }
         "reschedule" => {
-            let id = action.task_id.ok_or_else(|| "tarea no resuelta".to_string())?;
+            let id = action
+                .task_id
+                .ok_or_else(|| "tarea no resuelta".to_string())?;
             let (start, end) = (
-                action.start_ms.ok_or_else(|| "reschedule sin fecha".to_string())?,
-                action.end_ms.ok_or_else(|| "reschedule sin fin".to_string())?,
+                action
+                    .start_ms
+                    .ok_or_else(|| "reschedule sin fecha".to_string())?,
+                action
+                    .end_ms
+                    .ok_or_else(|| "reschedule sin fin".to_string())?,
             );
-            let t = db.get_task(id).map_err(|e| e.to_string())?.ok_or_else(|| "tarea ya no existe".to_string())?;
+            let t = db
+                .get_task(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "tarea ya no existe".to_string())?;
             if let Some((_, other)) = db.find_overlap(id, start, end).map_err(|e| e.to_string())? {
-                return Err(format!("'{}' se solapa con '{}' en ese horario.", t.title, other));
+                return Err(format!(
+                    "'{}' se solapa con '{}' en ese horario.",
+                    t.title, other
+                ));
             }
-            db.move_to(id, start, end, Some(action.all_day)).map_err(|e| e.to_string())?;
+            db.move_to(id, start, end, Some(action.all_day))
+                .map_err(|e| e.to_string())?;
             Ok(format!(
                 "Reagendada '{}': {}",
                 t.title,
@@ -754,19 +840,33 @@ pub fn apply_action(db: &Db, action: &AssistantAction) -> Result<String, String>
             ))
         }
         "create_event" => {
-            let title = if action.title.is_empty() { "Nuevo evento".to_string() } else { action.title.clone() };
+            let title = if action.title.is_empty() {
+                "Nuevo evento".to_string()
+            } else {
+                action.title.clone()
+            };
             let (start, end) = (
                 action.start_ms.unwrap_or_else(crate::email::now_ms),
                 action.end_ms.unwrap_or_else(crate::email::now_ms),
             );
             let t = db
-                .create(&title, &action.category_id, &action.priority, start, end, action.all_day)
+                .create(
+                    &title,
+                    &action.category_id,
+                    &action.priority,
+                    start,
+                    end,
+                    action.all_day,
+                )
                 .map_err(|e| e.to_string())?;
             Ok(format!("Creado '{}' en el calendario.", t.title))
         }
         "cancel_proposal" => {
             let pending = db.list_plan_proposals(true).map_err(|e| e.to_string())?;
-            let p = pending.into_iter().next().ok_or_else(|| "no hay ninguna propuesta pendiente que cancelar".to_string())?;
+            let p = pending
+                .into_iter()
+                .next()
+                .ok_or_else(|| "no hay ninguna propuesta pendiente que cancelar".to_string())?;
             planning::reject_plan(db, p.id)?;
             Ok("Propuesta de plan cancelada.".into())
         }
@@ -812,7 +912,12 @@ mod tests {
         Db::open_memory_pub().unwrap()
     }
 
-    fn action(kind: &str, task_id: Option<i64>, task_title: &str, start: Option<i64>) -> AssistantAction {
+    fn action(
+        kind: &str,
+        task_id: Option<i64>,
+        task_title: &str,
+        start: Option<i64>,
+    ) -> AssistantAction {
         AssistantAction {
             kind: kind.into(),
             task_title: task_title.into(),
@@ -836,7 +941,11 @@ mod tests {
             AssistantTurnView::Nothing { text } => assert!(text.contains("Sin IA configurada")),
             other => panic!("esperado Nothing, got {other:?}"),
         }
-        assert_eq!(d.list_plan_proposals(false).unwrap().len(), before, "no escribe nada");
+        assert_eq!(
+            d.list_plan_proposals(false).unwrap().len(),
+            before,
+            "no escribe nada"
+        );
     }
 
     #[test]
@@ -863,7 +972,10 @@ mod tests {
         match t {
             AssistantTurnView::Plan { proposal, note } => {
                 assert_eq!(proposal.status, "pending");
-                assert!(note.contains("nada cambia") || note.contains("te planifico"), "{note}");
+                assert!(
+                    note.contains("nada cambia") || note.contains("te planifico"),
+                    "{note}"
+                );
             }
             other => panic!("esperado Plan, got {other:?}"),
         }
@@ -872,7 +984,16 @@ mod tests {
     #[test]
     fn action_complete_requires_approval_then_applies() {
         let d = db();
-        let t = d.create("Informe final", "tra", "alta", crate::email::now_ms(), crate::email::now_ms() + 3_600_000, false).unwrap();
+        let t = d
+            .create(
+                "Informe final",
+                "tra",
+                "alta",
+                crate::email::now_ms(),
+                crate::email::now_ms() + 3_600_000,
+                false,
+            )
+            .unwrap();
         let p = QueueProvider::new(vec![json!({
             "mode": "action",
             "note": "marcaré el informe como hecho",
@@ -892,13 +1013,25 @@ mod tests {
         assert_eq!(a.task_id, Some(t.id));
         let summary = apply_action(&d, &a).unwrap();
         assert!(summary.contains("Informe final"), "{summary}");
-        assert_eq!(d.get_task(t.id).unwrap().unwrap().status, "completada", "aprobada aplica");
+        assert_eq!(
+            d.get_task(t.id).unwrap().unwrap().status,
+            "completada",
+            "aprobada aplica"
+        );
     }
 
     #[test]
     fn unknown_task_title_returns_clarifying_nothing() {
         let d = db();
-        d.create("Estudiar física", "uni", "media", crate::email::now_ms(), crate::email::now_ms() + 3_600_000, false).unwrap();
+        d.create(
+            "Estudiar física",
+            "uni",
+            "media",
+            crate::email::now_ms(),
+            crate::email::now_ms() + 3_600_000,
+            false,
+        )
+        .unwrap();
         let p = QueueProvider::new(vec![json!({
             "mode": "action",
             "note": null,
@@ -916,8 +1049,24 @@ mod tests {
     #[test]
     fn ambiguous_title_lists_candidates() {
         let d = db();
-        d.create("Informe A", "tra", "media", crate::email::now_ms(), crate::email::now_ms() + 3_600_000, false).unwrap();
-        d.create("Informe B", "tra", "media", crate::email::now_ms(), crate::email::now_ms() + 3_600_000, false).unwrap();
+        d.create(
+            "Informe A",
+            "tra",
+            "media",
+            crate::email::now_ms(),
+            crate::email::now_ms() + 3_600_000,
+            false,
+        )
+        .unwrap();
+        d.create(
+            "Informe B",
+            "tra",
+            "media",
+            crate::email::now_ms(),
+            crate::email::now_ms() + 3_600_000,
+            false,
+        )
+        .unwrap();
         let p = QueueProvider::new(vec![json!({
             "mode": "action",
             "note": null,
@@ -927,7 +1076,10 @@ mod tests {
         match turn {
             AssistantTurnView::Answer { text, .. } | AssistantTurnView::Nothing { text } => {
                 assert!(text.contains("varias tareas"), "{text}");
-                assert!(text.contains("Informe A") && text.contains("Informe B"), "{text}");
+                assert!(
+                    text.contains("Informe A") && text.contains("Informe B"),
+                    "{text}"
+                );
             }
             other => panic!("esperado aclaración, got {other:?}"),
         }
@@ -936,9 +1088,20 @@ mod tests {
     #[test]
     fn apply_reschedule_moves_via_service() {
         let d = db();
-        let t = d.create("Estudiar", "uni", "media", crate::email::now_ms(), crate::email::now_ms() + 3_600_000, false).unwrap();
+        let t = d
+            .create(
+                "Estudiar",
+                "uni",
+                "media",
+                crate::email::now_ms(),
+                crate::email::now_ms() + 3_600_000,
+                false,
+            )
+            .unwrap();
         let tomorrow = crate::engine::local_ms(
-            (chrono::Local::now().date_naive() + chrono::Duration::days(1)).and_hms_opt(9, 0, 0).unwrap(),
+            (chrono::Local::now().date_naive() + chrono::Duration::days(1))
+                .and_hms_opt(9, 0, 0)
+                .unwrap(),
         );
         let a = action("reschedule", Some(t.id), "Estudiar", Some(tomorrow));
         let summary = apply_action(&d, &a).unwrap();
@@ -956,10 +1119,14 @@ mod tests {
             category_id: "tra".into(),
             priority: "alta".into(),
             start_ms: Some(crate::engine::local_ms(
-                (chrono::Local::now().date_naive() + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap(),
+                (chrono::Local::now().date_naive() + chrono::Duration::days(2))
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
             )),
             end_ms: Some(crate::engine::local_ms(
-                (chrono::Local::now().date_naive() + chrono::Duration::days(3)).and_hms_opt(0, 0, 0).unwrap(),
+                (chrono::Local::now().date_naive() + chrono::Duration::days(3))
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
             )),
             all_day: true,
             ..action("create_event", None, "", None)
@@ -980,7 +1147,11 @@ mod tests {
             description: String::new(),
             category_id: "uni".into(),
             priority: crate::ai::intent::Priority::Media,
-            window: crate::ai::intent::TimeWindow { start: None, end: None, all_day: false },
+            window: crate::ai::intent::TimeWindow {
+                start: None,
+                end: None,
+                all_day: false,
+            },
             duration: Some(crate::ai::intent::Duration { minutes: 60 }),
             deadline: None,
             preparation: None,
@@ -1002,9 +1173,31 @@ mod tests {
     #[test]
     fn context_snapshot_is_minimal_no_descriptions() {
         let d = db();
-        let t = d.create("Estudiar cálculo", "uni", "alta", crate::email::now_ms(), crate::email::now_ms() + 3_600_000, false).unwrap();
-        d.update_task_full(t.id, "Estudiar cálculo", "uni", "alta", t.start_at, t.end_at,
-            "descripción secreta que no debe filtrarse", "[]", "", "", None, Some(false)).unwrap();
+        let t = d
+            .create(
+                "Estudiar cálculo",
+                "uni",
+                "alta",
+                crate::email::now_ms(),
+                crate::email::now_ms() + 3_600_000,
+                false,
+            )
+            .unwrap();
+        d.update_task_full(
+            t.id,
+            "Estudiar cálculo",
+            "uni",
+            "alta",
+            t.start_at,
+            t.end_at,
+            "descripción secreta que no debe filtrarse",
+            "[]",
+            "",
+            "",
+            None,
+            Some(false),
+        )
+        .unwrap();
         let ctx = context_snapshot(&d);
         assert!(ctx.contains("Estudiar cálculo"), "título sí va");
         assert!(!ctx.contains("secreta"), "descripción NO va");
@@ -1016,12 +1209,29 @@ mod tests {
         // ventanas libres de hoy se derivan de ella; el horario laboral sale
         // del motor (default 06:00–22:00), no de una constante.
         let d = Db::open_memory_clean_pub().unwrap();
-        d.create("Clase 10:00", "uni", "media", day_start(0) + 10 * 3_600_000, day_start(0) + 12 * 3_600_000, false).unwrap();
+        d.create(
+            "Clase 10:00",
+            "uni",
+            "media",
+            day_start(0) + 10 * 3_600_000,
+            day_start(0) + 12 * 3_600_000,
+            false,
+        )
+        .unwrap();
         let ctx = context_snapshot(&d);
-        assert!(ctx.contains("free_windows_next_days"), "ventanas libres concretas");
-        assert!(ctx.contains("free_hours_next_days"), "agregado por día sigue");
+        assert!(
+            ctx.contains("free_windows_next_days"),
+            "ventanas libres concretas"
+        );
+        assert!(
+            ctx.contains("free_hours_next_days"),
+            "agregado por día sigue"
+        );
         assert!(ctx.contains("06:00–22:00"), "working_hours real del motor");
-        assert!(ctx.contains("\"preferred_start\":null") || ctx.contains("preferred_start"), "campo esté presente");
+        assert!(
+            ctx.contains("\"preferred_start\":null") || ctx.contains("preferred_start"),
+            "campo esté presente"
+        );
     }
 
     fn day_start(days_from_today: i64) -> i64 {
@@ -1036,17 +1246,66 @@ mod tests {
     fn task_refs_classify_urgent_important_normal() {
         let d = Db::open_memory_clean_pub().unwrap();
         // vencida → URGENT
-        d.create("Entrega pasada", "uni", "media", day_start(-2), day_start(-1), false).unwrap();
+        d.create(
+            "Entrega pasada",
+            "uni",
+            "media",
+            day_start(-2),
+            day_start(-1),
+            false,
+        )
+        .unwrap();
         // vence hoy → URGENT
-        d.create("Entrega hoy", "uni", "media", day_start(0), day_start(0) + 3_600_000, false).unwrap();
+        d.create(
+            "Entrega hoy",
+            "uni",
+            "media",
+            day_start(0),
+            day_start(0) + 3_600_000,
+            false,
+        )
+        .unwrap();
         // prioridad alta futura → IMPORTANT
-        d.create("Parcial", "uni", "alta", day_start(5), day_start(5) + 3_600_000, false).unwrap();
+        d.create(
+            "Parcial",
+            "uni",
+            "alta",
+            day_start(5),
+            day_start(5) + 3_600_000,
+            false,
+        )
+        .unwrap();
         // vence en 7 días → IMPORTANT
-        d.create("Informe 7d", "tra", "media", day_start(7), day_start(7) + 3_600_000, false).unwrap();
+        d.create(
+            "Informe 7d",
+            "tra",
+            "media",
+            day_start(7),
+            day_start(7) + 3_600_000,
+            false,
+        )
+        .unwrap();
         // lejana y baja → NORMAL
-        d.create("Leer libro", "per", "baja", day_start(20), day_start(20) + 3_600_000, false).unwrap();
+        d.create(
+            "Leer libro",
+            "per",
+            "baja",
+            day_start(20),
+            day_start(20) + 3_600_000,
+            false,
+        )
+        .unwrap();
         // completada → excluida
-        let done = d.create("Hecha", "tra", "alta", day_start(-1), day_start(-1) + 3_600_000, false).unwrap();
+        let done = d
+            .create(
+                "Hecha",
+                "tra",
+                "alta",
+                day_start(-1),
+                day_start(-1) + 3_600_000,
+                false,
+            )
+            .unwrap();
         d.set_completed(done.id, true).unwrap();
 
         let refs = task_refs(&d, crate::email::now_ms());
@@ -1086,19 +1345,43 @@ mod tests {
         // 5 copias idénticas (mismo título y mismo día de vencimiento), como
         // las que quedaron por altas repetidas: el asistente solo ve una.
         for _ in 0..5 {
-            d.create("Reunion", "uni", "media", day_start(3), day_start(3) + 3_600_000, false)
-                .unwrap();
+            d.create(
+                "Reunion",
+                "uni",
+                "media",
+                day_start(3),
+                day_start(3) + 3_600_000,
+                false,
+            )
+            .unwrap();
         }
         // mismo título pero otro día: NO es duplicado
-        d.create("Reunion", "uni", "media", day_start(5), day_start(5) + 3_600_000, false)
-            .unwrap();
+        d.create(
+            "Reunion",
+            "uni",
+            "media",
+            day_start(5),
+            day_start(5) + 3_600_000,
+            false,
+        )
+        .unwrap();
         // distinto título, mismo día: NO es duplicado
-        d.create("Otra reunion", "uni", "media", day_start(3), day_start(3) + 7_200_000, false)
-            .unwrap();
+        d.create(
+            "Otra reunion",
+            "uni",
+            "media",
+            day_start(3),
+            day_start(3) + 7_200_000,
+            false,
+        )
+        .unwrap();
 
         let refs = task_refs(&d, crate::email::now_ms());
         assert_eq!(refs.len(), 3, "una copia por duplicado: {}", refs.len());
-        let first = refs.iter().find(|r| r.title == "Reunion" && r.end_ms == day_start(3) + 3_600_000).unwrap();
+        let first = refs
+            .iter()
+            .find(|r| r.title == "Reunion" && r.end_ms == day_start(3) + 3_600_000)
+            .unwrap();
         assert_eq!(first.id, 1, "se conserva la copia de id menor");
     }
 }

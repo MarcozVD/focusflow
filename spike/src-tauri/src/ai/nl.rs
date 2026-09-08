@@ -7,7 +7,12 @@ pub(crate) fn weekday_num(date: chrono::NaiveDate) -> u8 {
 }
 
 pub(crate) fn ymd(date: chrono::NaiveDate) -> (i32, u32, u32) {
-    let parts: Vec<u32> = date.format("%Y-%m-%d").to_string().split('-').map(|s| s.parse().unwrap()).collect();
+    let parts: Vec<u32> = date
+        .format("%Y-%m-%d")
+        .to_string()
+        .split('-')
+        .map(|s| s.parse().unwrap())
+        .collect();
     (parts[0] as i32, parts[1], parts[2])
 }
 
@@ -51,7 +56,11 @@ pub(crate) fn weekday_from_name(s: &str) -> Option<chrono::Weekday> {
         Some(chrono::Weekday::Tue)
     } else if n.starts_with("mié") || n.starts_with("mie") || n.starts_with("wed") {
         Some(chrono::Weekday::Wed)
-    } else if n.starts_with("jue") || n.starts_with("thu") || n.starts_with("thur") || n.starts_with("thurs") {
+    } else if n.starts_with("jue")
+        || n.starts_with("thu")
+        || n.starts_with("thur")
+        || n.starts_with("thurs")
+    {
         Some(chrono::Weekday::Thu)
     } else if n.starts_with("vie") || n.starts_with("fri") {
         Some(chrono::Weekday::Fri)
@@ -67,11 +76,17 @@ pub(crate) fn weekday_from_name(s: &str) -> Option<chrono::Weekday> {
 /// "de las") o con am/pm o con dos puntos: "el 15" o "2 horas" nunca son hora.
 pub(crate) fn hour_from_text(s: &str) -> Option<u32> {
     let lower = s.trim().to_lowercase();
-    let m = regex_extract(&lower, r"(\d{1,2})(?:\s*(:|\.)?\s*(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)").or_else(|| {
-        regex_extract(&lower, r"(?:a las|a la|at|alrededor de las|de las)\s+(\d{1,2})(?::(\d{2}))?")
-    }).or_else(|| {
-        regex_extract(&lower, r"\b(\d{1,2}):(\d{2})\b")
-    });
+    let m = regex_extract(
+        &lower,
+        r"(\d{1,2})(?:\s*(:|\.)?\s*(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)",
+    )
+    .or_else(|| {
+        regex_extract(
+            &lower,
+            r"(?:a las|a la|at|alrededor de las|de las)\s+(\d{1,2})(?::(\d{2}))?",
+        )
+    })
+    .or_else(|| regex_extract(&lower, r"\b(\d{1,2}):(\d{2})\b"));
     let (h, mm) = m?;
     let mut h: u32 = h.parse().ok()?;
     let mm: u32 = mm.unwrap_or("0").parse().unwrap_or(0);
@@ -99,7 +114,11 @@ pub(crate) fn hour_in_range(s: &str) -> Option<u32> {
         let caps = re.captures(s.trim())?;
         let h: u32 = caps.get(1)?.as_str().parse().ok()?;
         let mm: u32 = caps.get(2).map_or(Ok(0), |x| x.as_str().parse()).ok()?;
-        if h <= 23 && mm <= 59 { Some(h * 60 + mm) } else { None }
+        if h <= 23 && mm <= 59 {
+            Some(h * 60 + mm)
+        } else {
+            None
+        }
     })
 }
 
@@ -131,11 +150,22 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
     let today = now.date_naive();
     let lower = text.to_lowercase();
 
-    if lower.contains("pasado mañana") || lower.contains("pasado manana") || lower.contains("day after tomorrow") {
-        return Some(local_ms((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap()));
+    if lower.contains("pasado mañana")
+        || lower.contains("pasado manana")
+        || lower.contains("day after tomorrow")
+    {
+        return Some(local_ms(
+            (today + chrono::Duration::days(2))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        ));
     }
     if lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow") {
-        return Some(local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap()));
+        return Some(local_ms(
+            (today + chrono::Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        ));
     }
     if lower.contains("hoy") || lower.contains("today") {
         return Some(local_ms(today.and_hms_opt(0, 0, 0).unwrap()));
@@ -154,7 +184,10 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
             // `before` termina en "…de " (con la preposición), así que la
             // extracción debe permitir " de" tras el número — un `(\d+)\s*$`
             // simple fallaba y la fecha caía a la regla del "día 15".
-            if let Some(dcaps) = regex::Regex::new(r"(\d{1,2})\s*de\s*$").ok()?.captures(before) {
+            if let Some(dcaps) = regex::Regex::new(r"(\d{1,2})\s*de\s*$")
+                .ok()?
+                .captures(before)
+            {
                 if let Ok(d) = dcaps.get(1)?.as_str().parse::<u32>() {
                     if (1..=31).contains(&d) {
                         let (y, cur_m, _) = ymd(today);
@@ -190,7 +223,11 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
     for t in lower.split_whitespace() {
         if let Some(wd) = weekday_from_name(t) {
             let delta = weekday_delta(wd);
-            return Some(local_ms((today + chrono::Duration::days(delta)).and_hms_opt(0, 0, 0).unwrap()));
+            return Some(local_ms(
+                (today + chrono::Duration::days(delta))
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            ));
         }
     }
     None
@@ -224,9 +261,11 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
     let start_verb = ["inicia", "empieza", "comienza", "starts", "start"]
         .iter()
         .any(|v| lower.contains(v));
-    let end_verb = ["finaliza", "termina", "acaba", "vence", "ends", "finishes", "finish"]
-        .iter()
-        .any(|v| lower.contains(v));
+    let end_verb = [
+        "finaliza", "termina", "acaba", "vence", "ends", "finishes", "finish",
+    ]
+    .iter()
+    .any(|v| lower.contains(v));
     if start_verb && end_verb {
         return None;
     }
@@ -236,9 +275,22 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
     let mentions_weekday = lower.split(|c: char| !c.is_alphabetic()).any(|tok| {
         matches!(
             tok,
-            "lunes" | "martes" | "miércoles" | "miercoles" | "jueves" | "viernes"
-                | "sábado" | "sabado" | "domingo" | "monday" | "tuesday" | "wednesday"
-                | "thursday" | "friday" | "saturday" | "sunday"
+            "lunes"
+                | "martes"
+                | "miércoles"
+                | "miercoles"
+                | "jueves"
+                | "viernes"
+                | "sábado"
+                | "sabado"
+                | "domingo"
+                | "monday"
+                | "tuesday"
+                | "wednesday"
+                | "thursday"
+                | "friday"
+                | "saturday"
+                | "sunday"
         )
     });
     let mentions_relative = lower.contains("hoy")
@@ -246,16 +298,32 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
         || lower.contains("pasado mañana")
         || lower.contains("pasado manana")
         || lower.contains("day after tomorrow")
-        || (!manana_es_manana && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow")));
+        || (!manana_es_manana
+            && (lower.contains("mañana")
+                || lower.contains("manana")
+                || lower.contains("tomorrow")));
     if mentions_relative && mentions_weekday {
         return None;
     }
 
-    if lower.contains("pasado mañana") || lower.contains("pasado manana") || lower.contains("day after tomorrow") {
-        return Some(local_ms((today + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).unwrap()));
+    if lower.contains("pasado mañana")
+        || lower.contains("pasado manana")
+        || lower.contains("day after tomorrow")
+    {
+        return Some(local_ms(
+            (today + chrono::Duration::days(2))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        ));
     }
-    if !manana_es_manana && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow")) {
-        return Some(local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap()));
+    if !manana_es_manana
+        && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow"))
+    {
+        return Some(local_ms(
+            (today + chrono::Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        ));
     }
     if lower.contains("hoy") || lower.contains("today") {
         return Some(local_ms(today.and_hms_opt(0, 0, 0).unwrap()));
@@ -284,7 +352,11 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
     }
     let wd = found?;
     let delta = weekday_delta(wd);
-    Some(local_ms((today + chrono::Duration::days(delta)).and_hms_opt(0, 0, 0).unwrap()))
+    Some(local_ms(
+        (today + chrono::Duration::days(delta))
+            .and_hms_opt(0, 0, 0)
+            .unwrap(),
+    ))
 }
 
 /// Medianoche LOCAL (ms) del día al que pertenece un timestamp.
@@ -299,11 +371,30 @@ pub(crate) fn duration_from_text(text: &str) -> Option<i64> {
     let lower = text.to_lowercase();
 
     let words = [
-        ("una", 60), ("media", 30), ("dos", 120), ("tres", 180), ("cuatro", 240),
-        ("cinco", 300), ("seis", 360), ("siete", 420), ("ocho", 480), ("nueve", 540),
-        ("diez", 600), ("an", 60), ("a", 60), ("one", 60), ("half", 30), ("two", 120),
-        ("three", 180), ("four", 240), ("five", 300), ("six", 360), ("seven", 420),
-        ("eight", 480), ("nine", 540), ("ten", 600),
+        ("una", 60),
+        ("media", 30),
+        ("dos", 120),
+        ("tres", 180),
+        ("cuatro", 240),
+        ("cinco", 300),
+        ("seis", 360),
+        ("siete", 420),
+        ("ocho", 480),
+        ("nueve", 540),
+        ("diez", 600),
+        ("an", 60),
+        ("a", 60),
+        ("one", 60),
+        ("half", 30),
+        ("two", 120),
+        ("three", 180),
+        ("four", 240),
+        ("five", 300),
+        ("six", 360),
+        ("seven", 420),
+        ("eight", 480),
+        ("nine", 540),
+        ("ten", 600),
     ];
 
     // "Xh Ym" combinado ("1h30m", "1 hora 30 minutos")
@@ -326,14 +417,19 @@ pub(crate) fn duration_from_text(text: &str) -> Option<i64> {
     }
 
     // "2 horas" / "2h" / "3 hours" / "for two hours"
-    let re = regex::Regex::new(r"(?:for |durante |por )?(\d+(?:\.\d+)?)\s*(?:horas?|hrs?|hours?|h)\b").ok()?;
+    let re =
+        regex::Regex::new(r"(?:for |durante |por )?(\d+(?:\.\d+)?)\s*(?:horas?|hrs?|hours?|h)\b")
+            .ok()?;
     if let Some(caps) = re.captures(&lower) {
         let v: f64 = caps.get(1)?.as_str().parse().ok()?;
         return Some((v * 60.0).round() as i64);
     }
 
     // palabras de duración en inglés ("two hours") sin dígito
-    let re_en = regex::Regex::new(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|half|an?)\s+hours?\b").ok()?;
+    let re_en = regex::Regex::new(
+        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|half|an?)\s+hours?\b",
+    )
+    .ok()?;
     if let Some(caps) = re_en.captures(&lower) {
         let n = caps.get(1)?.as_str();
         for (w, mins) in words {
@@ -346,12 +442,29 @@ pub(crate) fn duration_from_text(text: &str) -> Option<i64> {
 }
 
 pub(crate) fn detect_category(lower: &str) -> &'static str {
-    if lower.contains("pagar") || lower.contains("factura") || lower.contains("pay") || lower.contains("bill") {
+    if lower.contains("pagar")
+        || lower.contains("factura")
+        || lower.contains("pay")
+        || lower.contains("bill")
+    {
         "fin"
-    } else if lower.contains("examen") || lower.contains("estudiar") || lower.contains("entregar") || lower.contains("proyecto")
-        || lower.contains("exam") || lower.contains("study") || lower.contains("submit") || lower.contains("assignment") || lower.contains("homework") {
+    } else if lower.contains("examen")
+        || lower.contains("estudiar")
+        || lower.contains("entregar")
+        || lower.contains("proyecto")
+        || lower.contains("exam")
+        || lower.contains("study")
+        || lower.contains("submit")
+        || lower.contains("assignment")
+        || lower.contains("homework")
+    {
         "uni"
-    } else if lower.contains("médico") || lower.contains("medico") || lower.contains("gimnasio") || lower.contains("doctor") || lower.contains("gym") {
+    } else if lower.contains("médico")
+        || lower.contains("medico")
+        || lower.contains("gimnasio")
+        || lower.contains("doctor")
+        || lower.contains("gym")
+    {
         "sal"
     } else if lower.contains("cita") || lower.contains("appointment") {
         "per"
@@ -373,7 +486,11 @@ pub fn parse_task_nl(text: &str) -> Option<ParsedTask> {
     let day_ms = parse_day(&lower).unwrap_or_else(|| {
         // por defecto mañana
         let today = chrono::Local::now().date_naive();
-        local_ms((today + chrono::Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
+        local_ms(
+            (today + chrono::Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        )
     });
 
     // Horario: rango explícito ("de 3pm a 5pm") manda; si solo hay hora de
@@ -398,7 +515,11 @@ pub fn parse_task_nl(text: &str) -> Option<ParsedTask> {
     let start_ms = day_ms + start_min as i64 * 60_000;
     let end_ms = day_ms + end_min as i64 * 60_000;
 
-    let priority = if lower.contains("urgente") || lower.contains("urgent") { "alta" } else { "media" };
+    let priority = if lower.contains("urgente") || lower.contains("urgent") {
+        "alta"
+    } else {
+        "media"
+    };
     let category_id = detect_category(&lower).to_string();
 
     // "Recordarme X el [fecha]" (FR-08): crea tarea + recordatorio (1 hora antes).
@@ -479,7 +600,9 @@ pub(crate) fn build_title(text: &str) -> String {
 
     // limpiar espacios y signos sobrantes
     let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
-    let t = t.trim_matches(|c| c == ' ' || c == ',' || c == ':' || c == '-' || c == '—').to_string();
+    let t = t
+        .trim_matches(|c| c == ' ' || c == ',' || c == ':' || c == '-' || c == '—')
+        .to_string();
 
     let mut chars = t.chars();
     match chars.next() {
@@ -534,7 +657,10 @@ mod tests {
         let t = parse("Study calculus for two hours Thursday");
         let thu = midnight(weekday_delta(chrono::Weekday::Thu) as i64);
         assert_eq!(t.start_ms, thu);
-        assert!(t.all_day, "duración sin hora de inicio → Todo el día (nunca inventar hora)");
+        assert!(
+            t.all_day,
+            "duración sin hora de inicio → Todo el día (nunca inventar hora)"
+        );
         assert_eq!(t.title, "Study calculus");
     }
 
@@ -612,7 +738,10 @@ mod tests {
     #[test]
     fn relative_day_ms_rules() {
         let fri = midnight(weekday_delta(chrono::Weekday::Fri) as i64);
-        assert_eq!(relative_day_ms("reunión de programación competitiva el viernes"), Some(fri));
+        assert_eq!(
+            relative_day_ms("reunión de programación competitiva el viernes"),
+            Some(fri)
+        );
         assert_eq!(
             relative_day_ms("quiz el martes a las 6pm"),
             Some(midnight(weekday_delta(chrono::Weekday::Tue) as i64))
@@ -621,7 +750,10 @@ mod tests {
         assert_eq!(relative_day_ms("cita pasado mañana"), Some(midnight(2)));
         assert_eq!(relative_day_ms("llamar hoy"), Some(midnight(0)));
         // "de la mañana" no es la fecha "mañana"
-        assert_eq!(relative_day_ms("clase el viernes a las 10 de la mañana"), Some(fri));
+        assert_eq!(
+            relative_day_ms("clase el viernes a las 10 de la mañana"),
+            Some(fri)
+        );
         // rangos y fechas absolutas: sin corrección
         assert_eq!(relative_day_ms("disponible del 5 al 23 de agosto"), None);
         assert_eq!(relative_day_ms("de lunes a viernes estudiar"), None);
@@ -637,7 +769,10 @@ mod tests {
         // día relativo + día de la semana: varios días, manda la IA
         assert_eq!(relative_day_ms("hoy tengo clase y el viernes examen"), None);
         // verbo de fin sin verbo de inicio: un solo día, se corrige igual
-        assert_eq!(relative_day_ms("la clase termina a las 6pm el viernes"), Some(fri));
+        assert_eq!(
+            relative_day_ms("la clase termina a las 6pm el viernes"),
+            Some(fri)
+        );
     }
 
     #[test]

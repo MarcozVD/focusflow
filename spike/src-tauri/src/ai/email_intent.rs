@@ -171,7 +171,12 @@ mod tests {
         let m = minimize_email(&r);
         assert!(!m.contains("wrote:"), "citas eliminadas");
         assert!(m.contains("reunión"), "cuerpo limpio conservado");
-        assert!(m.len() < body.len() + 200, "truncado: {} vs {}", m.len(), body.len());
+        assert!(
+            m.len() < body.len() + 200,
+            "truncado: {} vs {}",
+            m.len(),
+            body.len()
+        );
     }
 
     #[test]
@@ -183,7 +188,11 @@ mod tests {
         let m = minimize_email(&r);
         let section = m.split("Cuerpo:\n").nth(1).unwrap();
         // 900 'á' + "\n[…]" (salto + 3 caracteres) → 904 caracteres
-        assert_eq!(section.chars().count(), MAX_BODY_CHARS + 4, "truncado por frontera de carácter");
+        assert_eq!(
+            section.chars().count(),
+            MAX_BODY_CHARS + 4,
+            "truncado por frontera de carácter"
+        );
         assert!(section.ends_with("[…]"), "marcador de truncado");
     }
 
@@ -231,7 +240,10 @@ mod tests {
         let p = DummyProvider(fixture);
         let batch = parse_email_intent(&raw("disponible del 5 al 23"), &p, true).expect("ai");
         assert_eq!(batch.intents[0].intent_type, IntentType::Availability);
-        assert_eq!(suggestion_kind(&batch.intents[0].intent_type), "availability");
+        assert_eq!(
+            suggestion_kind(&batch.intents[0].intent_type),
+            "availability"
+        );
         let w = batch.intents[0].window;
         assert!(w.start.is_some() && w.end.is_some() && w.start.unwrap() < w.end.unwrap());
     }
@@ -240,7 +252,8 @@ mod tests {
     fn parse_irrelevant_email_returns_empty() {
         let fixture = json!({"intents": []});
         let p = DummyProvider(fixture);
-        let batch = parse_email_intent(&raw("espero que estés bien, saludos"), &p, true).expect("ai");
+        let batch =
+            parse_email_intent(&raw("espero que estés bien, saludos"), &p, true).expect("ai");
         assert!(batch.intents.is_empty());
     }
 
@@ -263,7 +276,12 @@ mod tests {
             fn id(&self) -> &str {
                 "cap"
             }
-            fn chat_json(&self, _s: &str, user: &str, _schema: &str) -> AiResult<serde_json::Value> {
+            fn chat_json(
+                &self,
+                _s: &str,
+                user: &str,
+                _schema: &str,
+            ) -> AiResult<serde_json::Value> {
                 *self.0.lock().unwrap() = user.to_string();
                 Ok(json!({"intents": []}))
             }
@@ -275,7 +293,10 @@ mod tests {
         let user = captured.lock().unwrap();
         assert!(user.contains("<correo>"), "delimitador de apertura");
         assert!(user.contains("</correo>"), "delimitador de cierre");
-        assert!(user.contains("DATOS de un correo"), "clasificación del contenido");
+        assert!(
+            user.contains("DATOS de un correo"),
+            "clasificación del contenido"
+        );
         assert!(user.contains("viernes"), "el cuerpo llega como dato");
     }
 

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+
+  <Identity
+    Name="MarcozVD.FlowFocus"
+    Publisher="__PUBLISHER_ID__"
+    Version="0.1.5.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>FlowFocus</DisplayName>
+    <PublisherDisplayName>MarcozVD</PublisherDisplayName>
+    <Logo>assets\StoreLogo.scale-100.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="es-es" />
+  </Resources>
+
+  <Applications>
+    <Application Id="FocusFlow"
+      Executable="app\focusflow.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="FlowFocus"
+        Description="Gestor de tiempo con IA: calendario, tareas y planificacion inteligente."
+        BackgroundColor="#2563EB"
+        Square150x150Logo="assets\Square150x150Logo.scale-100.png"
+        Square44x44Logo="assets\Square44x44Logo.scale-100.png" />
+      <Extensions>
+        <!-- Autostart nativo MSIX (reemplaza la escritura en HKCU\...\Run de la build MSI) -->
+        <desktop:Extension Category="windows.startupTask" Executable="app\focusflow.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="FocusFlowStartup" Enabled="false" DisplayName="FlowFocus" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

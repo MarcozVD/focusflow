@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import { signInWithGoogle, loadAuthStatus } from "./data.svelte.ts";
 
   let busy = $state(false);
@@ -19,6 +20,17 @@
       err = String(e);
     } finally {
       busy = false;
+    }
+  }
+
+  // Guía de primeros pasos (incluye cómo obtener una cuenta de Google).
+  // Misma URL whitelisteada en el comando open_website del backend.
+  async function openGuide() {
+    try {
+      await invoke("open_website", { url: "https://gentle-cherry-45b1.mmvaleradaza.workers.dev/legal/empezar.html" });
+    } catch {
+      // fallback directo si el comando falla
+      window.open("https://accounts.google.com/signup", "_blank");
     }
   }
 </script>
@@ -48,6 +60,12 @@
     <p class="hint">
       Se abre tu navegador para autorizar. Tu cuenta de Google se usa solo para leer Gmail y
       sincronizar tu agenda. Sin sesión no puedes usar la app.
+    </p>
+    <p class="hint">
+      ¿No tienes cuenta de Google? Se crea gratis en un minuto —
+      <button class="linklike" onclick={openGuide}>ver guía para empezar</button>
+      (o créala directamente en
+      <button class="linklike" onclick={() => window.open("https://accounts.google.com/signup", "_blank")}>accounts.google.com/signup</button>).
     </p>
   </div>
 </div>
@@ -124,5 +142,18 @@
     color: var(--text-dim, inherit);
     line-height: 1.5;
     margin: 0;
+  }
+  .linklike {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--primary, #4f46e5);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .linklike:hover {
+    opacity: 0.85;
   }
 </style>

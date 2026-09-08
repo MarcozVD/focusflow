@@ -195,7 +195,7 @@ impl Db {
     /// "migración aplicada" de "columna preexistente", y una futura migración
     /// con transformación de datos necesita ese punto de anclaje
     /// (auditoría 17, hallazgo #7).
-    const SCHEMA_VERSION: i64 = 10;
+    const SCHEMA_VERSION: i64 = 11;
 
     fn migrate(&self) -> rusqlite::Result<()> {
         let v: i64 = self
@@ -231,8 +231,32 @@ impl Db {
         if v < 10 {
             self.migrate_0010()?;
         }
+        if v < 11 {
+            self.migrate_0011()?;
+        }
         self.conn
             .pragma_update(None, "user_version", Self::SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    /// Registro de correos ya revisados (fase 8, dedupe por correo): una fila
+    /// por Message-ID procesado. A diferencia del conteo de sugerencias vivas
+    /// (el método anterior), esta marca NO desaparece cuando el usuario
+    /// rechaza/borra sugerencias o cuando la retención archiva la fila: el
+    /// correo no vuelve a enviarse a la IA en cada sync.
+    fn migrate_0011(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS email_seen (
+                message_id TEXT PRIMARY KEY,
+                seen_at    INTEGER NOT NULL
+            )",
+        )?;
+        // backfill de instalación existente: todo Message-ID que ya generó
+        // sugerencias cuenta como revisado (las sugerencias no vencidas se
+        // mantienen; las archivadas no se re-analizan nunca más).
+        self.email_seen_backfill()?;
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS idx_email_seen_at ON email_seen(seen_at)")?;
         Ok(())
     }
 
@@ -270,10 +294,12 @@ impl Db {
                 status TEXT NOT NULL DEFAULT 'shown'
             )",
         )?;
-        self.conn
-            .execute_batch("CREATE INDEX IF NOT EXISTS idx_notif_log_lookup ON notification_log(kind, task_id)")?;
-        self.conn
-            .execute_batch("CREATE INDEX IF NOT EXISTS idx_notif_log_fired ON notification_log(fired_at)")?;
+        self.conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_notif_log_lookup ON notification_log(kind, task_id)",
+        )?;
+        self.conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_notif_log_fired ON notification_log(fired_at)",
+        )?;
         Ok(())
     }
 
@@ -288,7 +314,8 @@ impl Db {
             .collect::<Result<_, _>>()?;
         let add = |name: &str, ddl: &str| -> rusqlite::Result<()> {
             if !cols.iter().any(|c| c == name) {
-                self.conn.execute_batch(&format!("ALTER TABLE suggested_events ADD COLUMN {ddl}"))?;
+                self.conn
+                    .execute_batch(&format!("ALTER TABLE suggested_events ADD COLUMN {ddl}"))?;
             }
             Ok(())
         };
@@ -296,8 +323,9 @@ impl Db {
         add("deadline_at", "deadline_at INTEGER")?;
         add("prep_min", "prep_min INTEGER NOT NULL DEFAULT 0")?;
         add("source_subject", "source_subject TEXT NOT NULL DEFAULT ''")?;
-        self.conn
-            .execute_batch("CREATE INDEX IF NOT EXISTS idx_suggestions_kind ON suggested_events(kind)")?;
+        self.conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_kind ON suggested_events(kind)",
+        )?;
         Ok(())
     }
 
@@ -375,7 +403,8 @@ impl Db {
             .collect::<Result<_, _>>()?;
         let add = |name: &str, ddl: &str| -> rusqlite::Result<()> {
             if !cols.iter().any(|c| c == name) {
-                self.conn.execute_batch(&format!("ALTER TABLE tasks ADD COLUMN {ddl}"))?;
+                self.conn
+                    .execute_batch(&format!("ALTER TABLE tasks ADD COLUMN {ddl}"))?;
             }
             Ok(())
         };
@@ -466,20 +495,25 @@ impl Db {
             ",
         )?;
         let has_metadata: bool = {
-            let mut stmt = self.conn.prepare("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'metadata'")?;
+            let mut stmt = self.conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'metadata'",
+            )?;
             let n: i64 = stmt.query_row([], |r| r.get(0))?;
             n > 0
         };
         if !has_metadata {
-            self.conn
-                .execute_batch("ALTER TABLE tasks ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'")?;
+            self.conn.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+            )?;
         }
         Ok(())
     }
 
     pub fn settings_get(&self, key: &str) -> rusqlite::Result<Option<String>> {
         self.conn
-            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
             .optional()
     }
 
@@ -504,7 +538,8 @@ impl Db {
     /// incluye secretos: no hay claves ni contraseñas (viven en el Credential
     /// Manager del SO), y las settings sensibles (config de correo) se
     /// exportan sin la contraseña (nunca estuvo en DB) y sin el rescan flag.
-    pub fn export_data(&self) -> rusqlite::Result<serde_json::Value> {        fn dump_all(conn: &Connection, table: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
+    pub fn export_data(&self) -> rusqlite::Result<serde_json::Value> {
+        fn dump_all(conn: &Connection, table: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
             use rusqlite::types::Value;
             let mut stmt = conn.prepare(&format!("SELECT * FROM {table} ORDER BY id"))?;
             let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
@@ -566,6 +601,7 @@ impl Db {
             "assistant_actions",
             "plan_proposals",
             "suggested_events",
+            "email_seen",
             "sync_state",
             "sync_history",
             "trusted_senders",
@@ -589,7 +625,12 @@ impl Db {
         }
         let now = now_ms();
         let day = 86_400_000;
-        let t = |title: &str, cat: &str, prio: &str, start: i64, end: i64| -> rusqlite::Result<()> {
+        let t = |title: &str,
+                 cat: &str,
+                 prio: &str,
+                 start: i64,
+                 end: i64|
+         -> rusqlite::Result<()> {
             self.conn.execute(
                 "INSERT INTO tasks (title, category_id, priority, status, start_at, end_at, created_at, updated_at)
                  VALUES (?1, ?2, ?3, 'pendiente', ?4, ?5, ?6, ?6)",
@@ -597,23 +638,56 @@ impl Db {
             )?;
             Ok(())
         };
-        t("Estudiar cálculo — derivadas e integrales", "uni", "alta", now + day * 0 + 9 * 3_600_000, now + day * 0 + 11 * 3_600_000)?;
-        t("Entregar proyecto de redes", "uni", "alta", now + day + 14 * 3_600_000, now + day + 14 * 3_600_000 + 1_800_000)?;
-        t("Pagar internet", "fin", "media", now + day * 2 + 9 * 3_600_000, now + day * 2 + 9 * 3_600_000)?;
-        t("Examen de física — parcial 2", "uni", "alta", now + day * 3 + 8 * 3_600_000, now + day * 3 + 10 * 3_600_000)?;
-        t("Cita médico — revisión anual", "sal", "baja", now + day * 4 + 12 * 3_600_000, now + day * 4 + 12 * 3_600_000 + 45 * 60_000)?;
+        t(
+            "Estudiar cálculo — derivadas e integrales",
+            "uni",
+            "alta",
+            now + 9 * 3_600_000,
+            now + 11 * 3_600_000,
+        )?;
+        t(
+            "Entregar proyecto de redes",
+            "uni",
+            "alta",
+            now + day + 14 * 3_600_000,
+            now + day + 14 * 3_600_000 + 1_800_000,
+        )?;
+        t(
+            "Pagar internet",
+            "fin",
+            "media",
+            now + day * 2 + 9 * 3_600_000,
+            now + day * 2 + 9 * 3_600_000,
+        )?;
+        t(
+            "Examen de física — parcial 2",
+            "uni",
+            "alta",
+            now + day * 3 + 8 * 3_600_000,
+            now + day * 3 + 10 * 3_600_000,
+        )?;
+        t(
+            "Cita médico — revisión anual",
+            "sal",
+            "baja",
+            now + day * 4 + 12 * 3_600_000,
+            now + day * 4 + 12 * 3_600_000 + 45 * 60_000,
+        )?;
         Ok(())
     }
 
     pub fn count(&self) -> rusqlite::Result<i64> {
-        self.conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL", [], |r| r.get(0))
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
     }
 
     pub fn list(&self) -> rusqlite::Result<Vec<TaskRow>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY start_at",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY start_at")?;
         let rows = stmt.query_map([], task_from_row)?;
         rows.collect()
     }
@@ -628,7 +702,12 @@ impl Db {
     }
 
     /// Devuelve otra tarea activa que se solapa con [start, end].
-    pub fn find_overlap(&self, exclude_id: i64, start: i64, end: i64) -> rusqlite::Result<Option<(i64, String)>> {
+    pub fn find_overlap(
+        &self,
+        exclude_id: i64,
+        start: i64,
+        end: i64,
+    ) -> rusqlite::Result<Option<(i64, String)>> {
         // No cuentan como solape: tareas de todo el día ni spans multi-día
         // (>= 24 h). Son marcadores/rangos inicio→fin cuyos días quedan
         // libres para añadir otras tareas. Se excluye por DURACIÓN (no solo
@@ -649,7 +728,12 @@ impl Db {
 
     /// Igual que `find_overlap` pero excluyendo varias tareas (p. ej. los
     /// eventos recién creados por la propia propuesta al aceptar un plan).
-    pub fn find_overlap_excluding(&self, exclude_ids: &[i64], start: i64, end: i64) -> rusqlite::Result<Option<(i64, String)>> {
+    pub fn find_overlap_excluding(
+        &self,
+        exclude_ids: &[i64],
+        start: i64,
+        end: i64,
+    ) -> rusqlite::Result<Option<(i64, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title FROM tasks
              WHERE deleted_at IS NULL AND status != 'completada'
@@ -658,7 +742,9 @@ impl Db {
              ORDER BY start_at LIMIT 16",
         )?;
         let rows = stmt
-            .query_map(rusqlite::params![start, end], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .query_map(rusqlite::params![start, end], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows.into_iter().find(|(id, _)| !exclude_ids.contains(id)))
     }
@@ -679,11 +765,8 @@ impl Db {
             rusqlite::params![title, sanitize_category(category_id), priority, start_at, end_at, all_day as i64, now],
         )?;
         let id = self.conn.last_insert_rowid();
-        self.conn.query_row(
-            "SELECT * FROM tasks WHERE id = ?1",
-            [id],
-            task_from_row,
-        )
+        self.conn
+            .query_row("SELECT * FROM tasks WHERE id = ?1", [id], task_from_row)
     }
 
     /// Actualiza solo la descripción (contexto) de una tarea.
@@ -729,7 +812,13 @@ impl Db {
         Ok(())
     }
 
-    pub fn move_to(&self, id: i64, start_at: i64, end_at: i64, all_day: Option<bool>) -> rusqlite::Result<()> {
+    pub fn move_to(
+        &self,
+        id: i64,
+        start_at: i64,
+        end_at: i64,
+        all_day: Option<bool>,
+    ) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE tasks SET start_at = ?2, end_at = ?3,
                     all_day = CASE WHEN ?5 IS NULL THEN all_day ELSE ?5 END,
@@ -772,8 +861,19 @@ impl Db {
                     updated_at = ?12
              WHERE id = ?1 AND deleted_at IS NULL",
             rusqlite::params![
-                id, title, sanitize_category(category_id), priority, start_at, end_at,
-                description, tags, notes, links, reminder_minutes, now_ms(), all_day
+                id,
+                title,
+                sanitize_category(category_id),
+                priority,
+                start_at,
+                end_at,
+                description,
+                tags,
+                notes,
+                links,
+                reminder_minutes,
+                now_ms(),
+                all_day
             ],
         )?;
         // FR-30: cambiar el recordatorio rearma el disparo (no refirar si no cambió)
@@ -788,7 +888,11 @@ impl Db {
 
     pub fn get_task(&self, id: i64) -> rusqlite::Result<Option<TaskRow>> {
         self.conn
-            .query_row("SELECT * FROM tasks WHERE id = ?1 AND deleted_at IS NULL", [id], task_from_row)
+            .query_row(
+                "SELECT * FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                [id],
+                task_from_row,
+            )
             .optional()
     }
 
@@ -896,7 +1000,12 @@ impl Db {
     // ---------------- registro de notificaciones (fase 11) ----------------
 
     /// Registra un disparo de notificación contextual y devuelve su id.
-    pub fn log_notification(&self, kind: &str, task_id: i64, payload: &str) -> rusqlite::Result<i64> {
+    pub fn log_notification(
+        &self,
+        kind: &str,
+        task_id: i64,
+        payload: &str,
+    ) -> rusqlite::Result<i64> {
         self.conn.execute(
             "INSERT INTO notification_log (kind, task_id, fired_at, payload) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![kind, task_id, now_ms(), payload],
@@ -929,7 +1038,12 @@ impl Db {
     }
 
     /// ¿Disparado recientemente (ventana de cadencia) para (kind, tarea)?
-    pub fn notif_fired_recently(&self, kind: &str, task_id: i64, since_ms: i64) -> rusqlite::Result<bool> {
+    pub fn notif_fired_recently(
+        &self,
+        kind: &str,
+        task_id: i64,
+        since_ms: i64,
+    ) -> rusqlite::Result<bool> {
         self.conn
             .query_row(
                 "SELECT 1 FROM notification_log
@@ -952,7 +1066,12 @@ impl Db {
 
     // ---------------- propuestas de planificación (fase 7) ----------------
 
-    pub fn insert_plan_proposal(&self, text: &str, payload: &str, source: &str) -> rusqlite::Result<i64> {
+    pub fn insert_plan_proposal(
+        &self,
+        text: &str,
+        payload: &str,
+        source: &str,
+    ) -> rusqlite::Result<i64> {
         let now = now_ms();
         self.conn.execute(
             "INSERT INTO plan_proposals (text, status, payload, source, created_at, updated_at)
@@ -972,7 +1091,10 @@ impl Db {
             .optional()
     }
 
-    pub fn list_plan_proposals(&self, only_pending: bool) -> rusqlite::Result<Vec<PlanProposalRow>> {
+    pub fn list_plan_proposals(
+        &self,
+        only_pending: bool,
+    ) -> rusqlite::Result<Vec<PlanProposalRow>> {
         let mut stmt = self.conn.prepare(if only_pending {
             "SELECT id, text, status, payload, source, created_at, updated_at FROM plan_proposals
              WHERE status = 'pending' ORDER BY created_at DESC"
@@ -1014,7 +1136,10 @@ impl Db {
             .optional()
     }
 
-    pub fn list_assistant_actions(&self, only_pending: bool) -> rusqlite::Result<Vec<AssistantActionRow>> {
+    pub fn list_assistant_actions(
+        &self,
+        only_pending: bool,
+    ) -> rusqlite::Result<Vec<AssistantActionRow>> {
         let mut stmt = self.conn.prepare(if only_pending {
             "SELECT id, kind, payload, status, created_at, updated_at FROM assistant_actions
              WHERE status = 'pending' ORDER BY created_at DESC"
@@ -1035,7 +1160,9 @@ impl Db {
     }
 
     pub fn duplicate(&self, id: i64) -> rusqlite::Result<Option<TaskRow>> {
-        let Some(t) = self.get_task(id)? else { return Ok(None) };
+        let Some(t) = self.get_task(id)? else {
+            return Ok(None);
+        };
         let now = now_ms();
         let shift = (t.end_at - t.start_at).max(3_600_000);
         self.conn.execute(
@@ -1064,7 +1191,12 @@ impl Db {
             .optional()
     }
 
-    pub fn find_similar_task(&self, title: &str, start_at: i64, sender: &str) -> rusqlite::Result<Option<(i64, String)>> {
+    pub fn find_similar_task(
+        &self,
+        title: &str,
+        start_at: i64,
+        sender: &str,
+    ) -> rusqlite::Result<Option<(i64, String)>> {
         let window_start = start_at - 48 * 3_600_000;
         let window_end = start_at + 48 * 3_600_000;
         let mut stmt = self.conn.prepare(
@@ -1148,9 +1280,10 @@ impl Db {
              ORDER BY created_at ASC",
         )?;
         let candidates: Vec<(i64, String)> = stmt
-            .query_map(rusqlite::params![window_start, window_end, window_end, exclude_email_id], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })?
+            .query_map(
+                rusqlite::params![window_start, window_end, window_end, exclude_email_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?
             .collect::<Result<_, _>>()?;
         for (id, t) in candidates {
             if title_similar(title, &t) {
@@ -1174,11 +1307,16 @@ impl Db {
         if let Some(tid) = task_id {
             let _ = self.delete(tid);
         }
-        self.conn.execute("DELETE FROM suggested_events WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM suggested_events WHERE id = ?1", [id])?;
         Ok(())
     }
 
-    pub fn list_suggestions(&self, only_pending: bool, retention_ms: i64) -> rusqlite::Result<Vec<SuggestionRow>> {
+    pub fn list_suggestions(
+        &self,
+        only_pending: bool,
+        retention_ms: i64,
+    ) -> rusqlite::Result<Vec<SuggestionRow>> {
         let sql = if only_pending {
             "SELECT * FROM suggested_events WHERE status = 'pending' ORDER BY created_at DESC"
         } else {
@@ -1222,6 +1360,45 @@ impl Db {
         self.conn.execute_batch("ROLLBACK")
     }
 
+    /// ¿Este correo ya fue revisado? (registro persistente, migración 0011)
+    pub fn email_seen(&self, message_id: &str) -> rusqlite::Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM email_seen WHERE message_id = ?1",
+            [message_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Marca un correo como revisado (idempotente).
+    pub fn email_mark_seen(&self, message_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO email_seen (message_id, seen_at) VALUES (?1, ?2)",
+            rusqlite::params![message_id, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Cuántos Message-ID distintos hay registrados como revisados.
+    #[cfg(test)]
+    pub fn email_seen_count(&self) -> rusqlite::Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM email_seen", [], |r| r.get(0))
+    }
+
+    /// Backfill del registro de vistos desde sugerencias existentes (lo usa
+    /// la migración 0011 sobre una BD vieja; público para poder testearlo).
+    #[doc(hidden)]
+    pub fn email_seen_backfill(&self) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO email_seen (message_id, seen_at)
+             SELECT source_email_id, created_at
+             FROM suggested_events
+             WHERE source_email_id IS NOT NULL AND source_email_id != ''",
+            [],
+        )
+    }
+
     /// Auto-archiva (borra) sugerencias resueltas más antiguas que el corte.
     pub fn prune_suggestions(&self, cutoff_ms: i64) -> rusqlite::Result<usize> {
         let n = self.conn.execute(
@@ -1253,14 +1430,27 @@ impl Db {
             "UPDATE suggested_events SET title = ?2, category_id = ?3, priority = ?4,
                     start_at = ?5, end_at = ?6, description = ?7, updated_at = ?8
              WHERE id = ?1",
-            rusqlite::params![id, title, sanitize_category(category_id), priority, start_at, end_at, description, now_ms()],
+            rusqlite::params![
+                id,
+                title,
+                sanitize_category(category_id),
+                priority,
+                start_at,
+                end_at,
+                description,
+                now_ms()
+            ],
         )?;
         Ok(())
     }
 
     pub fn get_suggestion(&self, id: i64) -> rusqlite::Result<Option<SuggestionRow>> {
         self.conn
-            .query_row("SELECT * FROM suggested_events WHERE id = ?1", [id], suggestion_from_row)
+            .query_row(
+                "SELECT * FROM suggested_events WHERE id = ?1",
+                [id],
+                suggestion_from_row,
+            )
             .optional()
     }
 
@@ -1294,13 +1484,17 @@ impl Db {
                AND (? IS NULL OR source_email_id != ?)
              ORDER BY created_at ASC"
         );
-        let mut params: Vec<&dyn rusqlite::ToSql> =
-            thread_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let mut params: Vec<&dyn rusqlite::ToSql> = thread_ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::ToSql)
+            .collect();
         params.push(&exclude_email_id);
         params.push(&exclude_email_id);
         let mut stmt = self.conn.prepare(&sql)?;
         let candidates: Vec<(i64, String)> = stmt
-            .query_map(rusqlite::params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .query_map(rusqlite::params_from_iter(params), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
             .collect::<Result<_, _>>()?;
         for (id, t) in candidates {
             if crate::store::title_similar(title, &t) {
@@ -1320,12 +1514,15 @@ impl Db {
     }
 
     pub fn trusted_remove(&self, sender: &str) -> rusqlite::Result<()> {
-        self.conn.execute("DELETE FROM trusted_senders WHERE sender = ?1", [sender])?;
+        self.conn
+            .execute("DELETE FROM trusted_senders WHERE sender = ?1", [sender])?;
         Ok(())
     }
 
     pub fn trusted_list(&self) -> rusqlite::Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT sender FROM trusted_senders ORDER BY sender")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT sender FROM trusted_senders ORDER BY sender")?;
         let rows = stmt.query_map([], |r| r.get(0))?;
         rows.collect()
     }
@@ -1356,7 +1553,13 @@ impl Db {
         Ok(())
     }
 
-    pub fn sync_state_set(&self, source: &str, checkpoint: &str, result: &str, error: &str) -> rusqlite::Result<()> {
+    pub fn sync_state_set(
+        &self,
+        source: &str,
+        checkpoint: &str,
+        result: &str,
+        error: &str,
+    ) -> rusqlite::Result<()> {
         let now = now_ms();
         self.conn.execute(
             "INSERT INTO sync_state (source, checkpoint, last_result, last_error, last_run_at, created_at, updated_at)
@@ -1424,7 +1627,10 @@ impl Db {
         rows.collect()
     }
 
-    pub fn sync_history_today(&self, start_of_day_ms: i64) -> rusqlite::Result<Vec<SyncHistoryRow>> {
+    pub fn sync_history_today(
+        &self,
+        start_of_day_ms: i64,
+    ) -> rusqlite::Result<Vec<SyncHistoryRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, source, started_at, finished_at, result, items_found, items_processed, error, note
              FROM sync_history WHERE started_at >= ?1 ORDER BY id DESC",
@@ -1632,11 +1838,21 @@ mod tests {
         let db = db();
         let now = now_ms();
         let t = db
-            .create("clamp", "uni", "media", now + 3_600_000, now + 7_200_000, false)
+            .create(
+                "clamp",
+                "uni",
+                "media",
+                now + 3_600_000,
+                now + 7_200_000,
+                false,
+            )
             .unwrap();
         // negativo → 0 (dispara al inicio, nunca después); gigante → 4 semanas
         db.set_task_reminder(t.id, -30).unwrap();
-        assert_eq!(db.get_task(t.id).unwrap().unwrap().reminder_minutes, Some(0));
+        assert_eq!(
+            db.get_task(t.id).unwrap().unwrap().reminder_minutes,
+            Some(0)
+        );
         db.set_task_reminder(t.id, i64::MAX).unwrap();
         assert_eq!(
             db.get_task(t.id).unwrap().unwrap().reminder_minutes,
@@ -1649,7 +1865,14 @@ mod tests {
         let db = db();
         let now = now_ms();
         let t = db
-            .create("parcial", "uni", "alta", now - 2 * 3_600_000, now - 1_800_000, false)
+            .create(
+                "parcial",
+                "uni",
+                "alta",
+                now - 2 * 3_600_000,
+                now - 1_800_000,
+                false,
+            )
             .unwrap();
         db.set_task_reminder(t.id, 60).unwrap();
 
@@ -1668,13 +1891,27 @@ mod tests {
         let now = now_ms();
 
         let futura = db
-            .create("futura", "uni", "media", now + 3_600_000 * 2, now + 5_400_000, false)
+            .create(
+                "futura",
+                "uni",
+                "media",
+                now + 3_600_000 * 2,
+                now + 5_400_000,
+                false,
+            )
             .unwrap();
         db.set_task_reminder(futura.id, 60).unwrap();
         assert!(db.due_reminders(now).unwrap().is_empty());
 
         let pasada = db
-            .create("pasada", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .create(
+                "pasada",
+                "uni",
+                "media",
+                now - 3_600_000,
+                now - 1_800_000,
+                false,
+            )
             .unwrap();
         db.set_task_reminder(pasada.id, 60).unwrap();
         db.set_completed(pasada.id, true).unwrap();
@@ -1686,7 +1923,14 @@ mod tests {
         let db = db();
         let now = now_ms();
         let t = db
-            .create("tarea", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .create(
+                "tarea",
+                "uni",
+                "media",
+                now - 3_600_000,
+                now - 1_800_000,
+                false,
+            )
             .unwrap();
         db.set_task_reminder(t.id, 60).unwrap();
         db.mark_reminder_fired(t.id).unwrap();
@@ -1694,8 +1938,18 @@ mod tests {
 
         // cambiar el recordatorio → rearma
         db.update_task_full(
-            t.id, "tarea", "uni", "media", now - 3_600_000, now - 1_800_000,
-            "", "[]", "", "", Some(30), Some(false),
+            t.id,
+            "tarea",
+            "uni",
+            "media",
+            now - 3_600_000,
+            now - 1_800_000,
+            "",
+            "[]",
+            "",
+            "",
+            Some(30),
+            Some(false),
         )
         .unwrap();
         assert_eq!(db.due_reminders(now).unwrap().len(), 1);
@@ -1703,8 +1957,18 @@ mod tests {
         // mismo valor → no refira
         db.mark_reminder_fired(t.id).unwrap();
         db.update_task_full(
-            t.id, "tarea", "uni", "media", now - 3_600_000, now - 1_800_000,
-            "", "[]", "", "", Some(30), Some(false),
+            t.id,
+            "tarea",
+            "uni",
+            "media",
+            now - 3_600_000,
+            now - 1_800_000,
+            "",
+            "[]",
+            "",
+            "",
+            Some(30),
+            Some(false),
         )
         .unwrap();
         assert!(db.due_reminders(now).unwrap().is_empty());
@@ -1715,18 +1979,51 @@ mod tests {
         let db = db();
         let now = now_ms();
         let t = db
-            .create("tarea", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .create(
+                "tarea",
+                "uni",
+                "media",
+                now - 3_600_000,
+                now - 1_800_000,
+                false,
+            )
             .unwrap();
         db.set_task_reminder(t.id, 60).unwrap();
         db.mark_reminder_fired(t.id).unwrap();
-        db.move_to(t.id, now + 3_600_000, now + 5_400_000, None).unwrap();
+        db.move_to(t.id, now + 3_600_000, now + 5_400_000, None)
+            .unwrap();
         assert!(db.due_reminders(now).unwrap().is_empty());
     }
 
-    fn ins_suggestion(db: &Db, email_id: &str, subject: &str, kind: &str, title: &str, start: i64) -> i64 {
+    fn ins_suggestion(
+        db: &Db,
+        email_id: &str,
+        subject: &str,
+        kind: &str,
+        title: &str,
+        start: i64,
+    ) -> i64 {
         db.insert_suggestion(
-            "email", Some(email_id), Some("a@b.c"), subject, kind, title, "", "otr", "media",
-            Some(start), Some(start + 3_600_000), None, 0, "", "[]", 0.9, "test", None, "", "pending",
+            "email",
+            Some(email_id),
+            Some("a@b.c"),
+            subject,
+            kind,
+            title,
+            "",
+            "otr",
+            "media",
+            Some(start),
+            Some(start + 3_600_000),
+            None,
+            0,
+            "",
+            "[]",
+            0.9,
+            "test",
+            None,
+            "",
+            "pending",
         )
         .unwrap()
     }
@@ -1752,9 +2049,26 @@ mod tests {
         let db = db();
         let id = db
             .insert_suggestion(
-                "email", Some("m1"), Some("jefe@x.com"), "Asunto", "deadline",
-                "Informe", "desc", "tra", "alta", Some(5), Some(5), Some(5), 240,
-                "", "[]", 0.9, "entrega", None, "", "pending",
+                "email",
+                Some("m1"),
+                Some("jefe@x.com"),
+                "Asunto",
+                "deadline",
+                "Informe",
+                "desc",
+                "tra",
+                "alta",
+                Some(5),
+                Some(5),
+                Some(5),
+                240,
+                "",
+                "[]",
+                0.9,
+                "entrega",
+                None,
+                "",
+                "pending",
             )
             .unwrap();
         let s = db.get_suggestion(id).unwrap().unwrap();
@@ -1768,39 +2082,71 @@ mod tests {
     fn find_similar_suggestion_dedupes_across_emails() {
         let db = db();
         let start = now_ms() + 86_400_000;
-        let first = ins_suggestion(&db, "email-1", "Re: Informe", "event", "Informe del proyecto", start);
+        let first = ins_suggestion(
+            &db,
+            "email-1",
+            "Re: Informe",
+            "event",
+            "Informe del proyecto",
+            start,
+        );
         // mismo compromiso desde OTRO correo → detectado
         let (id, _) = db
-            .find_similar_suggestion("Informe del proyecto", Some(start), Some(start + 3_600_000), Some("email-2"))
+            .find_similar_suggestion(
+                "Informe del proyecto",
+                Some(start),
+                Some(start + 3_600_000),
+                Some("email-2"),
+            )
             .unwrap()
             .expect("duplicado detectado");
         assert_eq!(id, first);
         // el mismo correo que la creó no debe chocar consigo mismo
         assert!(
-            db.find_similar_suggestion("Informe del proyecto", Some(start), Some(start + 3_600_000), Some("email-1"))
-                .unwrap()
-                .is_none(),
+            db.find_similar_suggestion(
+                "Informe del proyecto",
+                Some(start),
+                Some(start + 3_600_000),
+                Some("email-1")
+            )
+            .unwrap()
+            .is_none(),
             "excluye su propio correo"
         );
         // título distinto → no duplicado
-        assert!(
-            db.find_similar_suggestion("Cena familiar", Some(start), Some(start + 3_600_000), Some("email-2"))
-                .unwrap()
-                .is_none()
-        );
+        assert!(db
+            .find_similar_suggestion(
+                "Cena familiar",
+                Some(start),
+                Some(start + 3_600_000),
+                Some("email-2")
+            )
+            .unwrap()
+            .is_none());
         // ventana muy lejana → no duplicado
-        assert!(
-            db.find_similar_suggestion("Informe del proyecto", Some(start + 30 * 86_400_000), Some(start + 30 * 86_400_000 + 3_600_000), Some("email-2"))
-                .unwrap()
-                .is_none()
-        );
+        assert!(db
+            .find_similar_suggestion(
+                "Informe del proyecto",
+                Some(start + 30 * 86_400_000),
+                Some(start + 30 * 86_400_000 + 3_600_000),
+                Some("email-2")
+            )
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn find_similar_suggestion_without_date_does_not_overflow() {
         let db = db();
         let start = now_ms() + 86_400_000;
-        ins_suggestion(&db, "email-1", "Re: Tareas", "task", "Enviar informe semanal", start);
+        ins_suggestion(
+            &db,
+            "email-1",
+            "Re: Tareas",
+            "task",
+            "Enviar informe semanal",
+            start,
+        );
         // intents "task" sin fecha (None) → antes paniqueaba con overflow (i64::MIN - 48h)
         let r = db
             .find_similar_suggestion("Enviar informe semanal", None, None, Some("email-2"))
@@ -1825,7 +2171,10 @@ mod tests {
 
         db.delete_suggestion(id).unwrap();
         assert!(db.get_suggestion(id).unwrap().is_none());
-        assert!(db.get_task(t.id).unwrap().is_none(), "tarea creada también borrada");
+        assert!(
+            db.get_task(t.id).unwrap().is_none(),
+            "tarea creada también borrada"
+        );
     }
 
     #[test]
@@ -1833,7 +2182,14 @@ mod tests {
         let db = db();
         let start = now_ms() + 86_400_000;
         // email-1 anuncia el compromiso ("entrega viernes")
-        ins_suggestion(&db, "email-1", "Entrega proyecto", "deadline", "Entregar proyecto", start);
+        ins_suggestion(
+            &db,
+            "email-1",
+            "Entrega proyecto",
+            "deadline",
+            "Entregar proyecto",
+            start,
+        );
         // email-2 es respuesta del hilo (References incluye email-1) y corrige
         let thread = vec!["email-1".to_string()];
         let hit = db
@@ -1855,7 +2211,9 @@ mod tests {
     #[test]
     fn assistant_actions_roundtrip() {
         let db = db();
-        let id = db.insert_assistant_action("complete", r#"{"kind":"complete"}"#).unwrap();
+        let id = db
+            .insert_assistant_action("complete", r#"{"kind":"complete"}"#)
+            .unwrap();
         let row = db.get_assistant_action(id).unwrap().unwrap();
         assert_eq!(row.kind, "complete");
         assert_eq!(row.status, "pending");
@@ -1869,7 +2227,9 @@ mod tests {
     fn set_task_status_marks_en_curso() {
         let db = db();
         let now = now_ms();
-        let t = db.create("Estudiar", "uni", "media", now, now + 3_600_000, false).unwrap();
+        let t = db
+            .create("Estudiar", "uni", "media", now, now + 3_600_000, false)
+            .unwrap();
         assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "pendiente");
         db.set_task_status(t.id, "en-curso").unwrap();
         assert_eq!(db.get_task(t.id).unwrap().unwrap().status, "en-curso");
@@ -1881,7 +2241,16 @@ mod tests {
     fn find_similar_task_dedupes_against_existing_tasks() {
         let db = db();
         let start = now_ms() + 86_400_000;
-        let t = db.create("Informe del proyecto", "uni", "alta", start, start + 3_600_000, false).unwrap();
+        let t = db
+            .create(
+                "Informe del proyecto",
+                "uni",
+                "alta",
+                start,
+                start + 3_600_000,
+                false,
+            )
+            .unwrap();
         // mismo título cerca de la fecha → detectado (dedupe de sugerencias)
         let (id, title) = db
             .find_similar_task("Informe del proyecto", start + 3_600_000, "remitente@x.com")
@@ -1890,31 +2259,58 @@ mod tests {
         assert_eq!(id, t.id);
         assert_eq!(title, "Informe del proyecto");
         // mismo remitente con título idéntico pero lejos en el tiempo → no
-        assert!(
-            db.find_similar_task("Informe del proyecto", start + 40 * 86_400_000, "remitente@x.com")
-                .unwrap()
-                .is_none()
-        );
+        assert!(db
+            .find_similar_task(
+                "Informe del proyecto",
+                start + 40 * 86_400_000,
+                "remitente@x.com"
+            )
+            .unwrap()
+            .is_none());
         // título distinto → no
-        assert!(
-            db.find_similar_task("Cena familiar", start, "remitente@x.com").unwrap().is_none()
-        );
+        assert!(db
+            .find_similar_task("Cena familiar", start, "remitente@x.com")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn export_contains_data_but_never_secrets() {
         let db = db();
         let now = now_ms();
-        db.create("Tarea A", "uni", "media", now, now + 3_600_000, false).unwrap();
+        db.create("Tarea A", "uni", "media", now, now + 3_600_000, false)
+            .unwrap();
         db.insert_suggestion(
-            "email", Some("m1"), Some("x@y.com"), "Asunto", "task", "Compromiso X", "",
-            "uni", "media", None, None, None, 0, "", "[]", 0.9, "razón", None, "", "pending",
+            "email",
+            Some("m1"),
+            Some("x@y.com"),
+            "Asunto",
+            "task",
+            "Compromiso X",
+            "",
+            "uni",
+            "media",
+            None,
+            None,
+            None,
+            0,
+            "",
+            "[]",
+            0.9,
+            "razón",
+            None,
+            "",
+            "pending",
         )
         .unwrap();
         db.settings_set("ai.endpoint", "http://x").unwrap();
         db.settings_set("ai.model", "m").unwrap();
         db.settings_set("ai.provider", "openai").unwrap();
-        db.settings_set("email.config", r#"{"host":"imap.gmail.com","user":"x@y.com"}"#).unwrap();
+        db.settings_set(
+            "email.config",
+            r#"{"host":"imap.gmail.com","user":"x@y.com"}"#,
+        )
+        .unwrap();
         db.settings_set("email.rescan_pending", "1").unwrap();
         let v = db.export_data().unwrap();
         let s = serde_json::to_string(&v).unwrap();
@@ -1931,11 +2327,16 @@ mod tests {
     fn wipe_clears_user_data_and_settings() {
         let db = db();
         let now = now_ms();
-        let t = db.create("Tarea A", "uni", "media", now, now + 3_600_000, false).unwrap();
+        let t = db
+            .create("Tarea A", "uni", "media", now, now + 3_600_000, false)
+            .unwrap();
         db.settings_set("ui.theme", "dark").unwrap();
         db.wipe_data().unwrap();
         assert!(db.list().unwrap().is_empty(), "tareas borradas");
-        assert!(db.settings_get("ui.theme").unwrap().is_none(), "settings borradas");
+        assert!(
+            db.settings_get("ui.theme").unwrap().is_none(),
+            "settings borradas"
+        );
         let _ = t;
     }
 }

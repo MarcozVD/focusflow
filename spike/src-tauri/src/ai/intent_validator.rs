@@ -176,12 +176,22 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
         .unwrap_or(Priority::Media);
 
     // ventana temporal (todo opcional; null = desconocido)
-    let start = obj.get("start_date").and_then(|d| ms_of_date_time(d, obj.get("start_time")));
-    let end = obj.get("end_date").and_then(|d| ms_of_date_time(d, obj.get("end_time")));
-    let all_day = is_null_or_missing(obj.get("start_time")) && is_null_or_missing(obj.get("end_time"));
+    let start = obj
+        .get("start_date")
+        .and_then(|d| ms_of_date_time(d, obj.get("start_time")));
+    let end = obj
+        .get("end_date")
+        .and_then(|d| ms_of_date_time(d, obj.get("end_time")));
+    let all_day =
+        is_null_or_missing(obj.get("start_time")) && is_null_or_missing(obj.get("end_time"));
 
-    let duration = obj.get("duration_minutes").and_then(parse_u32).map(|m| Duration { minutes: m });
-    let deadline = obj.get("deadline_date").and_then(|d| ms_of_date_time(d, obj.get("deadline_time")));
+    let duration = obj
+        .get("duration_minutes")
+        .and_then(parse_u32)
+        .map(|m| Duration { minutes: m });
+    let deadline = obj
+        .get("deadline_date")
+        .and_then(|d| ms_of_date_time(d, obj.get("deadline_time")));
 
     let preparation = match (obj.get("preparation_minutes"), obj.get("preparation_note")) {
         (Some(m), _) if m.as_u64().map(|x| x > 0).unwrap_or(false) => Some(Preparation {
@@ -205,11 +215,22 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
             let by_day = r
                 .get("by_day")
                 .and_then(|b| b.as_array())
-                .map(|arr| arr.iter().filter_map(|x| x.as_u64()).map(|n| n as u8).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_u64())
+                        .map(|n| n as u8)
+                        .collect()
+                })
                 .unwrap_or_default();
             let count = r.get("count").and_then(parse_u32);
             let until = r.get("until").and_then(|d| ms_of_date_time(d, None));
-            Some(Recurrence { frequency, interval, by_day, count, until })
+            Some(Recurrence {
+                frequency,
+                interval,
+                by_day,
+                count,
+                until,
+            })
         }
     };
 
@@ -223,23 +244,20 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
                         return None;
                     }
                     let minutes_before = r.get("minutes_before").and_then(parse_u32);
-                    let at = r
-                        .get("at")
-                        .and_then(|a| a.as_str())
-                        .and_then(|s| {
-                            if s.trim().is_empty() {
-                                return None;
-                            }
-                            NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M").ok().map(
-                                |dt| {
-                                    chrono::Local
-                                        .from_local_datetime(&dt)
-                                        .earliest()
-                                        .map(|d| d.timestamp_millis())
-                                        .unwrap_or_else(|| dt.and_utc().timestamp_millis())
-                                },
-                            )
-                        });
+                    let at = r.get("at").and_then(|a| a.as_str()).and_then(|s| {
+                        if s.trim().is_empty() {
+                            return None;
+                        }
+                        NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M")
+                            .ok()
+                            .map(|dt| {
+                                chrono::Local
+                                    .from_local_datetime(&dt)
+                                    .earliest()
+                                    .map(|d| d.timestamp_millis())
+                                    .unwrap_or_else(|| dt.and_utc().timestamp_millis())
+                            })
+                    });
                     if minutes_before.is_none() && at.is_none() {
                         return None;
                     }
@@ -259,9 +277,19 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
                         return None;
                     }
                     let kind = parse_constraint_kind(c.get("kind")?).ok()?;
-                    let target = c.get("target").and_then(|t| t.as_str()).map(|s| s.to_string());
-                    let value = c.get("value").and_then(|t| t.as_str()).map(|s| s.to_string());
-                    Some(Constraint { kind, target, value })
+                    let target = c
+                        .get("target")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string());
+                    let value = c
+                        .get("value")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string());
+                    Some(Constraint {
+                        kind,
+                        target,
+                        value,
+                    })
                 })
                 .collect()
         })
@@ -284,7 +312,11 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
         description,
         category_id,
         priority,
-        window: TimeWindow { start, end, all_day },
+        window: TimeWindow {
+            start,
+            end,
+            all_day,
+        },
         duration,
         deadline,
         preparation,
@@ -315,7 +347,10 @@ pub fn validate_intent(i: &Intent) -> Result<(), IntentValidationError> {
         err(&mut e, "título vacío");
     }
     if !(0.0..=1.0).contains(&i.confidence) {
-        err(&mut e, format!("confidence fuera de [0,1]: {}", i.confidence));
+        err(
+            &mut e,
+            format!("confidence fuera de [0,1]: {}", i.confidence),
+        );
     }
 
     // ventana temporal
@@ -363,7 +398,10 @@ pub fn validate_intent(i: &Intent) -> Result<(), IntentValidationError> {
             err(&mut e, "interval de recurrencia 0");
         }
         if r.interval > MAX_INTERVAL {
-            err(&mut e, format!("interval de recurrencia > {} días", MAX_INTERVAL));
+            err(
+                &mut e,
+                format!("interval de recurrencia > {} días", MAX_INTERVAL),
+            );
         }
         if !valid_weekdays(&r.by_day) {
             err(&mut e, "by_day fuera de 1..=7 (ISO: 1=Lunes..7=Domingo)");
@@ -398,7 +436,10 @@ pub fn validate_intent(i: &Intent) -> Result<(), IntentValidationError> {
             }
         }
         if rem.minutes_before.is_none() && rem.at.is_none() {
-            err(&mut e, format!("recordatorio #{idx}: sin minutes_before ni at"));
+            err(
+                &mut e,
+                format!("recordatorio #{idx}: sin minutes_before ni at"),
+            );
         }
     }
 
@@ -417,7 +458,10 @@ pub fn validate_intent(i: &Intent) -> Result<(), IntentValidationError> {
             err(&mut e, "intent_type=constraint sin constraints");
         }
         IntentType::Availability if i.window.start.is_none() => {
-            err(&mut e, "intent_type=availability sin ventana de disponibilidad");
+            err(
+                &mut e,
+                "intent_type=availability sin ventana de disponibilidad",
+            );
         }
         _ => {}
     }
@@ -432,8 +476,7 @@ pub fn validate_intent(i: &Intent) -> Result<(), IntentValidationError> {
 /// Parseo + validación en un paso (el flujo normal).
 pub fn parse_and_validate(v: &serde_json::Value) -> Result<Intent, AiError> {
     let intent = parse_intent_json(v)?;
-    validate_intent(&intent)
-        .map_err(|e| AiError::InvalidJson(e.to_string()))?;
+    validate_intent(&intent).map_err(|e| AiError::InvalidJson(e.to_string()))?;
     Ok(intent)
 }
 
@@ -488,7 +531,9 @@ mod tests {
     #[test]
     fn phase_example_event_with_preparation() {
         // "I have a calculus exam Friday and need four hours to prepare."
-        let friday = (chrono::Local::now().date_naive() + chrono::Duration::days(4)).format("%Y-%m-%d").to_string();
+        let friday = (chrono::Local::now().date_naive() + chrono::Duration::days(4))
+            .format("%Y-%m-%d")
+            .to_string();
         let v = json!({
             "intent_type": "event",
             "title": "Examen de cálculo",
@@ -507,14 +552,22 @@ mod tests {
         let i = parse_and_validate(&v).expect("válido");
         assert_eq!(i.intent_type, IntentType::Event);
         assert!(i.window.all_day);
-        assert_eq!(i.preparation, Some(Preparation { minutes: 240, note: "necesito 4 horas para preparar".into() }));
+        assert_eq!(
+            i.preparation,
+            Some(Preparation {
+                minutes: 240,
+                note: "necesito 4 horas para preparar".into()
+            })
+        );
         assert_eq!(i.priority, Priority::Alta);
     }
 
     #[test]
     fn phase_example_timed_event_with_duration() {
         // "Tomorrow at 6 PM study programming for two hours."
-        let tomorrow = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let tomorrow = (chrono::Local::now().date_naive() + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
         let v = json!({
             "intent_type": "event",
             "title": "Estudiar programación",
@@ -540,7 +593,9 @@ mod tests {
     #[test]
     fn phase_example_deadline_with_preparation() {
         // "The project is due Monday but I need at least six hours to finish it."
-        let monday = (chrono::Local::now().date_naive() + chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+        let monday = (chrono::Local::now().date_naive() + chrono::Duration::days(7))
+            .format("%Y-%m-%d")
+            .to_string();
         let v = json!({
             "intent_type": "deadline",
             "title": "Proyecto",
@@ -556,14 +611,24 @@ mod tests {
         let i = parse_and_validate(&v).expect("válido");
         assert_eq!(i.intent_type, IntentType::Deadline);
         assert!(i.deadline.is_some());
-        assert_eq!(i.preparation, Some(Preparation { minutes: 360, note: "necesito al menos 6 horas".into() }));
+        assert_eq!(
+            i.preparation,
+            Some(Preparation {
+                minutes: 360,
+                note: "necesito al menos 6 horas".into()
+            })
+        );
     }
 
     #[test]
     fn phase_example_availability_window() {
         // "Diagnostic Test is available from August 5 until August 23."
-        let from = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-        let to = (chrono::Local::now().date_naive() + chrono::Duration::days(19)).format("%Y-%m-%d").to_string();
+        let from = (chrono::Local::now().date_naive() + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let to = (chrono::Local::now().date_naive() + chrono::Duration::days(19))
+            .format("%Y-%m-%d")
+            .to_string();
         let v = json!({
             "intent_type": "availability",
             "title": "Diagnostic Test",
@@ -704,7 +769,9 @@ mod tests {
     #[test]
     fn windows_and_dates_use_local_time() {
         // "15:00" local no debe convertirse a UTC (regresión de timezone)
-        let tomorrow = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let tomorrow = (chrono::Local::now().date_naive() + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
         let mut v = base_json();
         v["intent_type"] = json!("event");
         v["start_date"] = json!(tomorrow);
@@ -719,6 +786,12 @@ mod tests {
         v["intent_type"] = json!("reminder");
         v["reminders"] = json!([{"minutes_before": 60, "at": null}]);
         let i = parse_and_validate(&v).expect("válido");
-        assert_eq!(i.reminders, vec![ReminderSpec { minutes_before: Some(60), at: None }]);
+        assert_eq!(
+            i.reminders,
+            vec![ReminderSpec {
+                minutes_before: Some(60),
+                at: None
+            }]
+        );
     }
 }

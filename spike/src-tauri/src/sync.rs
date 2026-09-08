@@ -102,7 +102,10 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
                     return Ok(vec![t]);
                 }
             }
-            return Err(format!("la sugerencia ya fue procesada (estado: {})", s.status));
+            return Err(format!(
+                "la sugerencia ya fue procesada (estado: {})",
+                s.status
+            ));
         }
     }
     // Sin hora de inicio → tarea de Todo el día (hoy), nunca una hora inventada.
@@ -119,37 +122,87 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
         }
     };
     let end = s.end_at.unwrap_or(start);
-    let status = if s.status == "auto_approved" { "auto_approved" } else { "accepted" };
+    // ¿Marcador de todo el día? Un deadline/tarea SIN hora concreta es un
+    // marcador de día completo (la IA le asigna la hora del correo de origen,
+    // p. ej. 23:59, que no es una hora real de evento). Un EVENT con hora
+    // explícita (p. ej. "tutoría mañana a las 9") NO es all-day aunque la IA
+    // no devuelva duración: conserva su hora y dura por defecto 1 h en vez de
+    // colapsarse a medianoche (regresión detectada por e2e s3: un evento 09:00
+    // se anclaba a 00:00 y desaparecía de la agenda).
+    let has_explicit_time = s.start_at.map(|ms| {
+        let t = chrono::DateTime::from_timestamp_millis(ms)
+            .map(|d| d.with_timezone(&chrono::Local))
+            .map(|d| d.format("%H:%M").to_string());
+        t.map(|h| h != "00:00" && h != "23:59").unwrap_or(false)
+    }).unwrap_or(false);
+    let single_all_day = s.start_at.is_none()
+        || s.end_at.is_none()
+        || (s.start_at == s.end_at && !has_explicit_time)
+        || s.kind == "availability";
+    // Un marcador all-day se ancla a la MEDIANOCHE de su día: la IA resuelve
+    // los deadlines sin hora a la hora del correo de origen (23:59), y aceptar
+    // "11 sept 23:59" como all-day creaba un bloque 11 23:59 → 12 23:59 (la
+    // tarea aparecía "inicio el 11, fin el 12, todo el día") en vez de marcar
+    // únicamente el día 11 completo. Los rangos multi-día (availability)
+    // también se anclan por extremo: split_range_blocks ya crea inicio +
+    // "(entrega)" sobre cada día frontera.
+    let (start, end) = if single_all_day {
+        (
+            crate::engine::local_midnight(start),
+            crate::engine::local_midnight(end),
+        )
+    } else {
+        (start, end)
+    };
+    let status = if s.status == "auto_approved" {
+        "auto_approved"
+    } else {
+        "accepted"
+    };
     // Rango multi-día (ventana de disponibilidad, "del 5 al 23", inicio+fin):
     // NO una tarea banner que ocupa todos los días intermedios — solo bloque
     // de inicio + bloque "(entrega)", igual que QuickAdd y el plan sugerido.
     let blocks = crate::planning::split_range_blocks(&s.title, start, end);
     let single_day = blocks.len() == 1;
-    let single_all_day =
-        s.start_at.is_none() || s.end_at.is_none() || s.start_at == s.end_at || s.kind == "availability";
     db.tx_begin().map_err(|e| e.to_string())?;
     let result = (|| {
         let mut created: Vec<crate::store::TaskRow> = Vec::new();
         for (title, bs, be, range_all_day) in &blocks {
-            let all_day = if single_day { single_all_day } else { *range_all_day };
+            let all_day = if single_day {
+                single_all_day
+            } else {
+                *range_all_day
+            };
             // Marcador de día completo: una tarea all-day de UN día debe cubrir
             // [inicio, inicio + 24h), no tener duración cero. Si end <= start
             // (deadline a medianoche "vie 4 sept 00:00"), coversDay en el
             // frontend exige end > dayStart y la tarea queda invisible en
             // mes/día/semana. Igual que split_range_blocks hace con los
             // marcadores de día (s_day, s_day + DAY_MS).
-            let be = if all_day && *be <= *bs { *bs + crate::engine::DAY_MS } else { *be };
+            let be = if all_day && *be <= *bs {
+                *bs + crate::engine::DAY_MS
+            } else {
+                *be
+            };
             let t = db
                 .create(title, &s.category_id, &s.priority, *bs, be, all_day)
                 .map_err(|e| e.to_string())?;
             created.push(t);
         }
-        let task = created.first().cloned().ok_or_else(|| "tarea no creada".to_string())?;
+        let task = created
+            .first()
+            .cloned()
+            .ok_or_else(|| "tarea no creada".to_string())?;
         // Contexto de la sugerencia → descripción de la tarea: qué hay que
         // hacer + procedencia (remitente y asunto del correo).
         let mut desc = s.description.trim().to_string();
         let mut src: Vec<String> = Vec::new();
-        if let Some(sender) = s.source_sender.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        if let Some(sender) = s
+            .source_sender
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             src.push(format!("de {sender}"));
         }
         if !s.source_subject.trim().is_empty() {
@@ -162,10 +215,13 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
             desc.push_str(&format!("Correo: {}", src.join(" · ")));
         }
         if !desc.is_empty() {
-            db.set_description(task.id, &desc).map_err(|e| e.to_string())?;
+            db.set_description(task.id, &desc)
+                .map_err(|e| e.to_string())?;
         }
-        db.set_suggestion_status(id, status).map_err(|e| e.to_string())?;
-        db.set_suggestion_result_task(id, task.id).map_err(|e| e.to_string())?;
+        db.set_suggestion_status(id, status)
+            .map_err(|e| e.to_string())?;
+        db.set_suggestion_result_task(id, task.id)
+            .map_err(|e| e.to_string())?;
         // re-fetch main para incluir la descripción, luego reemplazar en el vec
         let main = db
             .get_task(task.id)
@@ -195,14 +251,24 @@ pub fn revert_suggestion(db: &Db, id: i64) -> Result<(), String> {
     if let Some(task_id) = s.result_task_id {
         let _ = db.delete(task_id);
     }
-    db.set_suggestion_status(id, "pending").map_err(|e| e.to_string())?;
-    db.set_suggestion_result_task(id, 0).map_err(|e| e.to_string())?;
+    db.set_suggestion_status(id, "pending")
+        .map_err(|e| e.to_string())?;
+    db.set_suggestion_result_task(id, 0)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Fase 1 (DB, lock breve): ¿hay que procesar este correo? Devuelve false si
-/// ya se deduplicó (mismo message_id ya procesado).
+/// ya se deduplicó. Dos capas de defensa:
+/// 1. `email_seen`: registro persistente de correos revisados (no desaparece
+///    cuando el usuario rechaza/borra sugerencias ni con la retención).
+/// 2. conteo de sugerencias vivas del correo (redundancia histórica).
 fn prepare_email(db: &Db, raw: &RawEmail) -> Result<bool, String> {
+    match db.email_seen(&raw.message_id) {
+        Ok(true) => return Ok(false),
+        Ok(false) => {}
+        Err(e) => return Err(e.to_string()),
+    }
     let already = db.suggestion_count_for_email(&raw.message_id).unwrap_or(0);
     Ok(already == 0)
 }
@@ -217,7 +283,10 @@ fn analyze_email(
 ) -> Result<Vec<crate::ai::intent::Intent>, String> {
     let res = ai::email_intent::parse_email_intent(raw, provider, configured);
     match res {
-        Err(AiError::RateLimited { retry_after, detail }) => {
+        Err(AiError::RateLimited {
+            retry_after,
+            detail,
+        }) => {
             crate::append_log(
                 app,
                 &format!(
@@ -229,9 +298,7 @@ fn analyze_email(
             );
             Err(format!("ia_429 {detail}"))
         }
-        Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) => {
-            Err(format!("ia_fail {e}"))
-        }
+        Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) => Err(format!("ia_fail {e}")),
         Err(AiError::BadResponse(e)) if e.contains("intención inválida") => {
             // Permanente: la IA produjo intents que nunca pasarán la
             // validación para ESTE correo (p. ej. deadline en el pasado en un
@@ -243,7 +310,10 @@ fn analyze_email(
         }
         Err(AiError::BadResponse(e)) => Err(format!("ia_fail {e}")),
         Err(AiError::InvalidJson(e)) => {
-            crate::append_log(app, &format!("email_parse_invalid_json uid={} {e}", raw.uid));
+            crate::append_log(
+                app,
+                &format!("email_parse_invalid_json uid={} {e}", raw.uid),
+            );
             Ok(Vec::new())
         }
         Ok(batch) => {
@@ -272,13 +342,17 @@ fn analyze_email(
     }
 }
 
-/// Fase 3 (DB, lock breve): deduplica e inserta las sugerencias.
+/// Fase 3 (DB, lock breve): inserta las sugerencias y marca el correo como
+/// revisado. El visto se registra AUNQUE no haya intents: el correo ya se
+/// analizó y no debe volver a la IA (con sugerencias o sin ellas).
 fn commit_email(
     app: &AppHandle,
     db: &Db,
     raw: &RawEmail,
     intents: &[crate::ai::intent::Intent],
 ) -> Result<usize, String> {
+    db.email_mark_seen(&raw.message_id)
+        .map_err(|e| e.to_string())?;
     let mut count = 0;
     for it in intents {
         count += insert_intent_suggestion(app, db, raw, it)?;
@@ -337,7 +411,9 @@ fn insert_intent_suggestion(
         }
     };
 
-    let trusted = db.is_trusted(&email::sender_email(&raw.sender)).unwrap_or(false);
+    let trusted = db
+        .is_trusted(&email::sender_email(&raw.sender))
+        .unwrap_or(false);
     // auto-aprobación solo con remitente de confianza, sin duplicados y
     // con la fecha explícita (confianza alta)
     let status = if trusted && dedupe_id.is_none() && it.confidence >= 0.6 {
@@ -375,7 +451,10 @@ fn insert_intent_suggestion(
         match accept_suggestion(db, id) {
             Ok(_) => crate::append_log(
                 app,
-                &format!("email_auto_approved uid={} sender={} kind={kind}", raw.uid, raw.sender),
+                &format!(
+                    "email_auto_approved uid={} sender={} kind={kind}",
+                    raw.uid, raw.sender
+                ),
             ),
             Err(e) => crate::append_log(app, &format!("email_auto_approve_fail: {e}")),
         }
@@ -444,10 +523,14 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
             });
             s.access_token
         } else {
-            return Err("la sesión de Google no tiene token válido; cierra sesión y vuelve a entrar".into());
+            return Err(
+                "la sesión de Google no tiene token válido; cierra sesión y vuelve a entrar".into(),
+            );
         }
     };
-    let ai_configured = !ai_cfg.endpoint.is_empty() && !ai_cfg.model.is_empty() && ai_cfg.provider_name() != "local";
+    let ai_configured = !ai_cfg.endpoint.is_empty()
+        && !ai_cfg.model.is_empty()
+        && ai_cfg.provider_name() != "local";
 
     // rescan pendiente → reiniciar checkpoints: se vuelve a repasar la
     // ventana reciente (dedup por message_id evita duplicados)
@@ -478,68 +561,79 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
         let source = format!("email:{mailbox}");
 
         let (cp_json, checkpoint, prev_uid) = with_db(app, |db| {
-            let cp_json = db.sync_state_get(&source).ok().flatten().unwrap_or_default();
-            let checkpoint: SyncCheckpoint = serde_json::from_str(&cp_json).unwrap_or_else(|_| SyncCheckpoint::empty());
+            let cp_json = db
+                .sync_state_get(&source)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let checkpoint: SyncCheckpoint =
+                serde_json::from_str(&cp_json).unwrap_or_else(|_| SyncCheckpoint::empty());
             let uid = checkpoint.uid;
             (cp_json, checkpoint, uid)
         });
 
-            match email::fetch_mailbox(&mut session, mailbox, &checkpoint, since_days) {
-                Ok((emails, mut new_cp)) => {
-                    let mut mb = crate::sync::MailboxSummary {
-                        mailbox: mailbox.clone(),
-                        found: 0,
-                        processed: 0,
-                        result: "ok".into(),
-                        error: String::new(),
-                    };
-                    // sin filtros → todos; con filtros → los que coinciden
-                    let (kept, excluded): (Vec<RawEmail>, Vec<RawEmail>) = if email::has_filters(&config.filters) {
-                        emails.into_iter().partition(|e| email::matches_filters(e, &config.filters))
+        match email::fetch_mailbox(&mut session, mailbox, &checkpoint, since_days) {
+            Ok((emails, mut new_cp)) => {
+                let mut mb = crate::sync::MailboxSummary {
+                    mailbox: mailbox.clone(),
+                    found: 0,
+                    processed: 0,
+                    result: "ok".into(),
+                    error: String::new(),
+                };
+                // sin filtros → todos; con filtros → los que coinciden
+                let (kept, excluded): (Vec<RawEmail>, Vec<RawEmail>) =
+                    if email::has_filters(&config.filters) {
+                        emails
+                            .into_iter()
+                            .partition(|e| email::matches_filters(e, &config.filters))
                     } else {
                         (emails, Vec::new())
                     };
-                    for e in &excluded {
-                        crate::append_log(
-                            app,
-                            &format!("email_filtered uid={} sender={} asunto={}", e.uid, e.sender, e.subject),
-                        );
-                    }
-                    let filtered: Vec<RawEmail> = kept;
-                    mb.found = filtered.len();
-                    summary.total_found += filtered.len();
+                for e in &excluded {
+                    crate::append_log(
+                        app,
+                        &format!(
+                            "email_filtered uid={} sender={} asunto={}",
+                            e.uid, e.sender, e.subject
+                        ),
+                    );
+                }
+                let filtered: Vec<RawEmail> = kept;
+                mb.found = filtered.len();
+                summary.total_found += filtered.len();
 
-                    let total = filtered.len();
-                    let mut last_decided_uid: u32 = 0;
-                    for (i, raw) in filtered.iter().enumerate() {
-                        let _ = app.emit(
-                            "email:sync-progress",
-                            crate::sync::SyncProgress {
-                                phase: "email".into(),
-                                mailbox: mailbox.clone(),
-                                processed: i + 1,
-                                total,
-                            },
-                        );
-                        let outcome = (|| -> Result<usize, String> {
-                            // fase 1: dedupe previo (lock breve)
-                            if !with_db(app, |db| prepare_email(db, raw))? {
-                                return Ok(0);
-                            }
-                            // fase 2: IA sin lock (HTTP hasta 90 s)
-                            let intents = analyze_email(app, provider.as_ref(), ai_configured, raw)?;
-                            if intents.is_empty() {
-                                return Ok(0);
-                            }
-                            // fase 3: insertar sugerencias (lock breve)
-                            with_db(app, |db| commit_email(app, db, raw, &intents))
-                        })();
-                        match outcome {
-                            Ok(n) => {
-                                last_decided_uid = last_decided_uid.max(raw.uid);
-                                mb.processed += n;
-                                summary.total_suggestions += n;
-                            }
+                let total = filtered.len();
+                let mut last_decided_uid: u32 = 0;
+                for (i, raw) in filtered.iter().enumerate() {
+                    let _ = app.emit(
+                        "email:sync-progress",
+                        crate::sync::SyncProgress {
+                            phase: "email".into(),
+                            mailbox: mailbox.clone(),
+                            processed: i + 1,
+                            total,
+                        },
+                    );
+                    let outcome = (|| -> Result<usize, String> {
+                        // fase 1: dedupe previo (lock breve)
+                        if !with_db(app, |db| prepare_email(db, raw))? {
+                            return Ok(0);
+                        }
+                        // fase 2: IA sin lock (HTTP hasta 90 s)
+                        let intents = analyze_email(app, provider.as_ref(), ai_configured, raw)?;
+                        if intents.is_empty() {
+                            return Ok(0);
+                        }
+                        // fase 3: insertar sugerencias (lock breve)
+                        with_db(app, |db| commit_email(app, db, raw, &intents))
+                    })();
+                    match outcome {
+                        Ok(n) => {
+                            last_decided_uid = last_decided_uid.max(raw.uid);
+                            mb.processed += n;
+                            summary.total_suggestions += n;
+                        }
                         Err(e) => {
                             // fallo de red/IA → no avanzar checkpoint… pero si
                             // el MISMO correo falla MAX_SYNC_RETRIES veces
@@ -549,7 +643,8 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                             let transient = e.starts_with("ia_429") || e.starts_with("ia_fail");
                             let mut cp2 = checkpoint.clone();
                             if transient {
-                                let (next, skip) = crate::email::register_fail(&checkpoint, raw.uid);
+                                let (next, skip) =
+                                    crate::email::register_fail(&checkpoint, raw.uid);
                                 cp2 = next;
                                 if skip {
                                     crate::append_log(
@@ -564,8 +659,13 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                             with_db(app, |db| {
                                 let _ = db.sync_state_set(&source, &cp, "error", &e);
                                 let _ = db.sync_history_add(
-                                    &source, started, "error", filtered.len() as i64,
-                                    mb.processed as i64, &e, "abortado sin avanzar checkpoint",
+                                    &source,
+                                    started,
+                                    "error",
+                                    filtered.len() as i64,
+                                    mb.processed as i64,
+                                    &e,
+                                    "abortado sin avanzar checkpoint",
                                 );
                             });
                             let _ = session.logout();
@@ -580,7 +680,8 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                 // avanza más allá del último correo realmente procesado:
                 // se reintenta en la siguiente pasada (recuperable al
                 // ajustar los filtros en Ajustes).
-                let new_uid = rollback_uid(new_cp.uid, last_decided_uid, checkpoint.uid, excluded.len());
+                let new_uid =
+                    rollback_uid(new_cp.uid, last_decided_uid, checkpoint.uid, excluded.len());
                 if new_uid < new_cp.uid {
                     crate::append_log(
                         app,
@@ -595,18 +696,31 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                 }
 
                 let ok_cp = serde_json::to_string(&new_cp).unwrap_or_default();
-                let result = if filtered.is_empty() && prev_uid == new_cp.uid { "no_new" } else { "ok" };
+                let result = if filtered.is_empty() && prev_uid == new_cp.uid {
+                    "no_new"
+                } else {
+                    "ok"
+                };
                 with_db(app, |db| {
                     let _ = db.sync_state_set(&source, &ok_cp, result, "");
                     let _ = db.sync_history_add(
-                        &source, started, result, filtered.len() as i64,
-                        mb.processed as i64, "", &format!("uid {} → {}", prev_uid, new_cp.uid),
+                        &source,
+                        started,
+                        result,
+                        filtered.len() as i64,
+                        mb.processed as i64,
+                        "",
+                        &format!("uid {} → {}", prev_uid, new_cp.uid),
                     );
                 });
                 summary.mailboxes.push(mb);
                 crate::append_log(
                     app,
-                    &format!("checkpoint {source} uid {prev_uid} → {} (siguiente empieza en {})", new_cp.uid, new_cp.uid + 1),
+                    &format!(
+                        "checkpoint {source} uid {prev_uid} → {} (siguiente empieza en {})",
+                        new_cp.uid,
+                        new_cp.uid + 1
+                    ),
                 );
             }
             Err(e) => {
@@ -626,7 +740,9 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
         app,
         &format!(
             "sync_done found={} suggestions={} mbs={}",
-            summary.total_found, summary.total_suggestions, summary.mailboxes.len()
+            summary.total_found,
+            summary.total_suggestions,
+            summary.mailboxes.len()
         ),
     );
 
@@ -734,58 +850,215 @@ mod tests {
 
     #[test]
     fn excluded_emails_roll_back_uid() {
-            // 20 excluidos al final: nunca pasar del último procesado (30)
-            assert_eq!(rollback_uid(50, 30, 10, 20), 30);
-            // sin procesados (todos excluidos): se mantiene el previo
-            assert_eq!(rollback_uid(50, 0, 10, 5), 10);
-            // procesados hasta el final → igual que sin rollback
-            assert_eq!(rollback_uid(50, 50, 10, 3), 50);
-        }
-
-        #[test]
-        fn accept_suggestion_all_day_deadline_creates_full_day() {
-            // Sugerencia con deadline a medianoche (start == end == misma
-            // medianoche). Al aceptar, la tarea all-day debe cubrir 24h, no
-            // tener duración cero — si no, coversDay la ve invisible.
-            const DAY_MS: i64 = crate::engine::DAY_MS;
-            let db = crate::store::Db::open_memory_clean_pub().unwrap();
-            let now = chrono::Local::now().timestamp_millis();
-            let today = crate::engine::local_midnight(now);
-            let id = db
-                .insert_suggestion(
-                    "test", None, None, "test",
-                    "deadline",                    // kind
-                    "Envío enlace video catálogo", // title
-                    "",                            // description
-                    "uni",                         // category_id
-                    "alta",                        // priority
-                    Some(today),                   // start_at (hoy)
-                    Some(today),                   // end_at == start_at (misma medianoche)
-                    None,                          // deadline_at
-                    0,                             // prep_min
-                    "",                            // location
-                    "[]",                          // tags
-                    0.8,                           // confidence
-                    "test",                        // reason
-                    None,                          // dedupe_task_id
-                    "",                            // dedupe_note
-                    "pending",                     // status
-                )
-                .unwrap();
-            let tasks = accept_suggestion(&db, id).unwrap();
-
-            // Una tarea creada (single day, no split)
-            assert_eq!(tasks.len(), 1, "debe crear exactamente 1 tarea");
-            let t = &tasks[0];
-            assert_eq!(t.title, "Envío enlace video catálogo");
-            assert!(t.all_day, "la tarea debe ser all_day");
-            assert_eq!(
-                t.start_at, today,
-                "start_at debe ser la medianoche de la sugerencia"
-            );
-            assert_eq!(
-                t.end_at - t.start_at, DAY_MS,
-                "end_at debe ser start + 24h para cubrir el día completo, no duración cero"
-            );
-        }
+        // 20 excluidos al final: nunca pasar del último procesado (30)
+        assert_eq!(rollback_uid(50, 30, 10, 20), 30);
+        // sin procesados (todos excluidos): se mantiene el previo
+        assert_eq!(rollback_uid(50, 0, 10, 5), 10);
+        // procesados hasta el final → igual que sin rollback
+        assert_eq!(rollback_uid(50, 50, 10, 3), 50);
     }
+
+    #[test]
+    fn accept_suggestion_all_day_deadline_creates_full_day() {
+        // Sugerencia con deadline a medianoche (start == end == misma
+        // medianoche). Al aceptar, la tarea all-day debe cubrir 24h, no
+        // tener duración cero — si no, coversDay la ve invisible.
+        const DAY_MS: i64 = crate::engine::DAY_MS;
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let now = chrono::Local::now().timestamp_millis();
+        let today = crate::engine::local_midnight(now);
+        let id = db
+            .insert_suggestion(
+                "test",
+                None,
+                None,
+                "test",
+                "deadline",                    // kind
+                "Envío enlace video catálogo", // title
+                "",                            // description
+                "uni",                         // category_id
+                "alta",                        // priority
+                Some(today),                   // start_at (hoy)
+                Some(today),                   // end_at == start_at (misma medianoche)
+                None,                          // deadline_at
+                0,                             // prep_min
+                "",                            // location
+                "[]",                          // tags
+                0.8,                           // confidence
+                "test",                        // reason
+                None,                          // dedupe_task_id
+                "",                            // dedupe_note
+                "pending",                     // status
+            )
+            .unwrap();
+        let tasks = accept_suggestion(&db, id).unwrap();
+
+        // Una tarea creada (single day, no split)
+        assert_eq!(tasks.len(), 1, "debe crear exactamente 1 tarea");
+        let t = &tasks[0];
+        assert_eq!(t.title, "Envío enlace video catálogo");
+        assert!(t.all_day, "la tarea debe ser all_day");
+        assert_eq!(
+            t.start_at, today,
+            "start_at debe ser la medianoche de la sugerencia"
+        );
+        assert_eq!(
+            t.end_at - t.start_at,
+            DAY_MS,
+            "end_at debe ser start + 24h para cubrir el día completo, no duración cero"
+        );
+    }
+
+    #[test]
+    fn accept_suggestion_deadline_2359_marks_only_that_day() {
+        // La IA resuelve "entrega el 11" (sin hora) a la hora del correo de
+        // origen (23:59 del día 11). La tarea all-day debe marcar SOLO el
+        // día 11 [00:00, 00:00+24h), NO un bloque 11 23:59 → 12 23:59
+        // ("inicio el 11 y fin el 12, ambas todo el día").
+        const DAY_MS: i64 = crate::engine::DAY_MS;
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let day11 =
+            crate::engine::local_midnight(chrono::Local::now().timestamp_millis()) + 4 * DAY_MS;
+        let at_2359 = day11 + 23 * 3_600_000 + 59 * 60_000;
+        let id = db
+            .insert_suggestion(
+                "test",
+                None,
+                None,
+                "test",
+                "deadline",
+                "Analítica Digital: entrega tarea",
+                "",
+                "uni",
+                "media",
+                Some(at_2359),
+                Some(at_2359), // start == end == 23:59 del día 11
+                Some(at_2359),
+                0,
+                "",
+                "[]",
+                0.96,
+                "fecha de entrega explícita",
+                None,
+                "",
+                "pending",
+            )
+            .unwrap();
+        let tasks = accept_suggestion(&db, id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        let t = &tasks[0];
+        assert!(t.all_day);
+        assert_eq!(t.start_at, day11, "anclada a la medianoche del día 11");
+        assert_eq!(
+            t.end_at - t.start_at,
+            DAY_MS,
+            "cubre solo el día 11, no toca el 12"
+        );
+        assert!(
+            t.end_at <= day11 + DAY_MS,
+            "el bloque no se extiende al día 12"
+        );
+    }
+
+    #[test]
+    fn email_seen_survives_suggestion_rejection_and_prune() {
+        // El registro de correos revisados es persistente: rechazar/borrar
+        // las sugerencias (o la retención que las archiva) NO debe hacer
+        // que el correo se re-analice en el siguiente sync.
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let raw = crate::email::RawEmail {
+            mailbox: "INBOX".into(),
+            uid: 7,
+            message_id: "<canvas-1@amazonses.com>".into(),
+            thread: Vec::new(),
+            subject: "Tarea calificada".into(),
+            sender: "Canvas <notifications@instructure.com>".into(),
+            date: "2026-09-07".into(),
+            body: "entrega el 11".into(),
+        };
+        assert!(!db.email_seen(&raw.message_id).unwrap());
+        db.email_mark_seen(&raw.message_id).unwrap();
+        // idempotente
+        db.email_mark_seen(&raw.message_id).unwrap();
+        assert!(db.email_seen(&raw.message_id).unwrap());
+        assert_eq!(db.email_seen_count().unwrap(), 1);
+        // sugerencia del correo, resuelta y archivada por retención
+        let sid = db
+            .insert_suggestion(
+                "email",
+                Some(&raw.message_id),
+                Some(&raw.sender),
+                "Tarea calificada",
+                "deadline",
+                "Analítica Digital: entrega tarea",
+                "",
+                "uni",
+                "media",
+                None,
+                None,
+                None,
+                0,
+                "",
+                "[]",
+                0.9,
+                "test",
+                None,
+                "",
+                "pending",
+            )
+            .unwrap();
+        db.set_suggestion_status(sid, "rejected").unwrap();
+        let pruned = db
+            .prune_suggestions(crate::email::now_ms() + 1_000)
+            .unwrap();
+        assert_eq!(pruned, 1, "la retención archiva la sugerencia");
+        // …y aun así el correo sigue marcado como visto
+        assert!(
+            db.email_seen(&raw.message_id).unwrap(),
+            "el correo NO vuelve a la IA tras rechazar/archivar sus sugerencias"
+        );
+    }
+
+    #[test]
+    fn migrate_0011_backfills_seen_from_existing_suggestions() {
+        // Instalación existente: los Message-ID que ya generaron
+        // sugerencias deben quedar registrados como vistos por la
+        // migración, sin esperar a re-procesar el correo.
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        // open_memory_clean_pub ya corrió migrate() (incluida 0011);
+        // simular una sugerencia previa + re-ejecutar el backfill como
+        // haría la migración sobre una BD vieja.
+        db.email_mark_seen("<legacy@x.com>").unwrap();
+        let _ = db
+            .insert_suggestion(
+                "email",
+                Some("<legacy-2@x.com>"),
+                Some("a@x.com"),
+                "Asunto",
+                "deadline",
+                "Entrega X",
+                "",
+                "uni",
+                "media",
+                None,
+                None,
+                None,
+                0,
+                "",
+                "[]",
+                0.9,
+                "test",
+                None,
+                "",
+                "pending",
+            )
+            .unwrap();
+        let n = db.email_seen_backfill().unwrap();
+        assert_eq!(
+            n, 1,
+            "el backfill registra el correo de la sugerencia legado"
+        );
+        assert!(db.email_seen("<legacy-2@x.com>").unwrap());
+        assert!(db.email_seen("<legacy@x.com>").unwrap());
+    }
+}

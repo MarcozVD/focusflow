@@ -41,7 +41,11 @@ fn now() -> chrono::NaiveDate {
 }
 
 fn ms_to_date(ms: i64) -> chrono::NaiveDate {
-    chrono::Local.timestamp_millis_opt(ms).earliest().map(|d| d.date_naive()).unwrap_or_else(now)
+    chrono::Local
+        .timestamp_millis_opt(ms)
+        .earliest()
+        .map(|d| d.date_naive())
+        .unwrap_or_else(now)
 }
 
 fn next_weekday(by_day: &[u8]) -> chrono::NaiveDate {
@@ -94,7 +98,11 @@ fn detect_recurrence(lower: &str) -> Option<(&'static str, Vec<u8>)> {
             return Some(("weekly", vec![wd.number_from_monday() as u8]));
         }
     }
-    if lower.contains("weekly") || lower.contains("every week") || lower.contains("semanal") || lower.contains("cada semana") {
+    if lower.contains("weekly")
+        || lower.contains("every week")
+        || lower.contains("semanal")
+        || lower.contains("cada semana")
+    {
         return Some(("weekly", vec![]));
     }
     None
@@ -179,7 +187,10 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
     let (y0, _m0, _) = nl::ymd(now());
     let months_pat = "(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|january|february|march|april|may|june|july|august|september|october|november|december)";
 
-    let re1 = regex::Regex::new(&format!(r"del (\d{{1,2}}) (?:al|a|hasta) (?:el\s+)?(\d{{1,2}}) de {months_pat}")).ok()?;
+    let re1 = regex::Regex::new(&format!(
+        r"del (\d{{1,2}}) (?:al|a|hasta) (?:el\s+)?(\d{{1,2}}) de {months_pat}"
+    ))
+    .ok()?;
     let re2 = regex::Regex::new(&format!(r"(\d{{1,2}}) de {months_pat} (?:al|a|hasta) (?:el\s+|d[íi]a\s+)?(\d{{1,2}}) de {months_pat}")).ok()?;
     let re3 = regex::Regex::new(&format!(r"{months_pat} (\d{{1,2}})(?:st|nd|rd|th)? (?:through|to|until|thru) {months_pat} (\d{{1,2}})(?:st|nd|rd|th)?")).ok()?;
     let re4 = regex::Regex::new(&format!(r"({months_pat}) (\d{{1,2}})(?:st|nd|rd|th)? (?:through|to|until|thru) (\d{{1,2}})(?:st|nd|rd|th)?")).ok()?;
@@ -265,19 +276,28 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
             None
         }
     };
-    let re_wd1 = regex::Regex::new(&format!(r"del\s+{wd_pat}\s+(?:al|a|hasta)\s+(?:el\s+|d[íi]a\s+)?{wd_pat}")).ok()?;
+    let re_wd1 = regex::Regex::new(&format!(
+        r"del\s+{wd_pat}\s+(?:al|a|hasta)\s+(?:el\s+|d[íi]a\s+)?{wd_pat}"
+    ))
+    .ok()?;
     if let Some(caps) = re_wd1.captures(lower) {
         if let Some(pair) = wd_ms(&caps) {
             return Some(pair);
         }
     }
-    let re_wd2 = regex::Regex::new(&format!(r"\b{wd_pat}\s+(?:al|a|hasta)\s+(?:el\s+|d[íi]a\s+)?{wd_pat}")).ok()?;
+    let re_wd2 = regex::Regex::new(&format!(
+        r"\b{wd_pat}\s+(?:al|a|hasta)\s+(?:el\s+|d[íi]a\s+)?{wd_pat}"
+    ))
+    .ok()?;
     if let Some(caps) = re_wd2.captures(lower) {
         if let Some(pair) = wd_ms(&caps) {
             return Some(pair);
         }
     }
-    let re_wd3 = regex::Regex::new(&format!(r"(?:from\s+)?{wd_pat}\s+(?:to|through|until)\s+(?:next\s+|this\s+)?{wd_pat}")).ok()?;
+    let re_wd3 = regex::Regex::new(&format!(
+        r"(?:from\s+)?{wd_pat}\s+(?:to|through|until)\s+(?:next\s+|this\s+)?{wd_pat}"
+    ))
+    .ok()?;
     if let Some(caps) = re_wd3.captures(lower) {
         if let Some(pair) = wd_ms(&caps) {
             return Some(pair);
@@ -395,7 +415,11 @@ fn analyze_clause(clause: &str) -> RuleIntent {
     // declara disponibilidad explícita ("disponible del 5 al 23").
     let date_range = detect_date_range(&lower);
     if let Some((s, e)) = date_range {
-        let intent_type = if is_availability { "availability" } else { "event" };
+        let intent_type = if is_availability {
+            "availability"
+        } else {
+            "event"
+        };
         let reason = if is_availability {
             "ventana de disponibilidad con ambos extremos"
         } else {
@@ -405,7 +429,11 @@ fn analyze_clause(clause: &str) -> RuleIntent {
             intent_type,
             title: title_or(intent_type, clean_title(clause)),
             category_id: nl::detect_category(&lower).into(),
-            priority: if lower.contains("urgente") || lower.contains("urgent") { "alta" } else { "media" },
+            priority: if lower.contains("urgente") || lower.contains("urgent") {
+                "alta"
+            } else {
+                "media"
+            },
             start_ms: Some(s),
             end_ms: Some(e),
             all_day: true,
@@ -492,8 +520,14 @@ fn analyze_clause(clause: &str) -> RuleIntent {
     } else {
         match time_only {
             Some((s, _)) if s < 12 * 60 => {
-                let has_suffix = regex::Regex::new(r"(?:am|pm|a\.m\.|p\.m\.)").unwrap().is_match(&lower);
-                let has_part = lower.contains("tarde") || lower.contains("noche") || lower.contains("mañana ") || lower.contains("morning") || lower.contains("evening");
+                let has_suffix = regex::Regex::new(r"(?:am|pm|a\.m\.|p\.m\.)")
+                    .unwrap()
+                    .is_match(&lower);
+                let has_part = lower.contains("tarde")
+                    || lower.contains("noche")
+                    || lower.contains("mañana ")
+                    || lower.contains("morning")
+                    || lower.contains("evening");
                 !has_suffix && !has_part
             }
             _ => false,
@@ -510,26 +544,35 @@ fn analyze_clause(clause: &str) -> RuleIntent {
     let mut confidence = base
         + if day_ms.is_some() { 0.2 } else { 0.0 }
         + if time_only.is_some() { 0.15 } else { 0.0 }
-        + if duration_min.is_some() || prep_min.is_some() { 0.05 } else { 0.0 }
+        + if duration_min.is_some() || prep_min.is_some() {
+            0.05
+        } else {
+            0.0
+        }
         + if recurrence.is_some() { 0.1 } else { 0.0 }
         - if ambiguous_time { 0.3 } else { 0.0 };
     confidence = confidence.clamp(0.0, 0.95);
 
     // tipo de intención
-    let (intent_type, reminders_min): (&'static str, Option<u32>) = if prep_min.is_some() && day_ms.is_none() && deadline_ms.is_none() {
-        ("preparation", None)
-    } else if is_reminder && day_ms.is_none() && time_only.is_none() {
-        ("reminder", Some(60))
-    } else if deadline_ms.is_some() {
-        ("deadline", if is_reminder { Some(60) } else { None })
-    } else if day_ms.is_some() || time_only.is_some() {
-        ("event", if is_reminder { Some(60) } else { None })
-    } else {
-        ("task", if is_reminder { Some(60) } else { None })
-    };
+    let (intent_type, reminders_min): (&'static str, Option<u32>) =
+        if prep_min.is_some() && day_ms.is_none() && deadline_ms.is_none() {
+            ("preparation", None)
+        } else if is_reminder && day_ms.is_none() && time_only.is_none() {
+            ("reminder", Some(60))
+        } else if deadline_ms.is_some() {
+            ("deadline", if is_reminder { Some(60) } else { None })
+        } else if day_ms.is_some() || time_only.is_some() {
+            ("event", if is_reminder { Some(60) } else { None })
+        } else {
+            ("task", if is_reminder { Some(60) } else { None })
+        };
 
     let (start_ms, end_ms, all_day) = match (day_ms, time_only) {
-        (Some(d), Some((s, e))) => (Some(d + s as i64 * MIN_MS), Some(d + e as i64 * MIN_MS), false),
+        (Some(d), Some((s, e))) => (
+            Some(d + s as i64 * MIN_MS),
+            Some(d + e as i64 * MIN_MS),
+            false,
+        ),
         (Some(d), None) => (Some(d), None, true),
         // hora sin fecha: se conserva la hora, sin inventar el día
         (None, Some(_)) => (None, None, false),
@@ -550,7 +593,14 @@ fn analyze_clause(clause: &str) -> RuleIntent {
         intent_type,
         title: title_or(intent_type, clean_title(clause)),
         category_id: nl::detect_category(&lower).into(),
-        priority: if lower.contains("urgente") || lower.contains("urgent") || lower.contains("high") { "alta" } else if lower.contains("baja") || lower.contains("low") { "baja" } else { "media" },
+        priority: if lower.contains("urgente") || lower.contains("urgent") || lower.contains("high")
+        {
+            "alta"
+        } else if lower.contains("baja") || lower.contains("low") {
+            "baja"
+        } else {
+            "media"
+        },
         start_ms,
         end_ms,
         all_day,
@@ -605,10 +655,17 @@ fn split_clauses(text: &str) -> Vec<String> {
 /// con fecha si existe (regla de compuestos).
 fn merge_preparation(mut intents: Vec<RuleIntent>) -> Vec<RuleIntent> {
     let prep_idx = intents.iter().position(|i| i.intent_type == "preparation");
-    let Some(prep_idx) = prep_idx else { return intents };
+    let Some(prep_idx) = prep_idx else {
+        return intents;
+    };
     let prep = intents.remove(prep_idx);
-    let Some((m, n)) = prep.prep_min.map(|m| (m, prep.prep_note.clone())) else { return intents };
-    if let Some(target) = intents.iter_mut().find(|i| i.start_ms.is_some() || i.deadline_ms.is_some()) {
+    let Some((m, n)) = prep.prep_min.map(|m| (m, prep.prep_note.clone())) else {
+        return intents;
+    };
+    if let Some(target) = intents
+        .iter_mut()
+        .find(|i| i.start_ms.is_some() || i.deadline_ms.is_some())
+    {
         target.prep_min = Some(m);
         if !n.is_empty() {
             target.prep_note = n;
@@ -631,7 +688,10 @@ fn to_schema_json(i: &RuleIntent) -> serde_json::Value {
         (Some(ms), false) => {
             let dt = chrono::Local.timestamp_millis_opt(ms).earliest();
             match dt {
-                Some(dt) => (Some(dt.format("%Y-%m-%d").to_string()), Some(dt.format("%H:%M").to_string())),
+                Some(dt) => (
+                    Some(dt.format("%Y-%m-%d").to_string()),
+                    Some(dt.format("%H:%M").to_string()),
+                ),
                 None => (None, None),
             }
         }
@@ -642,7 +702,10 @@ fn to_schema_json(i: &RuleIntent) -> serde_json::Value {
         (Some(ms), false) => {
             let dt = chrono::Local.timestamp_millis_opt(ms).earliest();
             match dt {
-                Some(dt) => (Some(dt.format("%Y-%m-%d").to_string()), Some(dt.format("%H:%M").to_string())),
+                Some(dt) => (
+                    Some(dt.format("%Y-%m-%d").to_string()),
+                    Some(dt.format("%H:%M").to_string()),
+                ),
                 None => (None, None),
             }
         }
@@ -709,8 +772,10 @@ pub fn analyze_to_json(text: &str) -> AiResult<serde_json::Value> {
 
 /// Análisis determinista → intents intermedios (para tests).
 pub fn analyze(text: &str) -> Vec<RuleIntent> {
-    let intents: Vec<RuleIntent> =
-        split_clauses(text.trim()).iter().map(|c| analyze_clause(c)).collect();
+    let intents: Vec<RuleIntent> = split_clauses(text.trim())
+        .iter()
+        .map(|c| analyze_clause(c))
+        .collect();
     merge_preparation(intents)
 }
 
@@ -735,7 +800,10 @@ mod tests {
     }
 
     fn count(text: &str) -> usize {
-        analyze_to_json(text).unwrap()["intents"].as_array().unwrap().len()
+        analyze_to_json(text).unwrap()["intents"]
+            .as_array()
+            .unwrap()
+            .len()
     }
 
     fn midnight(days: i64) -> i64 {
@@ -753,7 +821,11 @@ mod tests {
         assert_eq!(i.title, "Study calculus");
         assert_eq!(i.category_id, "uni");
         // "at 4" sin am/pm → ambigüedad penalizada
-        assert!(i.confidence < 0.6, "ambigua → confirmación: {}", i.confidence);
+        assert!(
+            i.confidence < 0.6,
+            "ambigua → confirmación: {}",
+            i.confidence
+        );
         assert!(i.reason.contains("ambigua"));
 
         // "Exam Friday at 8 AM" — ejemplo 2
@@ -789,7 +861,10 @@ mod tests {
         let i = intent_of("Estudiar cálculo mañana a las 10 durante 3 horas", 0);
         assert_eq!(i.window.start, Some(midnight(1) + 10 * HOUR));
         assert_eq!(i.window.end, Some(midnight(1) + 13 * HOUR));
-        assert_eq!(i.duration, Some(crate::ai::intent::Duration { minutes: 180 }));
+        assert_eq!(
+            i.duration,
+            Some(crate::ai::intent::Duration { minutes: 180 })
+        );
 
         // rango explícito sin fecha → no inventa día, confianza baja (ambiguo)
         let i = intent_of("estudiar cálculo de 3pm a 5pm", 0);
@@ -840,11 +915,37 @@ mod tests {
         let today = chrono::Local::now().date_naive();
         let (y0, m0, _) = nl::ymd(today);
         let (m, y) = if m0 == 12 { (1, y0 + 1) } else { (m0 + 1, y0) };
-        let month = ["", "january", "february", "march", "april", "may", "june",
-            "july", "august", "september", "october", "november", "december"][m as usize];
-        let s = nl::local_ms(chrono::NaiveDate::from_ymd_opt(y, m, 5).unwrap().and_hms_opt(0, 0, 0).unwrap());
-        let e = nl::local_ms(chrono::NaiveDate::from_ymd_opt(y, m, 23).unwrap().and_hms_opt(0, 0, 0).unwrap());
-        let i = intent_of(&format!("Diagnostic Test is available {month} 5 through {month} 23"), 0);
+        let month = [
+            "",
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        ][m as usize];
+        let s = nl::local_ms(
+            chrono::NaiveDate::from_ymd_opt(y, m, 5)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        );
+        let e = nl::local_ms(
+            chrono::NaiveDate::from_ymd_opt(y, m, 23)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        );
+        let i = intent_of(
+            &format!("Diagnostic Test is available {month} 5 through {month} 23"),
+            0,
+        );
         assert_eq!(i.intent_type, IntentType::Availability);
         assert!(i.window.all_day);
         assert_eq!(i.window.start, Some(s));
@@ -852,8 +953,21 @@ mod tests {
         assert_eq!(i.title, "Diagnostic Test");
 
         // rango en español — mes siguiente a hoy
-        let month_es = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio",
-            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"][m as usize];
+        let month_es = [
+            "",
+            "enero",
+            "febrero",
+            "marzo",
+            "abril",
+            "mayo",
+            "junio",
+            "julio",
+            "agosto",
+            "septiembre",
+            "octubre",
+            "noviembre",
+            "diciembre",
+        ][m as usize];
         let i = intent_of(&format!("Disponible del 5 al 23 de {month_es}"), 0);
         assert_eq!(i.intent_type, IntentType::Availability);
         assert!(i.window.start.unwrap() < i.window.end.unwrap());
@@ -882,15 +996,36 @@ mod tests {
         assert!(i.window.all_day);
         let s = i.window.start.unwrap();
         let e = i.window.end.unwrap();
-        let s_date = chrono::Local.timestamp_millis_opt(s).earliest().unwrap().date_naive();
-        assert_eq!(crate::ai::nl::weekday_num(s_date), 1, "empieza lunes, fue {s_date}");
+        let s_date = chrono::Local
+            .timestamp_millis_opt(s)
+            .earliest()
+            .unwrap()
+            .date_naive();
+        assert_eq!(
+            crate::ai::nl::weekday_num(s_date),
+            1,
+            "empieza lunes, fue {s_date}"
+        );
         assert_eq!((e - s) / 86_400_000, 4, "lunes a viernes = 4 días");
         assert_eq!(i.title, "Proyecto");
 
         // rango de dígitos con actividad también es evento multi-día
         let (_, m0, _) = nl::ymd(chrono::Local::now().date_naive());
         let nm = if m0 == 12 { 1 } else { m0 + 1 };
-        let month_name = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][(nm - 1) as usize];
+        let month_name = [
+            "enero",
+            "febrero",
+            "marzo",
+            "abril",
+            "mayo",
+            "junio",
+            "julio",
+            "agosto",
+            "septiembre",
+            "octubre",
+            "noviembre",
+            "diciembre",
+        ][(nm - 1) as usize];
         let i = intent_of(&format!("proyecto del 10 al 15 de {month_name}"), 0);
         assert_eq!(i.intent_type, IntentType::Event);
         assert!(i.window.start.unwrap() < i.window.end.unwrap());
@@ -902,7 +1037,11 @@ mod tests {
         // inglés
         let i = intent_of("work on the report monday to friday", 0);
         assert_eq!(i.intent_type, IntentType::Event);
-        assert!(i.title.to_lowercase().contains("report"), "título: {}", i.title);
+        assert!(
+            i.title.to_lowercase().contains("report"),
+            "título: {}",
+            i.title
+        );
     }
 
     #[test]
@@ -911,7 +1050,10 @@ mod tests {
         let i = intent_of("Don't schedule anything before 6 AM", 0);
         assert_eq!(i.intent_type, IntentType::Constraint);
         assert_eq!(i.constraints.len(), 1);
-        assert_eq!(i.constraints[0].kind, crate::ai::intent::ConstraintKind::DailyCap);
+        assert_eq!(
+            i.constraints[0].kind,
+            crate::ai::intent::ConstraintKind::DailyCap
+        );
         assert_eq!(i.constraints[0].value.as_deref(), Some("06:00"));
 
         // "no programar nada después de las 9 pm"
@@ -945,7 +1087,11 @@ mod tests {
     #[test]
     fn ambiguity_penalized() {
         let i = intent_of("Study calculus tomorrow at 4", 0);
-        assert!(i.confidence < 0.6, "sin am/pm → {} (debe requerir confirmación)", i.confidence);
+        assert!(
+            i.confidence < 0.6,
+            "sin am/pm → {} (debe requerir confirmación)",
+            i.confidence
+        );
         let i = intent_of("Study calculus tomorrow at 4 PM", 0);
         assert!(i.confidence >= 0.8, "con am/pm → {}", i.confidence);
     }

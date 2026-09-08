@@ -67,17 +67,29 @@ fn parse_hhmm(s: &str) -> u32 {
 }
 
 fn setting(db: &Db, key: &str, default: &str) -> String {
-    db.settings_get(key).ok().flatten().unwrap_or_else(|| default.to_string())
+    db.settings_get(key)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| default.to_string())
 }
 
 pub fn prefs(db: &Db) -> NotifPrefs {
-    let cooldown_h: i64 = setting(db, "notif.cooldown_hours", "24").trim().parse().unwrap_or(24);
+    let cooldown_h: i64 = setting(db, "notif.cooldown_hours", "24")
+        .trim()
+        .parse()
+        .unwrap_or(24);
     NotifPrefs {
         enabled: setting(db, "notif.enabled", "1") == "1",
         quiet_start_min: parse_hhmm(&setting(db, "notif.quiet_start", "22:00")),
         quiet_end_min: parse_hhmm(&setting(db, "notif.quiet_end", "08:00")),
-        daily_cap: setting(db, "notif.daily_cap", "5").trim().parse().unwrap_or(5),
-        free_minutes: setting(db, "notif.free_minutes", "120").trim().parse().unwrap_or(120),
+        daily_cap: setting(db, "notif.daily_cap", "5")
+            .trim()
+            .parse()
+            .unwrap_or(5),
+        free_minutes: setting(db, "notif.free_minutes", "120")
+            .trim()
+            .parse()
+            .unwrap_or(120),
         cooldown_ms: cooldown_h.saturating_mul(3_600_000),
     }
 }
@@ -87,8 +99,14 @@ pub fn prefs_view(db: &Db) -> NotifPrefsView {
         enabled: setting(db, "notif.enabled", "1") == "1",
         quiet_start: setting(db, "notif.quiet_start", "22:00"),
         quiet_end: setting(db, "notif.quiet_end", "08:00"),
-        daily_cap: setting(db, "notif.daily_cap", "5").trim().parse().unwrap_or(5),
-        free_minutes: setting(db, "notif.free_minutes", "120").trim().parse().unwrap_or(120),
+        daily_cap: setting(db, "notif.daily_cap", "5")
+            .trim()
+            .parse()
+            .unwrap_or(5),
+        free_minutes: setting(db, "notif.free_minutes", "120")
+            .trim()
+            .parse()
+            .unwrap_or(120),
     }
 }
 
@@ -108,7 +126,10 @@ pub fn in_quiet_hours(min: u32, p: &NotifPrefs) -> bool {
 // ---------------- utilidades de tiempo ----------------
 
 fn local(ms: i64) -> chrono::DateTime<Local> {
-    Local.timestamp_millis_opt(ms).single().unwrap_or_else(Local::now)
+    Local
+        .timestamp_millis_opt(ms)
+        .single()
+        .unwrap_or_else(Local::now)
 }
 
 fn day_start(ms: i64) -> i64 {
@@ -170,7 +191,14 @@ pub struct Candidate {
     pub task_title: String,
 }
 
-const KINDS: [&str; 6] = ["deadline", "missed", "conflict", "free_time", "important", "reschedule"];
+const KINDS: [&str; 6] = [
+    "deadline",
+    "missed",
+    "conflict",
+    "free_time",
+    "important",
+    "reschedule",
+];
 
 /// Tareas activas (pendiente o en curso) que se cruzan con [now-1d, now+36h].
 fn active_tasks(db: &Db, now: i64) -> Vec<TaskRow> {
@@ -187,8 +215,13 @@ fn blocked(db: &Db, kind: &str, task_id: i64, p: &NotifPrefs, now: i64) -> bool 
     if db.notif_dismissed(kind, task_id).unwrap_or(false) {
         return true;
     }
-    let since = if kind == "missed" { 0 } else { now - p.cooldown_ms };
-    db.notif_fired_recently(kind, task_id, since).unwrap_or(false)
+    let since = if kind == "missed" {
+        0
+    } else {
+        now - p.cooldown_ms
+    };
+    db.notif_fired_recently(kind, task_id, since)
+        .unwrap_or(false)
 }
 
 fn push(db: &Db, v: &mut Vec<Candidate>, p: &NotifPrefs, now: i64, c: Candidate) {
@@ -240,7 +273,10 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
             fmt_hhmm(deadline)
         );
         if remaining > 0 {
-            body.push_str(&format!(" Quedan {} de preparación.", fmt_duration(remaining)));
+            body.push_str(&format!(
+                " Quedan {} de preparación.",
+                fmt_duration(remaining)
+            ));
         }
         push(
             db,
@@ -259,10 +295,9 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
     }
 
     // missed: pendiente que ya terminó (reciente, una sola vez)
-    for t in tasks
-        .iter()
-        .filter(|t| t.status == "pendiente" && !t.all_day && t.end_at < now && t.end_at >= now - 24 * 3_600_000)
-    {
+    for t in tasks.iter().filter(|t| {
+        t.status == "pendiente" && !t.all_day && t.end_at < now && t.end_at >= now - 24 * 3_600_000
+    }) {
         push(
             db,
             &mut out,
@@ -287,7 +322,11 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
     let timed: Vec<&TaskRow> = tasks.iter().filter(|t| !t.all_day).collect();
     for (i, a) in timed.iter().enumerate() {
         for b in timed.iter().skip(i + 1) {
-            let (x, y) = if a.start_at <= b.start_at { (a, b) } else { (b, a) };
+            let (x, y) = if a.start_at <= b.start_at {
+                (a, b)
+            } else {
+                (b, a)
+            };
             let overlap = (x.end_at.min(y.end_at) - y.start_at) / 60_000;
             if overlap < 15 {
                 continue;
@@ -319,7 +358,11 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
     // free_time: primer hueco libre >= umbral hoy, con tarea candidata
     if let Some((free_start, free_end)) = first_free_block(&timed, now, day, p.free_minutes) {
         if let Some(t) = best_free_candidate(&tasks, free_start) {
-            let label = if local(free_start).hour() >= 12 { "esta tarde" } else { "hoy" };
+            let label = if local(free_start).hour() >= 12 {
+                "esta tarde"
+            } else {
+                "hoy"
+            };
             push(
                 db,
                 &mut out,
@@ -345,10 +388,12 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
     }
 
     // important: compromiso de hoy (alta prioridad o todo el día)
-    for t in tasks
-        .iter()
-        .filter(|t| t.status == "pendiente" && (t.priority == "alta" || t.all_day) && t.start_at >= day && t.start_at < day + 86_400_000)
-    {
+    for t in tasks.iter().filter(|t| {
+        t.status == "pendiente"
+            && (t.priority == "alta" || t.all_day)
+            && t.start_at >= day
+            && t.start_at < day + 86_400_000
+    }) {
         let soon = !t.all_day && t.start_at - now <= 3 * 3_600_000 && t.start_at > now;
         let mut body = format!("Hoy: «{}».", t.title);
         if !t.all_day {
@@ -371,11 +416,17 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
     }
 
     // reschedule: en curso + otra pendiente que arranca en < 1h
-    for a in tasks.iter().filter(|t| t.status == "en-curso" && !t.all_day) {
-        for b in tasks
-            .iter()
-            .filter(|t| t.status == "pendiente" && !t.all_day && t.id != a.id && t.start_at >= now && t.start_at <= now + 3_600_000)
-        {
+    for a in tasks
+        .iter()
+        .filter(|t| t.status == "en-curso" && !t.all_day)
+    {
+        for b in tasks.iter().filter(|t| {
+            t.status == "pendiente"
+                && !t.all_day
+                && t.id != a.id
+                && t.start_at >= now
+                && t.start_at <= now + 3_600_000
+        }) {
             push(
                 db,
                 &mut out,
@@ -405,12 +456,7 @@ pub fn collect(db: &Db, now: i64, p: &NotifPrefs) -> Vec<Candidate> {
 }
 
 /// Primer hueco libre de >= `min` minutos entre [now, fin de día].
-fn first_free_block(
-    tasks: &[&TaskRow],
-    now: i64,
-    day: i64,
-    min: i64,
-) -> Option<(i64, i64)> {
+fn first_free_block(tasks: &[&TaskRow], now: i64, day: i64, min: i64) -> Option<(i64, i64)> {
     let mut busy: Vec<(i64, i64)> = tasks
         .iter()
         .filter(|t| t.end_at > now && t.start_at < day + 86_400_000)
@@ -496,7 +542,10 @@ pub fn tick(app: &AppHandle) {
 }
 
 fn fire(app: &AppHandle, c: &Candidate) {
-    let log_id = crate::sync::with_db(app, |db| db.log_notification(c.kind, c.task_id, &c.task_title)).unwrap_or(0);
+    let log_id = crate::sync::with_db(app, |db| {
+        db.log_notification(c.kind, c.task_id, &c.task_title)
+    })
+    .unwrap_or(0);
     match app
         .notification()
         .builder()
@@ -505,7 +554,13 @@ fn fire(app: &AppHandle, c: &Candidate) {
         .show()
     {
         Ok(_) => {
-            crate::append_log(app, &format!("notif_fired kind={} task_id={} log_id={log_id}", c.kind, c.task_id));
+            crate::append_log(
+                app,
+                &format!(
+                    "notif_fired kind={} task_id={} log_id={log_id}",
+                    c.kind, c.task_id
+                ),
+            );
             let _ = app.emit(
                 "notif:contextual",
                 ContextualNotif {
@@ -558,10 +613,18 @@ mod tests {
         assert!(in_quiet_hours(0, &p));
         assert!(in_quiet_hours(7 * 60, &p));
         assert!(!in_quiet_hours(12 * 60, &p));
-        let p2 = NotifPrefs { quiet_start_min: 13 * 60, quiet_end_min: 14 * 60, ..p };
+        let p2 = NotifPrefs {
+            quiet_start_min: 13 * 60,
+            quiet_end_min: 14 * 60,
+            ..p
+        };
         assert!(in_quiet_hours(13 * 60 + 30, &p2));
         assert!(!in_quiet_hours(15 * 60, &p2));
-        let p3 = NotifPrefs { quiet_start_min: 0, quiet_end_min: 0, ..p };
+        let p3 = NotifPrefs {
+            quiet_start_min: 0,
+            quiet_end_min: 0,
+            ..p
+        };
         assert!(!in_quiet_hours(23 * 60, &p3));
     }
 
@@ -569,11 +632,25 @@ mod tests {
     fn no_spam_dedup_and_cap() {
         let db = db();
         let now = now_ms();
-        let t = db.create("Examen", "uni", "baja", now, now + 3600_000, false).unwrap();
+        let t = db
+            .create("Examen", "uni", "baja", now, now + 3600_000, false)
+            .unwrap();
         let p = prefs_off_quiet();
-        assert_eq!(collect(&db, now, &p).iter().filter(|c| c.kind == "deadline").count(), 1);
+        assert_eq!(
+            collect(&db, now, &p)
+                .iter()
+                .filter(|c| c.kind == "deadline")
+                .count(),
+            1
+        );
         db.log_notification("deadline", t.id, "").unwrap();
-        assert_eq!(collect(&db, now, &p).iter().filter(|c| c.kind == "deadline").count(), 0);
+        assert_eq!(
+            collect(&db, now, &p)
+                .iter()
+                .filter(|c| c.kind == "deadline")
+                .count(),
+            0
+        );
         db.set_notif_status(1, "dismissed").unwrap();
         assert!(collect(&db, now, &p).is_empty());
     }
@@ -582,7 +659,15 @@ mod tests {
     fn deadline_candidate_with_remaining() {
         let db = db();
         let now = now_ms();
-        db.create("Estudiar cálculo", "uni", "media", now + 3_600_000, now + 5 * 3_600_000, false).unwrap();
+        db.create(
+            "Estudiar cálculo",
+            "uni",
+            "media",
+            now + 3_600_000,
+            now + 5 * 3_600_000,
+            false,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].kind, "deadline");
@@ -594,12 +679,24 @@ mod tests {
     fn multiday_allday_notifies_deadline() {
         let db = db();
         let now = day_start(now_ms()) + 23 * 3_600_000; // 23:00 de hoy
-        // rango sin hora de cierre: empieza hace 4 días, fin mañana 00:00
-        db.create("Entrega informe", "trab", "alta", now - 4 * 86_400_000, now + 3_600_000, true).unwrap();
+                                                        // rango sin hora de cierre: empieza hace 4 días, fin mañana 00:00
+        db.create(
+            "Entrega informe",
+            "trab",
+            "alta",
+            now - 4 * 86_400_000,
+            now + 3_600_000,
+            true,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         let dl = c.iter().find(|x| x.kind == "deadline");
         assert!(dl.is_some(), "candidates: {c:?}");
-        assert!(dl.unwrap().body.contains("22:00"), "fecha límite al final del día: {}", dl.unwrap().body);
+        assert!(
+            dl.unwrap().body.contains("22:00"),
+            "fecha límite al final del día: {}",
+            dl.unwrap().body
+        );
         assert!(dl.unwrap().body.contains("Entrega informe"));
     }
 
@@ -608,7 +705,15 @@ mod tests {
         let db = db();
         let now = day_start(now_ms()) + 23 * 3_600_000;
         // cierra mañana a las 21:00 → fecha límite = hora de cierre
-        db.create("Cierre", "trab", "media", now - 4 * 86_400_000, now + 22 * 3_600_000, true).unwrap();
+        db.create(
+            "Cierre",
+            "trab",
+            "media",
+            now - 4 * 86_400_000,
+            now + 22 * 3_600_000,
+            true,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         let dl = c.iter().find(|x| x.kind == "deadline");
         assert!(dl.is_some(), "candidates: {c:?}");
@@ -619,7 +724,15 @@ mod tests {
     fn single_day_allday_has_no_deadline_notif() {
         let db = db();
         let now = day_start(now_ms()) + 23 * 3_600_000;
-        db.create("Mañana entera", "uni", "alta", now + 3_600_000, now + 27 * 3_600_000, true).unwrap();
+        db.create(
+            "Mañana entera",
+            "uni",
+            "alta",
+            now + 3_600_000,
+            now + 27 * 3_600_000,
+            true,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         assert!(c.iter().all(|x| x.kind != "deadline"), "candidates: {c:?}");
     }
@@ -628,20 +741,49 @@ mod tests {
     fn missed_is_one_shot_forever() {
         let db = db();
         let now = now_ms();
-        db.create("Pasada", "uni", "baja", now - 5 * 3_600_000, now - 2 * 3_600_000, false).unwrap();
+        db.create(
+            "Pasada",
+            "uni",
+            "baja",
+            now - 5 * 3_600_000,
+            now - 2 * 3_600_000,
+            false,
+        )
+        .unwrap();
         let p = prefs_off_quiet();
-        assert_eq!(collect(&db, now, &p).iter().filter(|c| c.kind == "missed").count(), 1);
+        assert_eq!(
+            collect(&db, now, &p)
+                .iter()
+                .filter(|c| c.kind == "missed")
+                .count(),
+            1
+        );
         db.log_notification("missed", 1, "").unwrap();
         db.set_notif_status(1, "shown").unwrap();
-        assert_eq!(collect(&db, now, &p).iter().filter(|c| c.kind == "missed").count(), 0);
+        assert_eq!(
+            collect(&db, now, &p)
+                .iter()
+                .filter(|c| c.kind == "missed")
+                .count(),
+            0
+        );
     }
 
     #[test]
     fn conflict_pair_detected() {
         let db = db();
         let now = now_ms();
-        db.create("A", "uni", "baja", now, now + 2 * 3_600_000, false).unwrap();
-        db.create("B", "uni", "baja", now + 3_600_000, now + 26 * 3_600_000, false).unwrap();
+        db.create("A", "uni", "baja", now, now + 2 * 3_600_000, false)
+            .unwrap();
+        db.create(
+            "B",
+            "uni",
+            "baja",
+            now + 3_600_000,
+            now + 26 * 3_600_000,
+            false,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         let conflict = c.iter().find(|x| x.kind == "conflict");
         assert!(conflict.is_some(), "candidates: {c:?}");
@@ -654,20 +796,41 @@ mod tests {
         // anclado a las 10:00 locales de hoy: con la hora real el test
         // fallaba de noche (ya no queda hueco libre suficiente en el día)
         let now = day_start(now_ms()) + 10 * 3_600_000;
-        db.create("Cosas libres", "per", "baja", now, now + 3_600_000, false).unwrap();
-        db.create("Preparar entrevista", "trab", "alta", at(1, 9, 0), at(1, 11, 0), false).unwrap();
+        db.create("Cosas libres", "per", "baja", now, now + 3_600_000, false)
+            .unwrap();
+        db.create(
+            "Preparar entrevista",
+            "trab",
+            "alta",
+            at(1, 9, 0),
+            at(1, 11, 0),
+            false,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         let free = c.iter().find(|x| x.kind == "free_time");
         assert!(free.is_some(), "candidates: {c:?}");
-        assert!(free.unwrap().body.contains("¿Usarlas para «Preparar entrevista»?"));
+        assert!(free
+            .unwrap()
+            .body
+            .contains("¿Usarlas para «Preparar entrevista»?"));
     }
 
     #[test]
     fn important_commitment_today() {
         let db = db();
         let now = now_ms();
-        db.create("Defensa", "uni", "alta", at(0, 0, 0), at(0, 0, 0) + 86_400_000, true).unwrap();
-        db.create("Mañana", "uni", "alta", at(1, 9, 0), at(1, 10, 0), false).unwrap();
+        db.create(
+            "Defensa",
+            "uni",
+            "alta",
+            at(0, 0, 0),
+            at(0, 0, 0) + 86_400_000,
+            true,
+        )
+        .unwrap();
+        db.create("Mañana", "uni", "alta", at(1, 9, 0), at(1, 10, 0), false)
+            .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         let imp: Vec<_> = c.iter().filter(|x| x.kind == "important").collect();
         assert_eq!(imp.len(), 1, "candidates: {c:?}");
@@ -678,9 +841,25 @@ mod tests {
     fn reschedule_suggestion_while_en_curso() {
         let db = db();
         let now = now_ms();
-        db.create("Trabajando", "trab", "alta", now - 3_600_000, now + 3_600_000, false).unwrap();
+        db.create(
+            "Trabajando",
+            "trab",
+            "alta",
+            now - 3_600_000,
+            now + 3_600_000,
+            false,
+        )
+        .unwrap();
         db.set_task_status(1, "en-curso").unwrap();
-        db.create("Reunión", "trab", "media", now + 30 * 60_000, now + 90 * 60_000, false).unwrap();
+        db.create(
+            "Reunión",
+            "trab",
+            "media",
+            now + 30 * 60_000,
+            now + 90 * 60_000,
+            false,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         let r = c.iter().find(|x| x.kind == "reschedule");
         assert!(r.is_some(), "candidates: {c:?}");
@@ -691,8 +870,17 @@ mod tests {
     fn urgency_orders_candidates() {
         let db = db();
         let now = now_ms();
-        db.create("Urgente", "uni", "alta", now, now + 60 * 60_000, false).unwrap();
-        db.create("Tranquila", "uni", "baja", now + 10 * 3_600_000, now + 12 * 3_600_000, false).unwrap();
+        db.create("Urgente", "uni", "alta", now, now + 60 * 60_000, false)
+            .unwrap();
+        db.create(
+            "Tranquila",
+            "uni",
+            "baja",
+            now + 10 * 3_600_000,
+            now + 12 * 3_600_000,
+            false,
+        )
+        .unwrap();
         let c = collect(&db, now, &prefs_off_quiet());
         assert!(c.len() >= 2);
         assert!(c[0].score >= c[1].score);

@@ -36,7 +36,10 @@ fn ms(name: &str, iters: usize, f: impl Fn()) {
         f();
     }
     let per = t0.elapsed().as_micros() as f64 / iters as f64;
-    println!("{name:<42} {per:>10.1} µs/op   ({iters} ops en {:.1} ms)", t0.elapsed().as_millis());
+    println!(
+        "{name:<42} {per:>10.1} µs/op   ({iters} ops en {:.1} ms)",
+        t0.elapsed().as_millis()
+    );
 }
 
 #[test]
@@ -47,26 +50,55 @@ fn perf_report() {
 
     let t0 = Instant::now();
     fill(&db, N_TASKS);
-    println!("{:<42} {:>10.1} µs/op   (insertar {N_TASKS} tareas)", "db.create (2000)", t0.elapsed().as_micros() as f64 / N_TASKS as f64);
+    println!(
+        "{:<42} {:>10.1} µs/op   (insertar {N_TASKS} tareas)",
+        "db.create (2000)",
+        t0.elapsed().as_micros() as f64 / N_TASKS as f64
+    );
 
     ms("db.list (2000 filas)", 100, || {
         assert_eq!(db.list().unwrap().len(), N_TASKS);
     });
     ms("db.list_range (ventana 1 día)", 200, || {
-        db.list_range(chrono::Local::now().timestamp_millis(), chrono::Local::now().timestamp_millis() + 24 * HOUR)
-            .unwrap();
+        db.list_range(
+            chrono::Local::now().timestamp_millis(),
+            chrono::Local::now().timestamp_millis() + 24 * HOUR,
+        )
+        .unwrap();
     });
     ms("db.find_overlap (conflictos)", 1000, || {
-        db.find_overlap(-1, chrono::Local::now().timestamp_millis() + 45 * DAY, chrono::Local::now().timestamp_millis() + 45 * DAY + HOUR)
-            .unwrap();
+        db.find_overlap(
+            -1,
+            chrono::Local::now().timestamp_millis() + 45 * DAY,
+            chrono::Local::now().timestamp_millis() + 45 * DAY + HOUR,
+        )
+        .unwrap();
     });
     ms("db.find_similar_suggestion (dedupe)", 500, || {
         let _ = db.find_similar_suggestion("Tarea 999", None, None, Some("x"));
     });
     ms("db.insert_suggestion", 200, || {
         db.insert_suggestion(
-            "email", Some("m"), Some("s"), "asunto", "task", "Título", "", "uni",
-            "media", None, None, None, 0, "", "[]", 0.8, "r", None, "", "pending",
+            "email",
+            Some("m"),
+            Some("s"),
+            "asunto",
+            "task",
+            "Título",
+            "",
+            "uni",
+            "media",
+            None,
+            None,
+            None,
+            0,
+            "",
+            "[]",
+            0.8,
+            "r",
+            None,
+            "",
+            "pending",
         )
         .unwrap();
     });
@@ -86,10 +118,14 @@ fn perf_report() {
 
     // coste del handler de IPC (sin transporte; el transporte local WebView2
     // suma ~0.1–1 ms). `task_list` y `sync_status` comparten esta forma.
-    ms("handler-equivalente task_list (serialización)", 500, || {
-        let rows = db.list().unwrap();
-        let _ = serde_json::to_string(&rows).unwrap().len();
-    });
+    ms(
+        "handler-equivalente task_list (serialización)",
+        500,
+        || {
+            let rows = db.list().unwrap();
+            let _ = serde_json::to_string(&rows).unwrap().len();
+        },
+    );
 
     // vaciado del benchmark
     db.wipe_data().unwrap();

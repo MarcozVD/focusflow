@@ -39,7 +39,9 @@ pub fn smtp_host_for(imap_host: &str) -> String {
 /// Últimas líneas del log local que parecen errores (sin datos sensibles:
 /// `append_log` ya sanea saltos de línea; aquí además se recorta el largo).
 pub fn recent_error_lines(max: usize) -> Vec<String> {
-    let Some(dir) = crate::log_dir() else { return Vec::new() };
+    let Some(dir) = crate::log_dir() else {
+        return Vec::new();
+    };
     let Ok(content) = std::fs::read_to_string(dir.join("spike.log")) else {
         return Vec::new();
     };
@@ -63,12 +65,24 @@ fn b64(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -80,12 +94,20 @@ struct Smtp {
 
 impl Smtp {
     fn connect(host: &str, port: u16) -> Result<Self, String> {
-        let tcp = TcpStream::connect((host, port)).map_err(|e| format!("no se pudo conectar a {host}:{port}: {e}"))?;
-        tcp.set_read_timeout(Some(std::time::Duration::from_secs(15))).ok();
-        tcp.set_write_timeout(Some(std::time::Duration::from_secs(15))).ok();
+        let tcp = TcpStream::connect((host, port))
+            .map_err(|e| format!("no se pudo conectar a {host}:{port}: {e}"))?;
+        tcp.set_read_timeout(Some(std::time::Duration::from_secs(15)))
+            .ok();
+        tcp.set_write_timeout(Some(std::time::Duration::from_secs(15)))
+            .ok();
         let cx = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
-        let tls = cx.connect(host, tcp).map_err(|e| format!("TLS con {host}: {e}"))?;
-        let mut s = Smtp { stream: tls, buf: Vec::new() };
+        let tls = cx
+            .connect(host, tcp)
+            .map_err(|e| format!("TLS con {host}: {e}"))?;
+        let mut s = Smtp {
+            stream: tls,
+            buf: Vec::new(),
+        };
         s.expect("220")?;
         Ok(s)
     }
@@ -97,7 +119,10 @@ impl Smtp {
                 return String::from_utf8(line).map_err(|e| e.to_string());
             }
             let mut chunk = [0u8; 1024];
-            let n = self.stream.read(&mut chunk).map_err(|e| format!("SMTP lectura: {e}"))?;
+            let n = self
+                .stream
+                .read(&mut chunk)
+                .map_err(|e| format!("SMTP lectura: {e}"))?;
             if n == 0 {
                 return Err("SMTP: conexión cerrada".into());
             }
@@ -123,7 +148,10 @@ impl Smtp {
     }
 
     fn cmd(&mut self, c: &str, expect: &str) -> Result<String, String> {
-        self.stream.write_all(c.as_bytes()).and_then(|_| self.stream.write_all(b"\r\n")).map_err(|e| e.to_string())?;
+        self.stream
+            .write_all(c.as_bytes())
+            .and_then(|_| self.stream.write_all(b"\r\n"))
+            .map_err(|e| e.to_string())?;
         self.stream.flush().map_err(|e| e.to_string())?;
         self.expect(expect)
     }
@@ -131,7 +159,11 @@ impl Smtp {
 
 /// Envía el reporte usando SMTP con AUTH XOAUTH2 (OAuth2 de Google).
 /// Devuelve un mensaje de confirmación legible.
-pub fn send_report(cfg: &EmailConfig, access_token: &str, description: &str) -> Result<String, String> {
+pub fn send_report(
+    cfg: &EmailConfig,
+    access_token: &str,
+    description: &str,
+) -> Result<String, String> {
     if cfg.host.trim().is_empty() || cfg.user.trim().is_empty() {
         return Err("Configura tu correo en Ajustes → Correo electrónico.".into());
     }
@@ -139,7 +171,11 @@ pub fn send_report(cfg: &EmailConfig, access_token: &str, description: &str) -> 
         return Err("No hay sesión de Google: inicia sesión para enviar el reporte.".to_string());
     }
 
-    let desc: String = description.trim().chars().take(MAX_DESCRIPTION_CHARS).collect();
+    let desc: String = description
+        .trim()
+        .chars()
+        .take(MAX_DESCRIPTION_CHARS)
+        .collect();
     let errors = recent_error_lines(MAX_ERROR_LINES);
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
 
@@ -154,8 +190,16 @@ pub fn send_report(cfg: &EmailConfig, access_token: &str, description: &str) -> 
          Últimos errores del log:\r\n{errs}\r\n",
         user = cfg.user,
         ver = env!("CARGO_PKG_VERSION"),
-        desc = if desc.is_empty() { "(sin descripción)" } else { &desc },
-        errs = if errors.is_empty() { "(sin errores recientes en el log)".to_string() } else { errors.join("\r\n") },
+        desc = if desc.is_empty() {
+            "(sin descripción)"
+        } else {
+            &desc
+        },
+        errs = if errors.is_empty() {
+            "(sin errores recientes en el log)".to_string()
+        } else {
+            errors.join("\r\n")
+        },
     );
 
     let host = smtp_host_for(&cfg.host);
@@ -174,11 +218,16 @@ pub fn send_report(cfg: &EmailConfig, access_token: &str, description: &str) -> 
         "From: {}\r\nTo: {}\r\nSubject: [FocusFlow] Reporte de error — {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n.\r\n",
         cfg.user, REPORT_DEST, now, body
     );
-    smtp.stream.write_all(msg.as_bytes()).map_err(|e| e.to_string())?;
+    smtp.stream
+        .write_all(msg.as_bytes())
+        .map_err(|e| e.to_string())?;
     smtp.stream.flush().map_err(|e| e.to_string())?;
     smtp.expect("250")?;
     let _ = smtp.cmd("QUIT", "221");
-    Ok(format!("Reporte enviado desde {} a {}", cfg.user, REPORT_DEST))
+    Ok(format!(
+        "Reporte enviado desde {} a {}",
+        cfg.user, REPORT_DEST
+    ))
 }
 
 #[cfg(test)]
@@ -189,7 +238,10 @@ mod tests {
     fn smtp_host_derivation() {
         assert_eq!(smtp_host_for("imap.gmail.com"), "smtp.gmail.com");
         assert_eq!(smtp_host_for("smtp.office365.com"), "smtp.office365.com");
-        assert_eq!(smtp_host_for("mail.midominio.com"), "smtp.mail.midominio.com");
+        assert_eq!(
+            smtp_host_for("mail.midominio.com"),
+            "smtp.mail.midominio.com"
+        );
     }
 
     #[test]

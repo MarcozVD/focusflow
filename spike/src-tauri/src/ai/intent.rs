@@ -157,7 +157,10 @@ pub fn from_task(t: &ParsedTask) -> Intent {
         .reminders
         .iter()
         .filter_map(|s| crate::reminders::parse_reminder_minutes(s))
-        .map(|m| ReminderSpec { minutes_before: Some(m as u32), at: None })
+        .map(|m| ReminderSpec {
+            minutes_before: Some(m as u32),
+            at: None,
+        })
         .collect();
 
     Intent {
@@ -170,7 +173,11 @@ pub fn from_task(t: &ParsedTask) -> Intent {
             "baja" => Priority::Baja,
             _ => Priority::Media,
         },
-        window: TimeWindow { start, end, all_day: t.all_day },
+        window: TimeWindow {
+            start,
+            end,
+            all_day: t.all_day,
+        },
         duration: None,
         deadline: None,
         preparation: None,
@@ -206,7 +213,13 @@ mod tests {
         assert_eq!(i.title, "Estudiar programación");
         assert_eq!(i.category_id, "uni");
         assert!(i.window.all_day && i.window.start.is_none());
-        assert_eq!(i.reminders, vec![ReminderSpec { minutes_before: Some(60), at: None }]);
+        assert_eq!(
+            i.reminders,
+            vec![ReminderSpec {
+                minutes_before: Some(60),
+                at: None
+            }]
+        );
         assert_eq!(i.confidence, 0.0);
         assert_eq!(i.source, "local");
     }

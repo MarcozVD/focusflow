@@ -74,13 +74,21 @@ pub fn parse_task_text(
 /// determinista local manda sobre la de la IA; se conserva la hora que dio la
 /// IA. Rangos y fechas absolutas no se tocan.
 fn correct_relative_day(text: &str, t: &mut validation::ParsedTask) {
-    let Some(day_ms) = super::nl::relative_day_ms(text) else { return };
-    let Some(start_day) = super::nl::day_start_ms(t.start_ms) else { return };
+    let Some(day_ms) = super::nl::relative_day_ms(text) else {
+        return;
+    };
+    let Some(start_day) = super::nl::day_start_ms(t.start_ms) else {
+        return;
+    };
     if start_day == day_ms {
         return;
     }
     let start_tod = t.start_ms - start_day;
-    let end_tod = if t.end_ms > t.start_ms { t.end_ms - start_day } else { start_tod };
+    let end_tod = if t.end_ms > t.start_ms {
+        t.end_ms - start_day
+    } else {
+        start_tod
+    };
     t.start_ms = day_ms + start_tod;
     t.end_ms = day_ms + end_tod;
 }

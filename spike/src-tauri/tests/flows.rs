@@ -41,17 +41,32 @@ fn quickadd_text_becomes_calendar_block() {
     let d = db();
     // Quick Add = texto → intent → tarea directa (mismo camino que la UI)
     let intents = interpret("Reunión con el profe mañana a las 10 por 1 hora");
-    let ev = intents.iter().find(|i| i.intent_type == IntentType::Event).expect("evento");
+    let ev = intents
+        .iter()
+        .find(|i| i.intent_type == IntentType::Event)
+        .expect("evento");
     let start = ev.window.start.expect("fecha+ hora");
     let end = ev.window.end.expect("duración aplicada");
     assert_eq!(end - start, 60 * 60_000, "1 hora");
 
-    let t = d.create(&ev.title, &ev.category_id, prio_str(&ev.priority), start, end, false).unwrap();
+    let t = d
+        .create(
+            &ev.title,
+            &ev.category_id,
+            prio_str(&ev.priority),
+            start,
+            end,
+            false,
+        )
+        .unwrap();
 
     // El calendario (motor real) ve la tarea: las horas del bloque dejan de ser libres
     let engine = engine_with_calendar(&d);
     let before = engine.available_minutes(start - HOUR, start + 2 * HOUR);
-    assert!(before < 3 * 60, "el bloque ocupado se descuenta del tiempo libre");
+    assert!(
+        before < 3 * 60,
+        "el bloque ocupado se descuenta del tiempo libre"
+    );
     let rows = d.list_range(start - HOUR, start + 2 * HOUR).unwrap();
     assert!(rows.iter().any(|r| r.id == t.id));
 }
@@ -108,22 +123,45 @@ fn email_becomes_suggestion_then_calendar_task() {
     let end = it.window.end.unwrap_or(start);
     let sid = d
         .insert_suggestion(
-            "email", Some(&raw.message_id), Some(&raw.sender), &raw.subject, "event",
-            &it.title, &it.description, &it.category_id, prio_str(&it.priority),
-            Some(start), Some(end), None, 0, "", "[]", it.confidence, &it.reason,
-            None, "", "pending",
+            "email",
+            Some(&raw.message_id),
+            Some(&raw.sender),
+            &raw.subject,
+            "event",
+            &it.title,
+            &it.description,
+            &it.category_id,
+            prio_str(&it.priority),
+            Some(start),
+            Some(end),
+            None,
+            0,
+            "",
+            "[]",
+            it.confidence,
+            &it.reason,
+            None,
+            "",
+            "pending",
         )
         .unwrap();
     let s = d.get_suggestion(sid).unwrap().unwrap();
-    assert_eq!(s.status, "pending", "sin remitente de confianza no se auto-aprueba");
+    assert_eq!(
+        s.status, "pending",
+        "sin remitente de confianza no se auto-aprueba"
+    );
 
     // Sugerencia → Aceptar → Tarea en el calendario
     let before = d.count().unwrap();
-    let task = accept_suggestion(&d, sid).unwrap();
-    assert_eq!(d.count().unwrap(), before + 1);
-    assert_eq!(task.start_at, start);
+    let tasks = accept_suggestion(&d, sid).unwrap();
+    assert_eq!(d.count().unwrap(), before + tasks.len() as i64);
+    let created = tasks.first().expect("al menos una tarea");
+    assert_eq!(created.start_at, start);
     let rows = d.list_range(start - HOUR, end + HOUR).unwrap();
-    assert!(rows.iter().any(|r| r.id == task.id), "la tarea ocupa su hueco");
+    assert!(
+        rows.iter().any(|r| r.id == created.id),
+        "la tarea ocupa su hueco"
+    );
 
     // Revertir → la tarea desaparece, la sugerencia vuelve a pending
     revert_suggestion(&d, sid).unwrap();
@@ -138,16 +176,36 @@ fn accept_suggestion_is_idempotent() {
     let d = db();
     let sid = d
         .insert_suggestion(
-            "email", Some("msg-idem"), Some("x@y.com"), "Reunión", "event",
-            "Reunión de equipo", "", "trab", "media",
-            Some(1_800_000_000_000), Some(1_800_000_003_600_000), None, 0, "", "[]",
-            0.9, "test", None, "", "pending",
+            "email",
+            Some("msg-idem"),
+            Some("x@y.com"),
+            "Reunión",
+            "event",
+            "Reunión de equipo",
+            "",
+            "trab",
+            "media",
+            Some(1_800_000_000_000),
+            Some(1_800_000_003_600_000),
+            None,
+            0,
+            "",
+            "[]",
+            0.9,
+            "test",
+            None,
+            "",
+            "pending",
         )
         .unwrap();
     let t1 = accept_suggestion(&d, sid).unwrap();
     let before = d.count().unwrap();
     let t2 = accept_suggestion(&d, sid).unwrap();
-    assert_eq!(t1.id, t2.id, "re-aceptar devuelve la misma tarea");
+    assert_eq!(
+        t1.first().unwrap().id,
+        t2.first().unwrap().id,
+        "re-aceptar devuelve la misma tarea"
+    );
     assert_eq!(d.count().unwrap(), before, "no crea duplicados");
 }
 
@@ -220,10 +278,14 @@ fn conflict_detected_and_alternative_proposed() {
 
     // 1. Detección: llega un compromiso que choca con el bloque propuesto
     //    → la aceptación se rechaza con aviso y la propuesta sigue pending
-    d.create("Reunión urgente", "tra", "alta", slot, slot + HOUR, false).unwrap();
+    d.create("Reunión urgente", "tra", "alta", slot, slot + HOUR, false)
+        .unwrap();
     let err = accept_plan(&d, view.id, &Default::default()).expect_err("conflicto detectado");
     assert!(err.contains("se solapa"), "{err}");
-    assert_eq!(d.get_plan_proposal(view.id).unwrap().unwrap().status, "pending");
+    assert_eq!(
+        d.get_plan_proposal(view.id).unwrap().unwrap().status,
+        "pending"
+    );
 
     // 2. Alternativa: el compromiso se libera (se mueve a otro día) → el
     //    mismo plan se acepta y ocupa el calendario sin solaparse con nada
@@ -234,11 +296,17 @@ fn conflict_detected_and_alternative_proposed() {
         .find(|t| t.title == "Reunión urgente")
         .unwrap()
         .id;
-    d.move_to(clash, slot + 24 * HOUR, slot + 25 * HOUR, None).unwrap();
-    let tasks = accept_plan(&d, view.id, &Default::default()).expect("se acepta al liberarse el hueco");
+    d.move_to(clash, slot + 24 * HOUR, slot + 25 * HOUR, None)
+        .unwrap();
+    let tasks =
+        accept_plan(&d, view.id, &Default::default()).expect("se acepta al liberarse el hueco");
     assert_eq!(tasks.len(), 1, "una sesión de estudio");
-    assert!(d.find_overlap(tasks[0].id, tasks[0].start_at, tasks[0].end_at).unwrap().is_none(),
-        "sin solapamiento residual");
+    assert!(
+        d.find_overlap(tasks[0].id, tasks[0].start_at, tasks[0].end_at)
+            .unwrap()
+            .is_none(),
+        "sin solapamiento residual"
+    );
 }
 
 // ---------------------------------------------------------------------------
