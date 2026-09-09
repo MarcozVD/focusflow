@@ -1,4 +1,3 @@
-use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -57,7 +56,7 @@ impl Default for EmailConfig {
     fn default() -> Self {
         EmailConfig {
             host: String::new(),
-            port: 993,
+            port: 443,
             user: String::new(),
             auth: "password".into(),
             mailboxes: vec!["INBOX".into()],
@@ -68,7 +67,7 @@ impl Default for EmailConfig {
 }
 
 fn default_port() -> u16 {
-    993
+    443
 }
 fn default_auth() -> String {
     "password".into()
@@ -226,56 +225,302 @@ fn parse_body(pm: &mailparse::ParsedMail) -> String {
     String::new()
 }
 
-pub trait IoStream: Read + Write {}
-impl<T: Read + Write> IoStream for T {}
+pub type ImapSession = gmail::GmailClient;
 
-pub type ImapSession = imap::Session<Box<dyn IoStream>>;
+/// Cliente REST de Gmail API (scope `gmail.readonly`, SENSIBLE — no
+/// restringido). Sustituye al IMAP XOAUTH2 (scope `mail.google.com`,
+/// RESTRINGIDO → verificación + CASA anual de pago). Mantiene el contrato
+/// que usa sync.rs: `connect` → `fetch_mailbox` → `logout`.
+pub mod gmail {
+    use super::{now_ms, parse_body, RawEmail, SyncCheckpoint, MAX_BODY_CHARS, MAX_FETCH_PER_SYNC};
 
-/// Autenticador SASL XOAUTH2 para el crate `imap` (Gmail OAuth2).
-/// El crate base64-codifica la respuesta devuelta por `process`.
-pub struct XOAuth2 {
-    pub user: String,
-    pub access_token: String,
-}
+    const GMAIL_API: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-impl imap::Authenticator for XOAuth2 {
-    type Response = String;
-    fn process(&self, _challenge: &[u8]) -> Self::Response {
-        format!(
-            "user={}\x01auth=Bearer {}\x01\x01",
-            self.user, self.access_token
-        )
+    pub struct GmailClient {
+        http: reqwest::blocking::Client,
+        token: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MsgRef {
+        #[serde(default)]
+        id: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ListResponse {
+        #[serde(default)]
+        messages: Vec<MsgRef>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct GetResponse {
+        /// Mensaje completo MIME en base64url (format=raw).
+        #[serde(default)]
+        raw: String,
+        /// Milisegundos desde época (string) de la fecha interna del mensaje.
+        #[serde(default)]
+        internal_date: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Profile {
+        #[serde(default)]
+        messages_total: u32,
+        #[serde(default)]
+        email_address: String,
+    }
+
+    impl GmailClient {
+        pub fn connect(_config: &super::EmailConfig, access_token: &str) -> Result<Self, String> {
+            if access_token.is_empty() {
+                return Err("no hay sesión de Google: inicia sesión para conectar Gmail".into());
+            }
+            Ok(GmailClient {
+                http: reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(60))
+                    .build()
+                    .map_err(|e| e.to_string())?,
+                token: access_token.to_string(),
+            })
+        }
+
+        fn get(&self, path: &str) -> Result<String, String> {
+            let resp = self
+                .http
+                .get(format!("{GMAIL_API}{path}"))
+                .bearer_auth(&self.token)
+                .send()
+                .map_err(|e| format!("gmail api: {e}"))?;
+            let status = resp.status();
+            if !status.is_success() {
+                // Retry-After si Gmail lo envía (429); el cuerpo JSON crudo
+                // queda para el log a través del mensaje completo, pero el
+                // error que sube a la UI es corto y legible.
+                let retry_after = resp
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok());
+                let text = resp.text().unwrap_or_default();
+                return Err(Self::short_gmail_error(status, &text, retry_after));
+            }
+            resp.text().map_err(|e| format!("gmail api body: {e}"))
+        }
+
+        /// Traduce errores HTTP de Gmail API a mensajes cortos y accionables
+        /// para la UI (el cuerpo JSON crudo es técnico: solo log).
+        #[cfg(test)]
+        pub(crate) fn short_gmail_error_for_test(
+            status: reqwest::StatusCode,
+            body: &str,
+            retry_after: Option<u64>,
+        ) -> String {
+            Self::short_gmail_error(status, body, retry_after)
+        }
+
+        fn short_gmail_error(status: reqwest::StatusCode, body: &str, retry_after: Option<u64>) -> String {
+            let code = status.as_u16();
+            match code {
+                401 => "La sesión de Google caducó: cierra sesión y vuelve a entrar en Ajustes."
+                    .into(),
+                403 if body.contains("SERVICE_DISABLED") || body.contains("accessNotConfigured") => {
+                    "Gmail API deshabilitada en el proyecto de Google (error de configuración del servicio; no es culpa tuya). Se reintentará más tarde.".into()
+                }
+                403 => "Sin permiso para leer Gmail: revisa los permisos de la cuenta en Ajustes.".into(),
+                429 => {
+                    let w = retry_after
+                        .map(|s| format!(" Reintento automático en ~{s} s."))
+                        .unwrap_or_else(|| " Reintento automático en un rato.".into());
+                    format!("Límite de consultas a Gmail alcanzado.{w}")
+                }
+                500..=599 => "Gmail está temporalmente caído; se reintentará automáticamente.".into(),
+                _ => format!("Error de Gmail ({code}); se reintentará automáticamente."),
+            }
+        }
+
+        /// Prueba de conexión: perfil del buzón (dirección + nº de correos).
+        pub fn test_connection(&self) -> Result<(String, u32), String> {
+            let text = self.get("/profile")?;
+            let p: Profile =
+                serde_json::from_str(&text).map_err(|e| format!("perfil gmail: {e} ({text})"))?;
+            let label = if p.email_address.is_empty() {
+                "Gmail".to_string()
+            } else {
+                p.email_address
+            };
+            Ok((label, p.messages_total))
+        }
+
+        /// Mensajes nuevos de una bandeja desde el checkpoint. Equivalente
+        /// REST del antiguo `uid_search` + `uid_fetch` de IMAP:
+        /// - cursor: segundos de `internalDate` (monótono, cabe en u32 hasta 2106)
+        /// - ventana: `after:` con fecha del checkpoint (con 1 día de margen)
+        ///   o, en primera pasada, `today - since_days`.
+        pub fn fetch_mailbox(
+            &self,
+            mailbox: &str,
+            checkpoint: &SyncCheckpoint,
+            since_days: u32,
+        ) -> Result<(Vec<RawEmail>, SyncCheckpoint), String> {
+            let mut new_checkpoint = checkpoint.clone();
+
+            // consulta Gmail: bandeja + ventana temporal
+            let mut query = if mailbox == "INBOX" {
+                "in:inbox".to_string()
+            } else {
+                format!("label:{mailbox}")
+            };
+            if checkpoint.uid > 0 {
+                // margen de 1 día: emails cuyo Date difiere de internalDate
+                let cp_date = chrono::DateTime::from_timestamp(checkpoint.uid as i64, 0)
+                    .map(|d| d.with_timezone(&chrono::Local).date_naive())
+                    .unwrap_or_else(|| chrono::Local::now().date_naive())
+                    - chrono::Duration::days(1);
+                query.push_str(&format!(" after:{}", cp_date.format("%Y/%m/%d")));
+            } else if since_days > 0 {
+                let since =
+                    chrono::Local::now().date_naive() - chrono::Duration::days(since_days as i64);
+                query.push_str(&format!(" after:{}", since.format("%Y/%m/%d")));
+            }
+
+            let path = format!(
+                "/messages?maxResults={MAX_FETCH_PER_SYNC}&q={}",
+                urlencode(&query)
+            );
+            let text = self.get(&path)?;
+            let list: ListResponse =
+                serde_json::from_str(&text).map_err(|e| format!("list gmail: {e} ({text})"))?;
+
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(since_days as i64);
+            let mut emails = Vec::new();
+            let mut max_uid: u32 = checkpoint.uid;
+
+            for m in &list.messages {
+                if m.id.is_empty() {
+                    continue;
+                }
+                let get_path = format!("/messages/{}?format=raw", m.id);
+                let gtext = self.get(&get_path)?;
+                let g: GetResponse =
+                    serde_json::from_str(&gtext).map_err(|e| format!("get {}: {e}", m.id))?;
+                let uid = msg_uid(&g.internal_date, &m.id);
+                if uid > max_uid {
+                    max_uid = uid;
+                }
+                if uid <= checkpoint.uid {
+                    continue; // ya cubierto por el checkpoint (o anterior a él)
+                }
+
+                let mime_bytes = match b64url_decode(&g.raw) {
+                    Some(b) => b,
+                    None => continue,
+                };
+                let Ok(pm) = mailparse::parse_mail(&mime_bytes) else {
+                    continue;
+                };
+
+                let header = |key: &str| -> String {
+                    pm.headers
+                        .iter()
+                        .find(|h| h.get_key().eq_ignore_ascii_case(key))
+                        .map(|h| h.get_value())
+                        .unwrap_or_default()
+                };
+
+                // fuera de la ventana temporal → no se procesa (el cursor ya avanzó)
+                let date_raw = header("Date");
+                if since_days > 0 {
+                    if let Ok(t) = mailparse::dateparse(&date_raw) {
+                        if t < cutoff.timestamp() {
+                            continue;
+                        }
+                    }
+                }
+
+                let mut body_text = parse_body(&pm);
+                body_text.truncate(MAX_BODY_CHARS);
+
+                // hilo: In-Reply-To (padre inmediato) + References (toda la cadena)
+                let thread: Vec<String> = [header("In-Reply-To"), header("References")]
+                    .join(" ")
+                    .split_whitespace()
+                    .map(|s| s.trim_matches(|c| c == '<' || c == '>').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                emails.push(RawEmail {
+                    mailbox: mailbox.to_string(),
+                    uid,
+                    message_id: {
+                        let mid = header("Message-ID");
+                        if mid.is_empty() {
+                            format!("gmail-{}", m.id)
+                        } else {
+                            mid
+                        }
+                    },
+                    thread,
+                    subject: header("Subject"),
+                    sender: header("From"),
+                    date: date_raw,
+                    body: body_text,
+                });
+            }
+
+            new_checkpoint.uid = max_uid;
+            new_checkpoint.last_reviewed_date = now_ms();
+            Ok((emails, new_checkpoint))
+        }
+
+        pub fn logout(&self) {}
+    }
+
+    /// Cursor a partir de `internalDate` (ms desde época, string JSON).
+    /// Segundos desde época en u32 (válido hasta 2106). Si falta el campo,
+    /// fallback: hash FNV-1a del id (estable, sin orden temporal).
+    fn msg_uid(internal_date: &str, id: &str) -> u32 {
+        if let Ok(ms) = internal_date.parse::<i64>() {
+            if ms > 0 {
+                return (ms / 1000).min(u32::MAX as i64) as u32;
+            }
+        }
+        let mut h: u32 = 2166136261;
+        for b in id.as_bytes() {
+            h = h.wrapping_mul(16777619).wrapping_add(*b as u32);
+        }
+        h
+    }
+
+    #[cfg(test)]
+    pub fn msg_uid_for_test(internal_date: &str, id: &str) -> u32 {
+        msg_uid(internal_date, id)
+    }
+
+    fn urlencode(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(b as char)
+                }
+                _ => out.push_str(&format!("%{b:02X}")),
+            }
+        }
+        out
+    }
+
+    fn b64url_decode(s: &str) -> Option<Vec<u8>> {
+        use base64::Engine;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(s)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(s))
+            .ok()
     }
 }
 
 pub fn connect(config: &EmailConfig, access_token: &str) -> Result<ImapSession, String> {
-    // TLS implícito es obligatorio salvo servidor local (pruebas). Sin
-    // cifrado, el token y el correo viajan en claro (riesgo MITM).
-    let is_local = config.host == "localhost" || config.host == "127.0.0.1" || config.host == "::1";
-    if !config.ssl && !is_local {
-        return Err("se requiere TLS (activar 'Usar conexión segura')".into());
-    }
-    let tcp = std::net::TcpStream::connect((config.host.as_str(), config.port))
-        .map_err(|e| format!("tcp connect {}:{}: {e}", config.host, config.port))?;
-    let stream: Box<dyn IoStream> = if config.ssl || config.port == 993 {
-        let connector = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
-        let tls = connector
-            .connect(&config.host, tcp)
-            .map_err(|e| format!("tls connect: {e}"))?;
-        Box::new(tls)
-    } else {
-        Box::new(tcp)
-    };
-
-    let client = imap::Client::new(stream);
-    let auth = XOAuth2 {
-        user: config.user.clone(),
-        access_token: access_token.to_string(),
-    };
-    let session = client
-        .authenticate("XOAUTH2", &auth)
-        .map_err(|(e, _)| format!("login XOAUTH2: {e}"))?;
-    Ok(session)
+    gmail::GmailClient::connect(config, access_token)
 }
 
 /// Extrae la dirección de email pura de un encabezado From
@@ -291,8 +536,7 @@ pub fn sender_email(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
-/// Prueba de conexión: autenticación XOAUTH2 + SELECT de la primera bandeja +
-/// logout. Devuelve (bandeja, nº de correos) si todo va bien.
+/// Prueba de conexión: perfil del buzón de Gmail (dirección + nº de correos).
 pub fn test_connection(config: &EmailConfig, access_token: &str) -> Result<(String, u32), String> {
     if config.host.is_empty() || config.user.is_empty() {
         return Err("host y usuario requeridos".into());
@@ -300,18 +544,8 @@ pub fn test_connection(config: &EmailConfig, access_token: &str) -> Result<(Stri
     if access_token.is_empty() {
         return Err("no hay sesión de Google: inicia sesión para conectar Gmail".into());
     }
-    let mailbox = config
-        .mailboxes
-        .first()
-        .cloned()
-        .ok_or_else(|| "no hay bandejas configuradas".to_string())?;
-    let mut session = connect(config, access_token)?;
-    let mb = session
-        .select(&mailbox)
-        .map_err(|e| format!("select {mailbox}: {e}"))?;
-    let exists = mb.exists;
-    let _ = session.logout();
-    Ok((mailbox, exists))
+    let client = gmail::GmailClient::connect(config, access_token)?;
+    client.test_connection()
 }
 
 pub fn fetch_mailbox(
@@ -320,112 +554,7 @@ pub fn fetch_mailbox(
     checkpoint: &SyncCheckpoint,
     since_days: u32,
 ) -> Result<(Vec<RawEmail>, SyncCheckpoint), String> {
-    session
-        .select(mailbox)
-        .map_err(|e| format!("select {mailbox}: {e}"))?;
-
-    let mut new_checkpoint = checkpoint.clone();
-    new_checkpoint.uidvalidity = 0; // imap 2.x no expone UIDVALIDITY; reseteo heurístico abajo
-
-    let start_uid = checkpoint.uid + 1;
-    let search_expr = if start_uid > 1 {
-        format!("UID {start_uid}:*")
-    } else if since_days > 0 {
-        // primera pasada (sin checkpoint): solo la ventana reciente, no el buzón histórico
-        let since = chrono::Local::now().date_naive() - chrono::Duration::days(since_days as i64);
-        format!("SINCE {}", since.format("%d-%b-%Y"))
-    } else {
-        "1:*".into()
-    };
-    let searched = session
-        .uid_search(search_expr.as_str())
-        .map_err(|e| format!("uid_search({search_expr}): {e}"))?;
-    // UID n:* siempre incluye el último correo del buzón aunque su uid sea
-    // menor o igual al checkpoint (semántica IMAP); sin este filtro, el mismo
-    // correo se re-analizaba en cada sync cuando nada nuevo llegaba.
-    let ids: Vec<u32> = searched
-        .iter()
-        .copied()
-        .filter(|&uid| uid > checkpoint.uid)
-        .collect();
-
-    let take: Vec<u32> = ids.into_iter().take(MAX_FETCH_PER_SYNC).collect();
-    if take.is_empty() {
-        return Ok((Vec::new(), new_checkpoint));
-    }
-
-    let uids_str = take
-        .iter()
-        .map(|u| u.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let fetched = session
-        .uid_fetch(uids_str.as_str(), "(BODY.PEEK[])")
-        .map_err(|e| format!("uid_fetch: {e}"))?;
-
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(since_days as i64);
-    let mut emails = Vec::new();
-    let mut max_uid: u32 = 0;
-    for f in fetched.iter() {
-        let Some(body) = f.body() else { continue };
-        let Ok(pm) = mailparse::parse_mail(body) else {
-            continue;
-        };
-        let uid = f.uid.unwrap_or(0);
-        if uid > max_uid {
-            max_uid = uid;
-        }
-
-        let header = |key: &str| -> String {
-            pm.headers
-                .iter()
-                .find(|h| h.get_key().eq_ignore_ascii_case(key))
-                .map(|h| h.get_value())
-                .unwrap_or_default()
-        };
-
-        // fuera de la ventana temporal → se marca revisado pero no se procesa
-        let date_raw = header("Date");
-        if since_days > 0 {
-            if let Ok(t) = mailparse::dateparse(&date_raw) {
-                if (t as i64) < cutoff.timestamp() {
-                    continue;
-                }
-            }
-        }
-
-        let mut body_text = parse_body(&pm);
-        body_text.truncate(MAX_BODY_CHARS);
-
-        // hilo: In-Reply-To (padre inmediato) + References (toda la cadena)
-        let thread: Vec<String> = [header("In-Reply-To"), header("References")]
-            .join(" ")
-            .split_whitespace()
-            .map(|s| s.trim_matches(|c| c == '<' || c == '>').to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        emails.push(RawEmail {
-            mailbox: mailbox.to_string(),
-            uid,
-            message_id: header("Message-ID"),
-            thread,
-            subject: header("Subject"),
-            sender: header("From"),
-            date: date_raw,
-            body: body_text,
-        });
-    }
-
-    // reseteo heurístico: el servidor volvió a UIDs más bajos → mailbox reiniciado
-    if checkpoint.uid > 0 && max_uid < checkpoint.uid {
-        new_checkpoint.uid = 0;
-        new_checkpoint.uidvalidity = max_uid;
-    } else {
-        new_checkpoint.uid = max_uid;
-    }
-    new_checkpoint.last_reviewed_date = now_ms();
-    Ok((emails, new_checkpoint))
+    session.fetch_mailbox(mailbox, checkpoint, since_days)
 }
 
 #[cfg(test)]
@@ -518,26 +647,59 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_imap_rejected_outside_localhost() {
-        let mut cfg = EmailConfig {
-            host: "imap.proveedor.com".into(),
-            port: 143,
-            ssl: false,
-            ..EmailConfig::default()
-        };
-        let err = match connect(&cfg, "test-token") {
-            Ok(_) => panic!("sin TLS en remoto no debe conectar"),
+    fn connect_requires_token() {
+        let cfg = EmailConfig::default();
+        let err = match connect(&cfg, "") {
+            Ok(_) => panic!("sin token no debe conectar"),
             Err(e) => e,
         };
-        assert!(err.contains("TLS"), "{err}");
-        // localhost no recibe el guard: falla por red, no por el guard
-        cfg.host = "localhost".into();
-        match connect(&cfg, "test-token") {
-            Err(e) => assert!(
-                !e.contains("se requiere TLS"),
-                "el guard no debe aplicar a localhost"
-            ),
-            Ok(_) => {}
-        }
+        assert!(err.contains("inicia sesión"), "{err}");
+    }
+
+    #[test]
+    fn internal_date_maps_to_epoch_seconds_cursor() {
+        // 2026-09-09T00:00:00Z = 1_788_912_000 s (cabe en u32)
+        assert_eq!(
+            gmail::msg_uid_for_test("1788912000000", "abc"),
+            1_788_912_000
+        );
+        // sin internalDate → hash estable del id
+        let h1 = gmail::msg_uid_for_test("", "abc");
+        let h2 = gmail::msg_uid_for_test("", "abc");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, gmail::msg_uid_for_test("", "xyz"));
+    }
+
+    #[test]
+    fn gmail_errors_are_short_and_actionable() {
+        use reqwest::StatusCode;
+        // 403 SERVICE_DISABLED (caso real del usuario)
+        let e = gmail::GmailClient::short_gmail_error_for_test(
+            StatusCode::FORBIDDEN,
+            r#"{"error":{"message":"Gmail API has not been used in project…","status":"PERMISSION_DENIED"},"details":[{"reason":"SERVICE_DISABLED"}]}"#,
+            None,
+        );
+        assert!(e.contains("Gmail API deshabilitada"), "{e}");
+        assert!(!e.contains('{'), "sin JSON crudo: {e}");
+        // 429 con Retry-After
+        let e = gmail::GmailClient::short_gmail_error_for_test(
+            StatusCode::TOO_MANY_REQUESTS,
+            "{\"error\":\"quota\"}",
+            Some(90),
+        );
+        assert!(e.contains("~90 s"), "{e}");
+        // 401 → sesión caducada
+        let e = gmail::GmailClient::short_gmail_error_for_test(StatusCode::UNAUTHORIZED, "", None);
+        assert!(e.contains("caducó"), "{e}");
+        // 403 permisos normales
+        let e = gmail::GmailClient::short_gmail_error_for_test(StatusCode::FORBIDDEN, "forbidden", None);
+        assert!(e.contains("permiso"), "{e}");
+        // 5xx → temporal
+        let e = gmail::GmailClient::short_gmail_error_for_test(
+            StatusCode::BAD_GATEWAY,
+            "upstream",
+            None,
+        );
+        assert!(e.contains("temporalmente"), "{e}");
     }
 }

@@ -246,8 +246,8 @@ pub struct VerifyResult {
     pub email: ConnectionCheck,
 }
 
-/// Prueba ambas conexiones: API de IA (OpenCode Zen) y correo (IMAP).
-/// Async + spawn_blocking: la red (IA + IMAP, potencialmente minutos con
+/// Prueba ambas conexiones: API de IA (OpenCode Zen) y Gmail (REST API).
+/// Async + spawn_blocking: la red (IA + Gmail REST, potencialmente minutos con
 /// reintentos) no puede correr en el hilo principal o congela la UI
 /// (auditoría 17, hallazgo #1).
 #[tauri::command]

@@ -8,8 +8,8 @@
 //! 5. Los tokens se guardan en la DB local (tabla `auth_sessions`), NO en
 //!    Credential Manager. El usuario decide (prompt) qué cuenta usar.
 //!
-//! Scopes: identidad (openid email profile) + acceso a Gmail vía IMAP/SMTP
-//! XOAUTH2 (`https://mail.google.com/`).
+//! Scopes: identidad (openid email profile) + Gmail solo lectura vía REST API
+//! (`https://www.googleapis.com/auth/gmail.readonly`, scope SENSIBLE).
 //! `access_type=offline` + `prompt=consent` garantizan `refresh_token`.
 
 use std::io::{Read, Write};
@@ -24,9 +24,10 @@ use crate::store::{AuthSession, Db};
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-// gmail.readonly NO sirve para IMAP/SMTP XOAUTH2 (solo para la API REST);
-// Google exige el scope completo mail.google.com para autenticar IMAP/SMTP.
-const SCOPE: &str = "openid email profile https://mail.google.com/";
+// Scope SENSIBLE (no restringido): la app solo LEE el buzón vía Gmail REST API
+// (users.messages.list/get, format=raw). No usa IMAP/SMTP: el scope completo
+// mail.google.com es RESTRINGIDO y exigiría verificación + CASA anual de pago.
+const SCOPE: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly";
 const CALLBACK_TIMEOUT_SECS: u64 = 120;
 
 /// ID/secret de cliente incrustados en build-time (build.rs lee `.env`).
@@ -107,8 +108,9 @@ pub fn access_token(db: &Db) -> Result<String, String> {
 /// El `user` se rellena con el email de la sesión por el caller.
 pub fn gmail_email_config(session_email: &str) -> crate::email::EmailConfig {
     let mut cfg = crate::email::EmailConfig::default();
-    cfg.host = "imap.gmail.com".into();
-    cfg.port = 993;
+    // REST API de Gmail (no IMAP): host/port quedan como referencia informativa.
+    cfg.host = "gmail.googleapis.com".into();
+    cfg.port = 443;
     cfg.user = session_email.to_string();
     cfg.auth = "oauth2".into();
     cfg.ssl = true;

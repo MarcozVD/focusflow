@@ -11,7 +11,7 @@ use super::{AiError, AiProvider, AiResult};
 use crate::email::RawEmail;
 
 /// Limites de la minimización: solo se manda a la IA una ventana del cuerpo.
-/// El cuerpo completo llega del IMAP (hasta 8000); al proveedor le basta esta
+/// El cuerpo completo llega de la API de Gmail (hasta 8000); al proveedor le basta esta
 /// ventana para extraer materia, fechas e instrucciones sin mandar el buzón.
 const MAX_BODY_CHARS: usize = 4000;
 

@@ -221,8 +221,15 @@ fn no_available_time_is_reported() {
     for day in 0..15i64 {
         let t = chrono::Local::now().date_naive() + chrono::Duration::days(day);
         let s = focusflow_spike_lib::engine::local_ms(t.and_hms_opt(5, 0, 0).unwrap());
-        d.create("Bloque", "otr", "media", s, s + 18 * 3_600_000 + 30 * 60_000, false)
-            .unwrap();
+        d.create(
+            "Bloque",
+            "otr",
+            "media",
+            s,
+            s + 18 * 3_600_000 + 30 * 60_000,
+            false,
+        )
+        .unwrap();
     }
     let (intents, source) = interpret("Escribir informe 3 horas");
     let view = plan_from_text(&d, "Escribir informe 3 horas", &intents, &source).unwrap();
