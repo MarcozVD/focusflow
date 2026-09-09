@@ -27,7 +27,7 @@
   // Misma URL whitelisteada en el comando open_website del backend.
   async function openGuide() {
     try {
-      await invoke("open_website", { url: "https://gentle-cherry-45b1.mmvaleradaza.workers.dev/legal/empezar.html" });
+      await invoke("open_website", { url: "https://flowfocus.site/legal/empezar.html" });
     } catch {
       // fallback directo si el comando falla
       window.open("https://accounts.google.com/signup", "_blank");

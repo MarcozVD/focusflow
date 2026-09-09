@@ -51,7 +51,7 @@ use store::{lock_recover, Db};
 
 /// Base del sitio web público de FocusFlow (landing desplegada en Cloudflare).
 /// Única fuente para los enlaces legales abiertos desde Ajustes.
-pub(crate) const WEB_BASE: &str = "https://gentle-cherry-45b1.mmvaleradaza.workers.dev";
+pub(crate) const WEB_BASE: &str = "https://flowfocus.site";
 
 /// Directorio de log en %TEMP%. Nunca panic: si no se puede crear, el log
 /// se degrada a no-op (auditoría 17, hallazgo #6).

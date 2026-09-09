@@ -169,7 +169,7 @@ account creation; the account is obtained in 1 minute, free of charge:
 2. If you don't have one, the sign-in screen itself includes the link
    "¿No tienes cuenta? ... accounts.google.com/signup" and a "ver guía
    para empezar" link that opens our setup guide in the browser:
-   https://gentle-cherry-45b1.mmvaleradaza.workers.dev/legal/empezar.html
+   https://flowfocus.site/legal/empezar.html
    (page includes an English section for reviewers with these same steps).
 3. Direct shortcut: https://accounts.google.com/signup — creates a free
    Google account in about a minute (a phone number may be requested by
