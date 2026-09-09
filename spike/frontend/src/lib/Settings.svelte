@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { friendlySyncError } from "./syncError";
   import {
     aiConfig,
     emailConfig,
@@ -109,7 +110,7 @@
   }
 
   // ── Documentos legales: se abren en el navegador del sistema ──
-  const WEB_BASE = "https://gentle-cherry-45b1.mmvaleradaza.workers.dev";
+  const WEB_BASE = "https://flowfocus.site";
   let legalMsg = $state("");
   let legalOk = $state(false);
   async function openLegal(doc: "directivas" | "privacidad" | "condiciones") {
@@ -272,8 +273,8 @@
     saved = "";
     try {
       const config = {
-        host: emailConfig()?.config.host ?? "imap.gmail.com",
-        port: emailConfig()?.config.port ?? 993,
+        host: emailConfig()?.config.host ?? "gmail.googleapis.com",
+        port: emailConfig()?.config.port ?? 443,
         user: emailConfig()?.config.user ?? (authUser()?.email ?? ""),
         auth: "oauth2",
         ssl: emailSsl,
@@ -478,7 +479,7 @@
   <section>
     <h2>Cuenta de Google</h2>
     <p class="hint">
-      La sincronización de correo usa tu cuenta de Google (Gmail vía IMAP con OAuth2).
+      La sincronización de correo usa tu cuenta de Google (Gmail vía API oficial, solo lectura).
       Conecta tu cuenta una vez; no se necesitan servidores ni contraseñas.
     </p>
     {#if authUser()}
@@ -573,7 +574,8 @@
     {#if syncSummary()}
       <div class="sync-summary">
         {#if syncSummary()!.error}
-          <p class="sum-err">Error: {syncSummary()!.error}</p>
+          {@const friendly = friendlySyncError(syncSummary()!.error)}
+          <p class={friendly.transient ? "sum-warn" : "sum-err"}>{friendly.text}</p>
         {:else}
           <div class="sum-grid">
             <div class="sum-item">
@@ -721,7 +723,10 @@
       <div class="errbox">
         {#each syncToday() as h (h.id)}
           {#if h.error || h.result === "error"}
-            <p>{h.source}: {h.error || h.result}</p>
+            {@const friendly = friendlySyncError(h.error || h.result)}
+            <p class={friendly.transient ? "sum-warn" : "sum-err"}>
+              {h.source}: {friendly.text}
+            </p>
           {/if}
         {/each}
       </div>
@@ -1053,6 +1058,12 @@
     margin: 0;
     font-size: 13px;
     color: var(--danger);
+    font-weight: 600;
+  }
+  .sum-warn {
+    margin: 0;
+    font-size: 13px;
+    color: var(--warning);
     font-weight: 600;
   }
   .t {

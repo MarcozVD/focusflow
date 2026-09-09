@@ -41,8 +41,14 @@ impl std::fmt::Display for AiError {
         match self {
             AiError::NotConfigured(m) => write!(f, "IA no configurada: {m}"),
             AiError::Http(m) => write!(f, "Error HTTP: {m}"),
-            AiError::RateLimited { .. } => {
-                write!(f, "El proveedor de IA está temporalmente saturado por el límite de peticiones. Espera un momento y vuelve a intentarlo.")
+            AiError::RateLimited { retry_after, .. } => {
+                let wait = retry_after
+                    .map(|s| format!(" Reinténtalo {}.", fmt_wait_secs(s)))
+                    .unwrap_or_else(|| " Espera un momento y vuelve a intentarlo.".into());
+                write!(
+                    f,
+                    "El proveedor de IA está temporalmente saturado por el límite de peticiones.{wait}"
+                )
             }
             AiError::BadResponse(m) => write!(f, "Respuesta inválida de la IA: {m}"),
             AiError::InvalidJson(m) => write!(f, "JSON inválido: {m}"),
@@ -56,6 +62,7 @@ const MAX_RATE_LIMIT_RETRIES: u32 = 2;
 const MAX_RETRY_WAIT_SECS: u64 = 30;
 
 /// Lee `Retry-After`: o bien segundos, o bien una fecha HTTP (RFC 2822).
+/// Sin capar: el valor real viaja en el error para que el llamador decida.
 fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     let v = headers
         .get(reqwest::header::RETRY_AFTER)?
@@ -63,13 +70,57 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
         .ok()?
         .trim();
     if let Ok(secs) = v.parse::<u64>() {
-        return Some(secs.min(MAX_RETRY_WAIT_SECS));
+        return Some(secs);
     }
     let when = chrono::DateTime::parse_from_rfc2822(v).ok()?;
     let delta = (when.with_timezone(&chrono::Utc) - chrono::Utc::now())
         .num_seconds()
         .max(0) as u64;
-    Some(delta.min(MAX_RETRY_WAIT_SECS).max(1))
+    Some(delta)
+}
+
+/// Hint de reintento dentro del cuerpo del error 429 (varios proveedores no
+/// envían `Retry-After`). Formatos: "Please try again in 1m31.152s.",
+/// "in 17m26.3s", "in 5s".
+fn retry_hint_from_body(text: &str) -> Option<u64> {
+    const MARK: &str = "try again in ";
+    let rest = text.split(MARK).nth(1)?;
+    let mut total: u64 = 0;
+    let mut num = String::new();
+    let mut any = false;
+    for c in rest.chars() {
+        match c {
+            '0'..='9' | '.' => num.push(c),
+            'h' | 'm' | 's' => {
+                let v: f64 = num.parse().ok()?;
+                let mult = match c {
+                    'h' => 3600.0,
+                    'm' => 60.0,
+                    _ => 1.0,
+                };
+                total += (v * mult).ceil() as u64;
+                any = true;
+                num.clear();
+            }
+            _ => break,
+        }
+    }
+    if any {
+        Some(total)
+    } else {
+        None
+    }
+}
+
+/// Segundos → texto humano: "~92 s", "~17 min", "~2 h".
+pub fn fmt_wait_secs(secs: u64) -> String {
+    if secs >= 3600 {
+        format!("~{} h", secs.div_ceil(3600))
+    } else if secs >= 90 {
+        format!("~{} min", secs.div_ceil(60))
+    } else {
+        format!("~{secs} s")
+    }
 }
 
 fn map_http_status(
@@ -79,7 +130,7 @@ fn map_http_status(
 ) -> AiError {
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
         AiError::RateLimited {
-            retry_after: extract_retry_after(headers),
+            retry_after: extract_retry_after(headers).or_else(|| retry_hint_from_body(text)),
             detail: format!("{status} {}", text.chars().take(300).collect::<String>()),
         }
     } else {
@@ -91,7 +142,9 @@ fn map_http_status(
 }
 
 /// Reintenta con backoff exponencial mientras el error sea `RateLimited`.
-/// Después de `MAX_RATE_LIMIT_RETRIES` intentos devuelve el último error.
+/// Si el servidor pide esperar MÁS de MAX_RETRY_WAIT_SECS (reset en minutos:
+/// p. ej. límite diario de tokens), no bloquea el hilo: devuelve el error con
+/// el `retry_after` real para que el llamador programe un reintento diferido.
 fn chat_with_retry<F>(mut call: F) -> AiResult<serde_json::Value>
 where
     F: FnMut() -> AiResult<serde_json::Value>,
@@ -99,12 +152,17 @@ where
     let mut attempts: u32 = 0;
     loop {
         match call() {
-            Err(AiError::RateLimited { retry_after, .. }) if attempts < MAX_RATE_LIMIT_RETRIES => {
+            Err(e @ AiError::RateLimited { retry_after, .. })
+                if attempts < MAX_RATE_LIMIT_RETRIES =>
+            {
                 attempts += 1;
                 // backoff: 2s -> 4s -> ... improbable llegar al tope de retries.
                 let base = 2u64 << (attempts - 1);
-                let wait = retry_after.unwrap_or(base).min(MAX_RETRY_WAIT_SECS).max(1);
-                std::thread::sleep(std::time::Duration::from_secs(wait));
+                let wait = retry_after.unwrap_or(base);
+                if wait > MAX_RETRY_WAIT_SECS {
+                    return Err(e);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(wait.max(1)));
             }
             other => return other,
         }
@@ -509,5 +567,65 @@ mod tests {
         }
         let h = map_http_status(reqwest::StatusCode::BAD_GATEWAY, "bad proxy", &headers);
         assert!(matches!(h, AiError::Http(_)));
+    }
+
+    #[test]
+    fn retry_hint_parsed_from_429_body() {
+        // formato real del proveedor (límite diario de tokens):
+        // "Please try again in 1m31.152s."
+        let headers = reqwest::header::HeaderMap::new();
+        let rl = map_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit reached … Please try again in 1m31.152s. Need more tokens?",
+            &headers,
+        );
+        match rl {
+            AiError::RateLimited { retry_after, .. } => assert_eq!(retry_after, Some(92)),
+            other => panic!("esperaba RateLimited, got {other:?}"),
+        }
+        // minutos con decimales → ceil
+        let rl2 = map_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "Please try again in 17m26.303999999s.",
+            &headers,
+        );
+        match rl2 {
+            AiError::RateLimited { retry_after, .. } => assert_eq!(retry_after, Some(1047)),
+            other => panic!("esperaba RateLimited, got {other:?}"),
+        }
+        // segundos puros
+        let rl3 = map_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "try again in 45s",
+            &headers,
+        );
+        match rl3 {
+            AiError::RateLimited { retry_after, .. } => assert_eq!(retry_after, Some(45)),
+            other => panic!("esperaba RateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_with_retry_no_blocks_on_far_reset() {
+        // wait > MAX_RETRY_WAIT_SECS → devuelve el error sin dormir 17 min
+        let mut calls = 0;
+        let out = chat_with_retry(|| {
+            calls += 1;
+            Err(AiError::RateLimited {
+                retry_after: Some(1047),
+                detail: "TPD limit".into(),
+            })
+        });
+        assert!(matches!(out, Err(AiError::RateLimited { retry_after: Some(1047), .. })));
+        assert_eq!(calls, 1, "no debe reintentar si la espera supera el tope");
+    }
+
+    #[test]
+    fn fmt_wait_secs_human() {
+        assert_eq!(fmt_wait_secs(45), "~45 s");
+        assert_eq!(fmt_wait_secs(89), "~89 s");
+        assert_eq!(fmt_wait_secs(92), "~2 min");
+        assert_eq!(fmt_wait_secs(1047), "~18 min");
+        assert_eq!(fmt_wait_secs(7200), "~2 h");
     }
 }

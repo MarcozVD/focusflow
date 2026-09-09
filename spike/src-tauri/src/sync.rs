@@ -129,12 +129,15 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
     // no devuelva duración: conserva su hora y dura por defecto 1 h en vez de
     // colapsarse a medianoche (regresión detectada por e2e s3: un evento 09:00
     // se anclaba a 00:00 y desaparecía de la agenda).
-    let has_explicit_time = s.start_at.map(|ms| {
-        let t = chrono::DateTime::from_timestamp_millis(ms)
-            .map(|d| d.with_timezone(&chrono::Local))
-            .map(|d| d.format("%H:%M").to_string());
-        t.map(|h| h != "00:00" && h != "23:59").unwrap_or(false)
-    }).unwrap_or(false);
+    let has_explicit_time = s
+        .start_at
+        .map(|ms| {
+            let t = chrono::DateTime::from_timestamp_millis(ms)
+                .map(|d| d.with_timezone(&chrono::Local))
+                .map(|d| d.format("%H:%M").to_string());
+            t.map(|h| h != "00:00" && h != "23:59").unwrap_or(false)
+        })
+        .unwrap_or(false);
     let single_all_day = s.start_at.is_none()
         || s.end_at.is_none()
         || (s.start_at == s.end_at && !has_explicit_time)
@@ -296,7 +299,11 @@ fn analyze_email(
                     detail
                 ),
             );
-            Err(format!("ia_429 {detail}"))
+            // formato conversable por el frontend: `ia_429 [segundos] detalle`
+            Err(format!(
+                "ia_429{} {detail}",
+                retry_after.map(|s| format!(" {s}")).unwrap_or_default()
+            ))
         }
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) => Err(format!("ia_fail {e}")),
         Err(AiError::BadResponse(e)) if e.contains("intención inválida") => {
@@ -771,6 +778,8 @@ fn notify_new_suggestions(app: &AppHandle, count: usize) {
 }
 
 /// Lazo del scheduler: corre cada `interval_hours` horas en background.
+/// Fallos transitorios (429 de la IA, red, Gmail caído) programan un único
+/// reintento diferido según el hint del error; no ensucia el historial.
 pub fn scheduler_loop(app: AppHandle) {
     // Revisión inmediata al abrir la app: no esperar al intervalo (8 h por
     // defecto) para la primera verificación de correo. Corre en background
@@ -825,21 +834,95 @@ pub fn scheduler_loop(app: AppHandle) {
             }
             tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
             let h2 = app.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || match run_sync(&h2) {
-                Ok(s) => crate::append_log(
-                    &h2,
-                    &format!("scheduler_sync_ok suggestions={}", s.total_suggestions),
-                ),
-                Err(e) => crate::append_log(&h2, &format!("scheduler_sync_error: {e}")),
+            let outcome = tauri::async_runtime::spawn_blocking(move || {
+                match run_sync(&h2) {
+                    Ok(s) => {
+                        crate::append_log(
+                            &h2,
+                            &format!("scheduler_sync_ok suggestions={}", s.total_suggestions),
+                        );
+                        None
+                    }
+                    Err(e) => Some(e),
+                }
             })
-            .await;
+            .await
+            .unwrap_or_else(|_| Some("sync abortado".into()));
+            if let Some(e) = outcome {
+                crate::append_log(&h, &format!("scheduler_sync_error: {e}"));
+                // reintento único diferido si el fallo es transitorio
+                if let Some(delay) = retry_delay_hint(&e) {
+                    crate::append_log(
+                        &h,
+                        &format!("scheduler_sync_retry_scheduled delay_s={delay}"),
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    let h2 = h.clone();
+                    let _ = tauri::async_runtime::spawn_blocking(move || match run_sync(&h2) {
+                        Ok(s) => crate::append_log(
+                            &h2,
+                            &format!("scheduler_retry_ok suggestions={}", s.total_suggestions),
+                        ),
+                        Err(e) => crate::append_log(&h2, &format!("scheduler_retry_error: {e}")),
+                    })
+                    .await;
+                }
+            }
         }
     });
+}
+
+/// Hint de reintento para errores transitorios de sync (segundos de espera).
+/// `None` = fallo permanente (configuración), no reintentar.
+pub fn retry_delay_hint(err: &str) -> Option<u64> {
+    const DEFAULT_RETRY: u64 = 300;
+    if let Some(rest) = err.strip_prefix("ia_429 ") {
+        // `ia_429 [segundos] detalle`
+        let secs = rest
+            .split_whitespace()
+            .next()
+            .and_then(|t| t.parse::<u64>().ok());
+        return Some(secs.unwrap_or(DEFAULT_RETRY).clamp(30, 3600));
+    }
+    if err.starts_with("ia_fail") || err.contains("gmail api 4") || err.contains("conexión fallida")
+    {
+        return Some(DEFAULT_RETRY);
+    }
+    // fallo de configuración (email deshabilitado, sin sesión de Google, …)
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::retry_delay_hint;
+
+    #[test]
+    fn retry_hint_429_con_segundos() {
+        assert_eq!(retry_delay_hint("ia_429 92 FreeUsageLimitError"), Some(92));
+        // sin hint → default 300 s; con hint enorme → capado a 1 h
+        assert_eq!(retry_delay_hint("ia_429 oops"), Some(300));
+        assert_eq!(retry_delay_hint("ia_429 99999 x"), Some(3600));
+    }
+
+    #[test]
+    fn retry_hint_transitorios_y_permanentes() {
+        assert_eq!(retry_delay_hint("ia_fail timeout"), Some(300));
+        assert_eq!(
+            retry_delay_hint("INBOX: gmail api 429 Too Many Requests"),
+            Some(300)
+        );
+        assert_eq!(
+            retry_delay_hint("conexión fallida: gmail api timeout"),
+            Some(300)
+        );
+        // permanentes → sin reintento
+        assert_eq!(retry_delay_hint("email deshabilitado en Ajustes"), None);
+        assert_eq!(
+            retry_delay_hint("no hay sesión de Google: inicia sesión para sincronizar Gmail"),
+            None
+        );
+    }
 
     #[test]
     fn no_excluded_emails_keeps_forward_progress() {
