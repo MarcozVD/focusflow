@@ -197,9 +197,9 @@
         <TopBar {date} {view} {navigate} {goToday} {hmode} {setHmode} />
         {#if view === "sesiones"}
           <div class="cal-wrap">
-            {#key "sesiones-" + smode + date.toDateString()}
+            {#key "sesiones-" + hmode + date.toDateString()}
               <div transition:fade={{ duration: 160 }}>
-                <StudySessions {date} smode={smode} {setDate} {setHmode} />
+                <StudySessions {date} smode={hmode} {setDate} {setHmode} />
               </div>
             {/key}
           </div>
