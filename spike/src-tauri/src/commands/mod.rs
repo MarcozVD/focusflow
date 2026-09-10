@@ -14,8 +14,10 @@
 
 pub mod assistant;
 pub mod auth;
+pub mod classes;
 pub mod email;
 pub mod plans;
+pub mod study;
 pub mod suggestions;
 pub mod tasks;
 pub mod ui;

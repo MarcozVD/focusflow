@@ -125,6 +125,119 @@ pub struct AuthSession {
     pub expires_at: i64,
 }
 
+/// Clase del horario semanal: bloque de tiempo fijo con vigencia
+/// (independiente de las tareas: sin estado, sin completado, sin estadísticas).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ClassRow {
+    pub id: i64,
+    pub title: String,
+    /// 0 = lunes … 6 = domingo.
+    pub day_of_week: i64,
+    /// Minutos desde medianoche local.
+    pub start_min: i64,
+    pub end_min: i64,
+    /// Día ÉPOCA (medianoche local) de inicio de la vigencia, inclusivo.
+    pub start_date: i64,
+    /// Día ÉPOCA (medianoche local) de fin de la vigencia, inclusivo.
+    pub end_date: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn class_from_row(r: &rusqlite::Row) -> rusqlite::Result<ClassRow> {
+    Ok(ClassRow {
+        id: r.get("id")?,
+        title: r.get("title")?,
+        day_of_week: r.get("day_of_week")?,
+        start_min: r.get("start_min")?,
+        end_min: r.get("end_min")?,
+        start_date: r.get("start_date")?,
+        end_date: r.get("end_date")?,
+        created_at: r.get("created_at")?,
+        updated_at: r.get("updated_at")?,
+    })
+}
+
+/// Sesión de estudio: bloque de tiempo RESERVADO (planificado y movible) para
+/// estudiar o trabajar sobre un tema/tarea. Independiente de tareas y clases:
+/// no tiene estado, no es pendiente, no cuenta en estadísticas. `task_id` es
+/// una relación OPCIONAL (la tarea sigue viviendo por su cuenta).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct StudyRow {
+    pub id: i64,
+    pub title: String,
+    /// Inicio del bloque (ms ÉPOCA local).
+    pub start_at: i64,
+    /// Fin del bloque (ms ÉPOCA local), estrictamente posterior al inicio.
+    pub end_at: i64,
+    /// Tarea relacionada (opcional): `None` = sesión libre de un tema.
+    pub task_id: Option<i64>,
+    pub notes: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn study_from_row(r: &rusqlite::Row) -> rusqlite::Result<StudyRow> {
+    Ok(StudyRow {
+        id: r.get("id")?,
+        title: r.get("title")?,
+        start_at: r.get("start_at")?,
+        end_at: r.get("end_at")?,
+        task_id: r.get("task_id")?,
+        notes: r.get("notes")?,
+        created_at: r.get("created_at")?,
+        updated_at: r.get("updated_at")?,
+    })
+}
+
+/// Normaliza y valida una sesión de estudio antes de tocar la BD. Devuelve
+/// `Err(texto)` con el motivo legible (título obligatorio, fecha válida y
+/// duración > 0 — es decir, fin posterior al inicio).
+pub(crate) fn validate_study(title: &str, start_at: i64, end_at: i64) -> Result<(), String> {
+    if title.trim().is_empty() {
+        return Err("El título de la sesión es obligatorio".into());
+    }
+    if start_at <= 0 || end_at <= 0 {
+        return Err("La fecha de la sesión no es válida".into());
+    }
+    if end_at <= start_at {
+        return Err("La hora de finalización debe ser posterior a la de inicio".into());
+    }
+    Ok(())
+}
+
+/// Envuelve un mensaje legible como error de rusqlite para que viaje intacto
+/// hasta el frontend (mismo patrón que las clases).
+fn study_err(msg: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(msg)))
+}
+
+pub(crate) fn validate_class(
+    title: &str,
+    day_of_week: i64,
+    start_min: i64,
+    end_min: i64,
+    start_date: i64,
+    end_date: i64,
+) -> Result<(), String> {
+    if title.trim().is_empty() {
+        return Err("El nombre de la clase es obligatorio".into());
+    }
+    if !(0..=6).contains(&day_of_week) {
+        return Err("Día de la semana inválido".into());
+    }
+    if end_min <= start_min {
+        return Err("La hora de finalización debe ser posterior a la de inicio".into());
+    }
+    if !(0..1440).contains(&start_min) || end_min > 1440 {
+        return Err("Horario fuera del rango del día".into());
+    }
+    if end_date < start_date {
+        return Err("La fecha de finalización debe ser igual o posterior a la de inicio".into());
+    }
+    Ok(())
+}
+
 impl Db {
     pub fn open(data_dir: &PathBuf) -> rusqlite::Result<Self> {
         std::fs::create_dir_all(data_dir).ok();
@@ -195,7 +308,7 @@ impl Db {
     /// "migración aplicada" de "columna preexistente", y una futura migración
     /// con transformación de datos necesita ese punto de anclaje
     /// (auditoría 17, hallazgo #7).
-    const SCHEMA_VERSION: i64 = 11;
+    const SCHEMA_VERSION: i64 = 13;
 
     fn migrate(&self) -> rusqlite::Result<()> {
         let v: i64 = self
@@ -234,8 +347,62 @@ impl Db {
         if v < 11 {
             self.migrate_0011()?;
         }
+        if v < 12 {
+            self.migrate_0012()?;
+        }
+        if v < 13 {
+            self.migrate_0013()?;
+        }
         self.conn
             .pragma_update(None, "user_version", Self::SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    /// Sesiones de estudio (bloques de tiempo RESERVADO para estudiar/trabajar
+    /// en un tema o tarea). Entidad propia e independiente de `tasks` y de
+    /// `classes`: no tiene estado de completado, no cuenta como pendiente y no
+    /// entra en contadores ni estadísticas. `task_id` es la relación OPCIONAL
+    /// con una tarea (la tarea sigue existiendo por sí sola).
+    fn migrate_0013(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS study_sessions (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                title      TEXT NOT NULL CHECK (length(trim(title)) > 0),
+                start_at   INTEGER NOT NULL,
+                end_at     INTEGER NOT NULL CHECK (end_at > start_at),
+                task_id    INTEGER,
+                notes      TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_study_start ON study_sessions(start_at);
+            CREATE INDEX IF NOT EXISTS idx_study_task ON study_sessions(task_id);",
+        )?;
+        Ok(())
+    }
+
+    /// Clases del horario (bloques recurrentes con vigencia, independientes
+    /// de las tareas): día de la semana + franja horaria + periodo académico.
+    /// `day_of_week`: 0 = lunes … 6 = domingo (mismo criterio que el
+    /// frontend: `(getDay() + 6) % 7`). `start_min`/`end_min`: minutos desde
+    /// medianoche local. `start_date`/`end_date`: días ÉPOCA (medianoche
+    /// local) que delimitan la vigencia (ambos inclusivos).
+    fn migrate_0012(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS classes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT NOT NULL CHECK (length(trim(title)) > 0),
+                day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+                start_min   INTEGER NOT NULL CHECK (start_min BETWEEN 0 AND 1439),
+                end_min     INTEGER NOT NULL CHECK (end_min BETWEEN 1 AND 1440 AND end_min > start_min),
+                start_date  INTEGER NOT NULL,
+                end_date    INTEGER NOT NULL CHECK (end_date >= start_date),
+                created_at  INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_classes_day ON classes(day_of_week);
+            CREATE INDEX IF NOT EXISTS idx_classes_dates ON classes(start_date, end_date);",
+        )?;
         Ok(())
     }
 
@@ -562,6 +729,8 @@ impl Db {
         }
         let tasks = dump_all(&self.conn, "tasks")?;
         let suggestions = dump_all(&self.conn, "suggested_events")?;
+        let classes = dump_all(&self.conn, "classes")?;
+        let study_sessions = dump_all(&self.conn, "study_sessions")?;
 
         let trusted: Vec<String> = self
             .conn
@@ -585,6 +754,8 @@ impl Db {
             "exported_at": now_ms(),
             "tasks": tasks,
             "suggestions": suggestions,
+            "classes": classes,
+            "study_sessions": study_sessions,
             "trusted_senders": trusted,
             "settings": settings,
         }))
@@ -609,6 +780,8 @@ impl Db {
             tx.execute_batch(&format!("DELETE FROM {t};"))?;
         }
         tx.execute("DELETE FROM tasks", [])?;
+        tx.execute("DELETE FROM classes", [])?;
+        tx.execute("DELETE FROM study_sessions", [])?;
         tx.execute("DELETE FROM settings", [])?;
         tx.commit()?;
         Ok(())
@@ -747,6 +920,249 @@ impl Db {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows.into_iter().find(|(id, _)| !exclude_ids.contains(id)))
+    }
+
+    // ------------------------------------------------------------------
+    // Clases del horario (bloques fijos con vigencia, NO son tareas)
+    // ------------------------------------------------------------------
+
+    pub fn class_list(&self) -> rusqlite::Result<Vec<ClassRow>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM classes ORDER BY day_of_week, start_min")?;
+        let rows = stmt.query_map([], class_from_row)?;
+        rows.collect()
+    }
+
+    pub fn class_get(&self, id: i64) -> rusqlite::Result<Option<ClassRow>> {
+        self.conn
+            .query_row("SELECT * FROM classes WHERE id = ?1", [id], class_from_row)
+            .optional()
+    }
+
+    pub fn class_create(
+        &self,
+        title: &str,
+        day_of_week: i64,
+        start_min: i64,
+        end_min: i64,
+        start_date: i64,
+        end_date: i64,
+    ) -> rusqlite::Result<ClassRow> {
+        #[allow(clippy::too_many_arguments)]
+        fn inner(
+            conn: &rusqlite::Connection,
+            title: &str,
+            day_of_week: i64,
+            start_min: i64,
+            end_min: i64,
+            start_date: i64,
+            end_date: i64,
+        ) -> rusqlite::Result<ClassRow> {
+            validate_class(title, day_of_week, start_min, end_min, start_date, end_date).map_err(
+                |e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e))),
+            )?;
+            let now = now_ms();
+            conn.execute(
+                "INSERT INTO classes (title, day_of_week, start_min, end_min, start_date, end_date, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                rusqlite::params![
+                    title.trim(),
+                    day_of_week,
+                    start_min,
+                    end_min,
+                    start_date,
+                    end_date,
+                    now
+                ],
+            )?;
+            let id = conn.last_insert_rowid();
+            let mut stmt = conn.prepare("SELECT * FROM classes WHERE id = ?1")?;
+            stmt.query_row([id], class_from_row)
+        }
+        inner(
+            &self.conn,
+            title,
+            day_of_week,
+            start_min,
+            end_min,
+            start_date,
+            end_date,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn class_update(
+        &self,
+        id: i64,
+        title: &str,
+        day_of_week: i64,
+        start_min: i64,
+        end_min: i64,
+        start_date: i64,
+        end_date: i64,
+    ) -> rusqlite::Result<ClassRow> {
+        validate_class(title, day_of_week, start_min, end_min, start_date, end_date).map_err(
+            |e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e))),
+        )?;
+        let n = self.conn.execute(
+            "UPDATE classes SET title = ?2, day_of_week = ?3, start_min = ?4, end_min = ?5,
+               start_date = ?6, end_date = ?7, updated_at = ?8
+             WHERE id = ?1",
+            rusqlite::params![
+                id,
+                title.trim(),
+                day_of_week,
+                start_min,
+                end_min,
+                start_date,
+                end_date,
+                now_ms()
+            ],
+        )?;
+        if n == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(self.class_get(id)?.expect("clase existente"))
+    }
+
+    // ------------------------------------------------------------------
+    // Sesiones de estudio (tiempo RESERVADO, movible y editable).
+    // NO son tareas: sin estado, sin pendientes, sin contadores.
+    // ------------------------------------------------------------------
+
+    /// Sesiones que tocan el rango [start, end) — solape real semiabierto.
+    pub fn study_list_range(&self, start: i64, end: i64) -> rusqlite::Result<Vec<StudyRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT * FROM study_sessions
+             WHERE start_at < ?2 AND end_at > ?1
+             ORDER BY start_at, id",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![start, end], study_from_row)?;
+        rows.collect()
+    }
+
+    /// Todas las sesiones (orden cronológico). Igual que `class_list`: la usa
+    /// el planificador y el export.
+    pub fn study_list(&self) -> rusqlite::Result<Vec<StudyRow>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM study_sessions ORDER BY start_at, id")?;
+        let rows = stmt.query_map([], study_from_row)?;
+        rows.collect()
+    }
+
+    pub fn study_get(&self, id: i64) -> rusqlite::Result<Option<StudyRow>> {
+        self.conn
+            .query_row(
+                "SELECT * FROM study_sessions WHERE id = ?1",
+                [id],
+                study_from_row,
+            )
+            .optional()
+    }
+
+    /// Crea una sesión. `task_id` es opcional, pero si viene debe apuntar a una
+    /// tarea existente (relación válida, nunca una tarea disfrazada).
+    pub fn study_create(
+        &self,
+        title: &str,
+        start_at: i64,
+        end_at: i64,
+        task_id: Option<i64>,
+        notes: &str,
+    ) -> rusqlite::Result<StudyRow> {
+        validate_study(title, start_at, end_at).map_err(study_err)?;
+        if let Some(id) = task_id {
+            if self.get_task(id)?.is_none() {
+                return Err(study_err("La tarea relacionada no existe".into()));
+            }
+        }
+        let now = now_ms();
+        self.conn.execute(
+            "INSERT INTO study_sessions (title, start_at, end_at, task_id, notes, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            rusqlite::params![title.trim(), start_at, end_at, task_id, notes.trim(), now],
+        )?;
+        let id = self.conn.last_insert_rowid();
+        Ok(self.study_get(id)?.expect("sesión recién creada"))
+    }
+
+    pub fn study_update(
+        &self,
+        id: i64,
+        title: &str,
+        start_at: i64,
+        end_at: i64,
+        task_id: Option<i64>,
+        notes: &str,
+    ) -> rusqlite::Result<StudyRow> {
+        validate_study(title, start_at, end_at).map_err(study_err)?;
+        if let Some(tid) = task_id {
+            if self.get_task(tid)?.is_none() {
+                return Err(study_err("La tarea relacionada no existe".into()));
+            }
+        }
+        let n = self.conn.execute(
+            "UPDATE study_sessions SET title = ?2, start_at = ?3, end_at = ?4,
+               task_id = ?5, notes = ?6, updated_at = ?7
+             WHERE id = ?1",
+            rusqlite::params![id, title.trim(), start_at, end_at, task_id, notes.trim(), now_ms()],
+        )?;
+        if n == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(self.study_get(id)?.expect("sesión existente"))
+    }
+
+    /// Mueve/redimensiona una sesión (drag & drop del calendario): solo cambia
+    /// la ventana temporal, conservando título, tarea y notas.
+    pub fn study_move(&self, id: i64, start_at: i64, end_at: i64) -> rusqlite::Result<StudyRow> {
+        let cur = self
+            .study_get(id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        validate_study(&cur.title, start_at, end_at).map_err(study_err)?;
+        self.conn.execute(
+            "UPDATE study_sessions SET start_at = ?2, end_at = ?3, updated_at = ?4 WHERE id = ?1",
+            rusqlite::params![id, start_at, end_at, now_ms()],
+        )?;
+        Ok(self.study_get(id)?.expect("sesión existente"))
+    }
+
+    pub fn study_delete(&self, id: i64) -> rusqlite::Result<bool> {
+        let n = self
+            .conn
+            .execute("DELETE FROM study_sessions WHERE id = ?1", [id])?;
+        Ok(n > 0)
+    }
+
+    pub fn class_delete(&self, id: i64) -> rusqlite::Result<bool> {
+        let n = self
+            .conn
+            .execute("DELETE FROM classes WHERE id = ?1", [id])?;
+        Ok(n > 0)
+    }
+
+    /// Texto legible de un error de BD para el frontend: los errores de
+    /// validación de clase viajan como mensaje directo (sin prefijo técnico).
+    /// `pub`: también lo usa el CLI (`ff clases` / `ff sesiones`).
+    pub fn rusqlite_error_text(e: rusqlite::Error) -> String {
+        if let rusqlite::Error::ToSqlConversionFailure(f) = &e {
+            return f.to_string();
+        }
+        if let rusqlite::Error::SqliteFailure(_, Some(msg)) = &e {
+            // CHECK constraints: mensaje técnico → regla legible
+            if msg.contains("end_min > start_min")
+                || msg.contains("end_date >= start_date")
+                || msg.contains("La hora de finalización")
+            {
+                return "La hora de finalización debe ser posterior a la de inicio".into();
+            }
+            if msg.contains("CHECK") || msg.contains("constraint") {
+                return "Datos de la clase inválidos".into();
+            }
+        }
+        e.to_string()
     }
 
     pub fn create(

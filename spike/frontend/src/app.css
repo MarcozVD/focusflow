@@ -15,6 +15,9 @@
   --warning-bg: #fef3c7;
   --danger: #dc2626;
   --danger-bg: #fee2e2;
+  /* Sesiones de estudio: identidad propia (teal), no es el color de una categoría */
+  --study: #0d9488;
+  --study-bg: #ccfbf1;
   --text-1: #1f2937;
   --text-2: #6b7280;
   --text-3: #9ca3af;
@@ -67,6 +70,9 @@
   --warning-bg: rgba(245, 158, 11, 0.15);
   --danger: #f87171;
   --danger-bg: rgba(239, 68, 68, 0.15);
+  /* Sesiones de estudio (dark): teal más claro para contraste */
+  --study: #2dd4bf;
+  --study-bg: rgba(13, 148, 136, 0.18);
   --text-1: #f3f4f6;
   --text-2: #a6adbb;
   --text-3: #6b7280;

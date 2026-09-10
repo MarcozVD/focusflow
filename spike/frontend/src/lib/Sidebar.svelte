@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { toggleTheme, categories, tasks as tasksStore, DAYS_ES, suggestionsPending } from "./data.svelte";
+  import { toggleTheme, categories, tasks as tasksStore, DAYS_ES, suggestionsPending, bumpClassAdd, studySessions, bumpStudyAdd } from "./data.svelte";
 
   let {
     view,
@@ -28,7 +28,8 @@
       { id: "semana", label: "Semana", icon: "calendar" },
       { id: "mes", label: "Mes", icon: "grid" },
       { id: "dia", label: "Día", icon: "sun" },
-      { id: "agenda", label: "Agenda", icon: "list" },
+      { id: "horario", label: "Horario", icon: "clock" },
+      { id: "sesiones", label: "Sesiones de estudio", icon: "book" },
       { id: "asistente", label: "Asistente", icon: "sparkle" },
       { id: "sugerencias", label: "Sugerencias", icon: "inbox" },
       { id: "ajustes", label: "Ajustes", icon: "gear" },
@@ -44,8 +45,12 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="3" stroke="currentColor" stroke-width="2"/><rect x="13" y="3" width="8" height="8" rx="3" stroke="currentColor" stroke-width="2"/><rect x="3" y="13" width="8" height="8" rx="3" stroke="currentColor" stroke-width="2"/><rect x="13" y="13" width="8" height="8" rx="3" stroke="currentColor" stroke-width="2"/></svg>
           {:else if item.icon === "sun"}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><path d="M12 2V5M12 19V22M2 12H5M19 12H22M4.9 4.9L7 7M17 17L19.1 19.1M19.1 4.9L17 7M7 17L4.9 19.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          {:else if item.icon === "clock"}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7V12L15.5 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           {:else if item.icon === "list"}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M8 6H21M8 12H21M8 18H21M3 6H3.01M3 12H3.01M3 18H3.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+          {:else if item.icon === "book"}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19V19H6.5A2.5 2.5 0 0 0 4 21.5V5.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 7.5H15M8 11H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           {:else if item.icon === "inbox"}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22 12H16L14 15H10L8 12H2M5 4H19L22 12V18A2 2 0 0 1 20 20H4A2 2 0 0 1 2 18V12L5 4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
           {:else if item.icon === "sparkle"}
@@ -61,6 +66,16 @@
       </button>
     {/each}
   </nav>
+
+  <button class="add-horario" onclick={() => { setView("horario"); bumpClassAdd(); }}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+    Añadir horario
+  </button>
+
+  <button class="add-horario add-study" onclick={() => { setView("sesiones"); bumpStudyAdd(); }}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+    Añadir sesión de estudio
+  </button>
 
   <div class="section-label">Categorías</div>
   <div class="cats">
@@ -147,6 +162,40 @@
   }
   .ico {
     display: inline-flex;
+  }
+  .add-horario {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: var(--s-2) 0 var(--s-4);
+    padding: 10px 14px;
+    border: 1.5px dashed var(--primary);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  /* Sesiones de estudio: mismo componente, color propio (no son tareas) */
+  .add-horario.add-study {
+    margin-top: -8px;
+    border-color: var(--study);
+    color: var(--study);
+  }
+  .add-horario.add-study:hover {
+    background: color-mix(in srgb, var(--study) 12%, transparent);
+    border-style: solid;
+  }
+  .add-horario:hover {
+    background: var(--primary-soft);
+    border-style: solid;
+  }
+  /* el hover genérico no debe pisar el de las sesiones */
+  .add-horario.add-study:hover {
+    background: color-mix(in srgb, var(--study) 12%, transparent);
   }
   .badge {
     margin-left: auto;

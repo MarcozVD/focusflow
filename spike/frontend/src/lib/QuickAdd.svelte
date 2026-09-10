@@ -99,10 +99,11 @@
         return;
       }
       if (r.source === "stale") return;
+      if (r.source === "cancelada") return; // el usuario descartó el conflicto con una clase
       if (r.source === "error") {
         // sin Tauri o fallo del pipeline → creación directa (comportamiento anterior)
         const direct = await createTaskFromText(input);
-        if (direct.source === "stale") return;
+        if (direct.source === "stale" || direct.source === "cancelada") return;
         if (direct.ok) {
           text = "";
           showPreview = false;

@@ -8,6 +8,7 @@
     completeTask,
     updateTaskDetail,
     deleteTask,
+    guardClassConflict,
     duplicateTask,
     type Task,
   } from "./data.svelte";
@@ -77,6 +78,15 @@
       startAt = at(eSDate, eSTime);
       endAt = at(eEDate, eETime);
       if (endAt <= startAt) endAt = startAt + 3_600_000;
+      // regla 22: si la nueva ventana choca con una clase, preguntar antes
+      // de persistir (Editar = hueco libre sugerido, Cancelar = cerrar sin guardar)
+      const g = await guardClassConflict(eTitle.trim() || t.title, startAt, endAt);
+      if (g.result === "aborted") {
+        saving = false;
+        return;
+      }
+      startAt = g.startAt;
+      endAt = g.endAt;
     }
     const r = await updateTaskDetail(t.id, {
       title: eTitle.trim() || t.title,

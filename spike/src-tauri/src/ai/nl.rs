@@ -136,7 +136,7 @@ pub(crate) fn time_range(text: &str) -> Option<(u32, u32)> {
 
 /// Fecha/hora naive LOCAL → ms (la hora del usuario, no UTC: `.and_utc()`
 /// desplazaba las tareas según la zona horaria).
-pub(crate) fn local_ms(dt: chrono::NaiveDateTime) -> i64 {
+pub fn local_ms(dt: chrono::NaiveDateTime) -> i64 {
     chrono::Local
         .from_local_datetime(&dt)
         .earliest()
@@ -360,7 +360,7 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
 }
 
 /// Medianoche LOCAL (ms) del día al que pertenece un timestamp.
-pub(crate) fn day_start_ms(ms: i64) -> Option<i64> {
+pub fn day_start_ms(ms: i64) -> Option<i64> {
     let dt = chrono::DateTime::from_timestamp_millis(ms)?.with_timezone(&chrono::Local);
     Some(local_ms(dt.date_naive().and_hms_opt(0, 0, 0)?))
 }

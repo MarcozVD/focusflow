@@ -616,7 +616,13 @@ mod tests {
                 detail: "TPD limit".into(),
             })
         });
-        assert!(matches!(out, Err(AiError::RateLimited { retry_after: Some(1047), .. })));
+        assert!(matches!(
+            out,
+            Err(AiError::RateLimited {
+                retry_after: Some(1047),
+                ..
+            })
+        ));
         assert_eq!(calls, 1, "no debe reintentar si la espera supera el tope");
     }
 

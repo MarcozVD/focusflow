@@ -1,6 +1,6 @@
 //! Dominio UI/AJUSTES: generales, notificaciones, preferencias visuales,
 //! onboarding, datos (export/borrado), reporte de errores y navegación
-//! abierta desde el widget (open_task/open_agenda/open_assistant/website).
+//! abierta desde el widget (open_task/open_study/open_assistant/website).
 
 use serde::Serialize;
 use std::sync::Mutex;
@@ -371,8 +371,10 @@ pub fn open_task(app: AppHandle, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Abre la app principal en la vista de SESIONES DE ESTUDIO (sustituye a la
+/// antigua Agenda). Se conserva el nombre `open_study` para el widget.
 #[tauri::command]
-pub fn open_agenda(app: AppHandle) -> Result<(), String> {
+pub fn open_study(app: AppHandle) -> Result<(), String> {
     crate::show_main(&app);
     if let Some(w) = app.get_webview_window("widget") {
         let _ = w.hide();
@@ -380,9 +382,9 @@ pub fn open_agenda(app: AppHandle) -> Result<(), String> {
     let app2 = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(350));
-        let _ = app2.emit("nav:agenda", ());
+        let _ = app2.emit("nav:study", ());
     });
-    append_log(&app, "open_agenda_from_widget");
+    append_log(&app, "open_study_from_widget");
     Ok(())
 }
 

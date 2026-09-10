@@ -1,5 +1,9 @@
 <script lang="ts">
+  // Bloque de evento del calendario día/semana. Sirve para TAREAS y, mediante
+  // la prop `study`, para SESIONES DE ESTUDIO: mismas interacciones (mover,
+  // redimensionar, click), color propio (--study) y rótulo distinto.
   import { cat, openTaskDetail, type Task } from "./data.svelte";
+  import type { StudySession } from "./studyLogic";
 
   interface Seg {
     start: Date;
@@ -14,6 +18,8 @@
     height,
     left,
     width,
+    conflict = false,
+    study = null,
     onPointerDown,
     onClick,
   }: {
@@ -23,24 +29,37 @@
     height: number;
     left: number;
     width: number;
+    /** La tarea coincide con una clase del horario (regla 8). */
+    conflict?: boolean;
+    /** Si viene, el bloque representa una SESIÓN DE ESTUDIO (no una tarea). */
+    study?: StudySession | null;
     onPointerDown?: (t: Task, mode: "move" | "resize-start" | "resize-end", e: PointerEvent) => void;
     onClick?: (t: Task) => void;
   } = $props();
 
-  const c = $derived(cat(task.categoryId));
+  const c = $derived(study ? "var(--study)" : cat(task.categoryId).color);
   const compact = $derived(height < 36);
   const tall = $derived(height >= 62);
+  const isStudy = $derived(study != null);
 
   function fmt(d: Date): string {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
   const label = $derived(
-    seg.kind === "inicio" ? `Inicio · ${task.title}` : seg.kind === "fin" ? `Fin · ${task.title}` : task.title,
+    isStudy
+      ? study!.title
+      : seg.kind === "inicio"
+        ? `Inicio · ${task.title}`
+        : seg.kind === "fin"
+          ? `Fin · ${task.title}`
+          : task.title,
   );
 
   const tooltip = $derived(
-    `${task.title} · ${fmt(seg.start)} – ${fmt(seg.end)}${task.description ? "\n" + task.description : ""}${task.priority === "alta" ? "\nPrioridad alta" : ""}${task.status === "vencida" ? "\nVencida" : ""}`,
+    isStudy
+      ? `Sesión de estudio: ${study!.title} · ${fmt(seg.start)} – ${fmt(seg.end)}${study!.notes ? "\n" + study!.notes : ""}${conflict ? "\n⚠ Coincide con una clase de tu horario" : ""}`
+      : `${task.title} · ${fmt(seg.start)} – ${fmt(seg.end)}${task.description ? "\n" + task.description : ""}${conflict ? "\n⚠ Coincide con una clase de tu horario" : ""}${task.priority === "alta" ? "\nPrioridad alta" : ""}${task.status === "vencida" ? "\nVencida" : ""}`,
   );
 
   function onMove(e: PointerEvent) {
@@ -55,8 +74,8 @@
 </script>
 
 <div
-  class="evt {seg.kind} {task.status === 'vencida' ? 'overdue' : ''} {compact ? 'compact' : ''} {task.status === 'completada' ? 'done' : ''}"
-  style="top: {top}px; height: {height}px; left: {left}%; width: {width}%; --c: {c.color}"
+  class="evt {seg.kind} {task.status === 'vencida' ? 'overdue' : ''} {compact ? 'compact' : ''} {task.status === 'completada' ? 'done' : ''} {conflict ? 'class-conflict' : ''} {isStudy ? 'study' : ''}"
+  style="top: {top}px; height: {height}px; left: {left}%; width: {width}%; --c: {c}"
   title={tooltip}
   role="button"
   tabindex="0"
@@ -71,22 +90,35 @@
 >
   {#if !compact}
     <span class="evt-time">
+      {#if isStudy}
+        <span class="study-tag" aria-hidden="true">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19V19H6.5A2.5 2.5 0 0 0 4 21.5V5.5Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
+        </span>
+      {/if}
       {fmt(seg.start)}{tall ? ` – ${fmt(seg.end)}` : ""}
-      {#if task.priority === "alta"}
+      {#if !isStudy && task.priority === "alta"}
         <span class="prio-dot" title="Prioridad alta"></span>
       {/if}
     </span>
     <span class="evt-title">{label}</span>
-    {#if tall && task.description}
+    {#if tall && !isStudy && task.description}
       <span class="evt-desc">{task.description}</span>
     {/if}
-    {#if !tall && task.priority === "alta"}
+    {#if tall && isStudy && study!.notes}
+      <span class="evt-desc">{study!.notes}</span>
+    {/if}
+    {#if !tall && !isStudy && task.priority === "alta"}
       <span class="evt-title" aria-hidden="true">
         <span class="prio-bar"></span>
       </span>
     {/if}
   {:else}
     <span class="evt-inline">
+      {#if isStudy}
+        <span class="study-tag" aria-hidden="true">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19V19H6.5A2.5 2.5 0 0 0 4 21.5V5.5Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
+        </span>
+      {/if}
       <span class="evt-time-mini">{fmt(seg.start)}</span>
       <span class="evt-title">{label}</span>
     </span>
@@ -140,6 +172,11 @@
     border-left-style: dashed;
     opacity: 0.8;
   }
+  /* Regla 8: la tarea coincide con una clase (el usuario confirmó) */
+  .evt.class-conflict {
+    outline: 1.5px solid var(--warning);
+    outline-offset: -1.5px;
+  }
   .evt.done {
     opacity: 0.5;
   }
@@ -149,6 +186,17 @@
   .evt.inicio,
   .evt.fin {
     background: color-mix(in srgb, var(--c) 18%, var(--surface));
+  }
+  /* Sesión de estudio: rótulo mini con icono de libro para distinguirla */
+  .study-tag {
+    display: inline-grid;
+    place-items: center;
+    width: 13px;
+    height: 13px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--c) 20%, transparent);
+    color: var(--c);
+    flex-shrink: 0;
   }
   .evt-time {
     font-size: 10px;

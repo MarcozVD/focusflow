@@ -38,7 +38,7 @@
 <div class="stage">
   <div class="card">
     <div class="logo">
-      <img src="/favicon.svg" alt="" />
+      <img src="/icon.png" alt="Icono de FocusFlow" />
     </div>
     <h1>FocusFlow</h1>
     <p class="sub">

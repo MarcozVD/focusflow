@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  classConflictsIn,
+  shiftToFreeSlot,
+  type ClassInstance,
+  type ClassRow,
+} from "./classLogic";
 
 export type Priority = "alta" | "media" | "baja";
 export type Status = "pendiente" | "completada" | "en-curso" | "vencida";
@@ -173,8 +179,21 @@ export type AssistantTurn =
 
 const store = $state({
   tasks: [] as Task[],
+  // Catálogo de clases del horario (reglas 10–13): se guarda SEPARADO de
+  // tasks; ninguna función de tareas lo recorre ni lo cuenta.
+  classes: [] as ClassRow[],
+  // Sesiones de estudio: entidad PROPIA y también separada de tasks (tiempo
+  // reservado, no pendiente). Ninguna función de tareas la recorre ni la cuenta.
+  study: [] as StudySession[],
   ready: false,
   quickadd: 0,
+  // bump que abre el formulario de clase nueva desde el sidebar ("Añadir horario")
+  classAdd: 0,
+  // bump que abre el formulario de sesión de estudio (sidebar "Añadir sesión
+  // de estudio" y botón de la vista de sesiones)
+  studyAdd: 0,
+  // Sesión de estudio abierta en su editor/visor de detalles
+  studyDetail: null as number | null,
   suggestions: [] as Suggestion[],
   suggestionsPending: 0,
   aiConfig: null as AiConfigView | null,
@@ -188,6 +207,17 @@ const store = $state({
   syncSummary: null as SyncDoneSummary | null,
   taskDetail: null as Task | null,
   lastRange: null as null | { from: number; to: number },
+  // Diálogo de conflicto tarea↔clase (regla 22): una petición pendiente por
+  // vez. `resolve` devuelve la elección al flujo que la esperaba.
+  classConflict: null as null | {
+    taskTitle: string;
+    /** Quién pide el diálogo: una tarea o una sesión de estudio (copy). */
+    kind?: "task" | "study";
+    startAt: number;
+    endAt: number;
+    conflicts: ClassInstance[];
+    resolve: (choice: "editar" | "continuar" | "cancelar") => void;
+  },
   general: null as GeneralSettingsView | null,
   syncToday: [] as SyncHistoryRow[],
   lastSyncAt: null as number | null,
@@ -218,6 +248,14 @@ const store = $state({
 export const tasks = () => store.tasks;
 export const ready = () => store.ready;
 export const quickadd = () => store.quickadd;
+export const classAdd = () => store.classAdd;
+/** El sidebar ("Añadir horario") pide abrir el formulario de clase nueva. */
+export function bumpClassAdd() {
+  store.classAdd += 1;
+}
+export function resetClassAdd() {
+  store.classAdd = 0;
+}
 export const suggestions = () => store.suggestions;
 export const suggestionsPending = () => store.suggestionsPending;
 export const aiConfig = () => store.aiConfig;
@@ -501,10 +539,10 @@ export function closeTaskDetail() {
   store.taskDetail = null;
 }
 
-/** Abre la app principal en la vista Agenda (desde el widget). */
-export function openAgenda() {
+/** Abre la app principal en la vista de Sesiones de estudio (desde el widget). */
+export function openStudySessions() {
   if (!inTauri()) return;
-  invoke("open_agenda").catch(() => {});
+  invoke("open_study").catch(() => {});
 }
 
 /** Abre la app principal (desde el widget). */
@@ -745,6 +783,350 @@ export async function initTasks() {
   } else {
     await loadTasks();
   }
+  // Las clases se cargan junto con las tareas: el advertidor de conflictos y
+  // el calendario las necesitan disponibles desde el primer render.
+  await loadClasses();
+  // Igual con las sesiones de estudio: el consejo de conflicto y las vistas
+  // Día/Semana las necesitan desde el primer render.
+  await loadStudies();
+}
+
+// ── Horario (clases) ───────────────────────────────────────────────────────
+// Entidad INDEPENDIENTE de las tareas (reglas 10–13): sin estado completado,
+// sin pendientes, sin contadores ni estadísticas. Aquí solo se cachea el
+// catálogo; la materialización por días la hace classLogic.ts en memoria.
+
+export async function loadClasses() {
+  if (!inTauri()) return;
+  try {
+    const rows = await invoke<ClassRow[]>("class_list");
+    store.classes.length = 0;
+    store.classes.push(...rows);
+  } catch (e) {
+    console.error("loadClasses", e);
+  }
+}
+
+export const classList = () => store.classes;
+
+export interface ClassDraft {
+  title: string;
+  day_of_week: number;
+  start_min: number;
+  end_min: number;
+  start_date: number;
+  end_date: number;
+}
+
+export async function createClass(
+  draft: ClassDraft,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const row = await invoke<ClassRow>("class_create", {
+      title: draft.title,
+      dayOfWeek: draft.day_of_week,
+      startMin: draft.start_min,
+      endMin: draft.end_min,
+      startDate: draft.start_date,
+      endDate: draft.end_date,
+    });
+    store.classes.push(row);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+export async function updateClass(
+  id: number,
+  draft: ClassDraft,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const row = await invoke<ClassRow>("class_update", {
+      id,
+      title: draft.title,
+      dayOfWeek: draft.day_of_week,
+      startMin: draft.start_min,
+      endMin: draft.end_min,
+      startDate: draft.start_date,
+      endDate: draft.end_date,
+    });
+    const idx = store.classes.findIndex((c) => c.id === id);
+    if (idx >= 0) store.classes[idx] = row;
+    else store.classes.push(row);
+    return { ok: true };
+  } catch (e) {
+    await loadClasses(); // resync: la validación pudo dejar el orden divergente
+    return { ok: false, error: String(e) };
+  }
+}
+
+export async function deleteClass(id: number): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await invoke("class_delete", { id });
+    const i = store.classes.findIndex((c) => c.id === id);
+    if (i >= 0) store.classes.splice(i, 1);
+    return { ok: true };
+  } catch (e) {
+    await loadClasses();
+    return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * Clases activas que solapan [startMs, endMs]. Fuente única para el
+ * advertidor visual de conflictos (reglas 24–26), tanto en creación de tareas
+ * como en drag&drop del calendario.
+ */
+export function taskClassConflicts(startMs: number, endMs: number) {
+  return classConflictsIn(store.classes, startMs, endMs);
+}
+
+/** Sugerencia "Editar" del diálogo: ventana desplazada al primer hueco libre. */
+export function suggestFreeSlot(startMs: number, endMs: number) {
+  return shiftToFreeSlot(store.classes, startMs, endMs);
+}
+
+/**
+ * Compuerta de conflicto (regla 22): si la ventana choca con clases activas,
+ * abre ClassConflictDialog (montado en App.svelte) y espera la elección.
+ * - "continuar": el flujo prosigue con la ventana original.
+ * - "editar":    prosigue con la ventana desplazada al hueco libre sugerido.
+ * - "cancelar":  aborta (devuelve aborted).
+ * Sin conflicto, devuelve proceed directo sin molestar al usuario.
+ */
+export function guardClassConflict(
+  taskTitle: string,
+  startMs: number,
+  endMs: number,
+  kind: "task" | "study" = "task",
+): Promise<
+  | { result: "proceed"; startAt: number; endAt: number }
+  | { result: "aborted" }
+> {
+  const conflicts = taskClassConflicts(startMs, endMs);
+  if (conflicts.length === 0) {
+    return Promise.resolve({ result: "proceed", startAt: startMs, endAt: endMs });
+  }
+  return new Promise((resolve) => {
+    store.classConflict = {
+      taskTitle,
+      kind,
+      startAt: startMs,
+      endAt: endMs,
+      conflicts,
+      resolve: (choice) => {
+        store.classConflict = null;
+        if (choice === "cancelar") {
+          resolve({ result: "aborted" });
+        } else if (choice === "editar") {
+          if (kind === "study") {
+            // Regla 10: la decisión es del usuario y NUNCA se mueve la sesión
+            // automáticamente. "Editar horario" aborta el movimiento y deja
+            // los datos como estaban; el usuario corrige a mano.
+            resolve({ result: "aborted" });
+          } else {
+            const slot = suggestFreeSlot(startMs, endMs);
+            resolve({ result: "proceed", startAt: slot.start, endAt: slot.end });
+          }
+        } else {
+          resolve({ result: "proceed", startAt: startMs, endAt: endMs });
+        }
+      },
+    };
+  });
+}
+
+/** Estado observable del diálogo (App.svelte lo monta condicionalmente). */
+export function classConflictRequest() {
+  return store.classConflict;
+}
+
+/** Resuelve el diálogo pendiente (botones del ClassConflictDialog). */
+export function resolveClassConflict(choice: "editar" | "continuar" | "cancelar") {
+  store.classConflict?.resolve(choice);
+}
+
+// ── Sesiones de estudio ────────────────────────────────────────────────────
+// Entidad INDEPENDIENTE de tareas y clases: tiempo RESERVADO (no pendiente).
+// Se cachea completa (igual que `classes`) porque el volumen es pequeño y la
+// vista Día/Semana + la lista necesitan datos al instante.
+
+import { toStudy, type StudyRow, type StudySession } from "./studyLogic";
+export type { StudyRow, StudySession } from "./studyLogic";
+
+export const studySessions = () => store.study;
+
+/** Abre el formulario de nueva sesión (desde el sidebar o la vista). */
+export function bumpStudyAdd() {
+  store.studyAdd += 1;
+}
+export function resetStudyAdd() {
+  store.studyAdd = 0;
+}
+export const studyAdd = () => store.studyAdd;
+
+/** Id de sesión abierta en el editor/visor de detalles (null = cerrado). */
+export function openStudyDetail(id: number) {
+  store.studyDetail = id;
+}
+export function closeStudyDetail() {
+  store.studyDetail = null;
+}
+export const studyDetail = () => store.studyDetail;
+
+let studyRange = { from: Date.now() - 7 * 86_400_000, to: Date.now() + 35 * 86_400_000 };
+
+/** Sesiones de ejemplo SOLO para el modo navegador (sin Tauri). */
+function demoStudies(): StudySession[] {
+  return [
+    { id: 1, title: "Estudiar cálculo — integrales", start: at(0, 10, 0), end: at(0, 12, 0), taskId: 1, notes: "Capítulo 4" },
+    { id: 2, title: "Preparar parcial de programación", start: at(2, 14, 0), end: at(2, 16, 0), taskId: null, notes: "" },
+    { id: 3, title: "Repasar redes", start: at(3, 17, 30), end: at(3, 18, 30), taskId: null, notes: "" },
+  ];
+}
+
+export async function loadStudies() {
+  if (!inTauri()) {
+    store.study = demoStudies();
+    return;
+  }
+  try {
+    const rows = await invoke<StudyRow[]>("study_list_range", {
+      startAt: studyRange.from,
+      endAt: studyRange.to,
+    });
+    store.study = rows.map(toStudy);
+  } catch (e) {
+    console.error("loadStudies", e);
+  }
+}
+
+/** Recarga las sesiones del rango visible (llamado al cambiar de vista). */
+export async function ensureStudies(from: Date, to: Date) {
+  studyRange = { from: from.getTime(), to: to.getTime() };
+  await loadStudies();
+}
+
+export interface StudyDraft {
+  title: string;
+  start: Date;
+  end: Date;
+  taskId: number | null;
+  notes: string;
+}
+
+export async function createStudy(draft: StudyDraft): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) {
+    store.study.push({ id: -1, title: draft.title, start: draft.start, end: draft.end, taskId: draft.taskId, notes: draft.notes });
+    return { ok: true };
+  }
+  try {
+    const row = await invoke<StudyRow>("study_create", {
+      title: draft.title,
+      startAt: draft.start.getTime(),
+      endAt: draft.end.getTime(),
+      taskId: draft.taskId,
+      notes: draft.notes,
+    });
+    store.study.push(toStudy(row));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+export async function updateStudy(id: number, draft: StudyDraft): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
+  try {
+    const row = await invoke<StudyRow>("study_update", {
+      id,
+      title: draft.title,
+      startAt: draft.start.getTime(),
+      endAt: draft.end.getTime(),
+      taskId: draft.taskId,
+      notes: draft.notes,
+    });
+    const i = store.study.findIndex((s) => s.id === id);
+    if (i >= 0) store.study[i] = toStudy(row);
+    return { ok: true };
+  } catch (e) {
+    await loadStudies(); // resync: la validación pudo dejar el orden divergente
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Mueve/redimensiona una sesión (drag & drop). Solo cambia la ventana. */
+export async function moveStudy(id: number, startAt: number, endAt: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
+  try {
+    const row = await invoke<StudyRow>("study_move", { id, startAt, endAt });
+    const i = store.study.findIndex((s) => s.id === id);
+    if (i >= 0) store.study[i] = toStudy(row);
+    return { ok: true };
+  } catch (e) {
+    await loadStudies();
+    return { ok: false, error: String(e) };
+  }
+}
+
+export async function deleteStudy(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) {
+    store.study = store.study.filter((s) => s.id !== id);
+    return { ok: true };
+  }
+  try {
+    await invoke("study_delete", { id });
+    store.study = store.study.filter((s) => s.id !== id);
+    if (store.studyDetail === id) store.studyDetail = null;
+    return { ok: true };
+  } catch (e) {
+    await loadStudies();
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Conflicto de una ventana contra clases y tareas (regla 10 y 11). */
+export interface StudyConflicts {
+  classes: ClassInstance[];
+  tasks: { id: number; title: string; start_at: number; end_at: number }[];
+}
+
+export async function studyConflicts(startMs: number, endMs: number): Promise<StudyConflicts> {
+  const local = {
+    classes: taskClassConflicts(startMs, endMs),
+    tasks: store.tasks
+      .filter((t) => t.status !== "completada" &&
+        t.start.getTime() < endMs && t.end.getTime() > startMs)
+      .map((t) => ({ id: t.id, title: t.title, start_at: t.start.getTime(), end_at: t.end.getTime() })),
+  };
+  if (!inTauri()) return local;
+  try {
+    const r = await invoke<StudyConflicts>("study_conflicts", { startAt: startMs, endAt: endMs, excludeId: null });
+    // el backend es autoritativo para las clases; las tareas locales ya son frescas
+    return { classes: r.classes.length > 0 ? r.classes : local.classes, tasks: r.tasks };
+  } catch {
+    return local;
+  }
+}
+
+/**
+ * Guard de sesión de estudio al crear/mover (reglas 10 y 11).
+ * - Clases: abre el ClassConflictDialog en modo "study" con las opciones
+ *   Editar horario / Cancelar / Continuar de todas formas. "Editar" devuelve
+ *   la ventana ORIGINAL (el usuario corrige a mano en el formulario; nunca se
+ *   mueve automáticamente).
+ * - Tareas: solo se incluyen en el copy del diálogo; nunca bloquean.
+ */
+export function guardStudyConflicts(
+  study: { title: string },
+  startMs: number,
+  endMs: number,
+): Promise<
+  | { result: "proceed"; startAt: number; endAt: number }
+  | { result: "aborted" }
+> {
+  return guardClassConflict(study.title, startMs, endMs, "study");
 }
 
 export async function addTask(t: Omit<Task, "id">) {
@@ -804,6 +1186,12 @@ export async function init() {
         if (cur) store.taskDetail = cur;
         else store.taskDetail = null;
       }
+    });
+    await listen("classes:changed", () => {
+      loadClasses();
+    });
+    await listen("study:changed", () => {
+      loadStudies();
     });
     await listen("quickadd", () => bumpQuickadd());
     await listen("notif:contextual", (e) => {
@@ -1133,6 +1521,24 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
       putInCache(toTask(row as TaskRow));
     }
     rebuildTasks();
+    // regla 22: la NLU puede haber puesto la hora encima de una clase.
+    // Preguntar DESPUÉS de crear: Editar mueve al hueco libre; Cancelar
+    // deshace la creación (la tarea aún no es visible para el usuario).
+    const created = r.created.length > 0 ? r.created : [r.task];
+    for (const row of created) {
+      const t = toTask(row as TaskRow);
+      if (t.allDay || t.status === "completada") continue;
+      const g = await guardClassConflict(t.title, t.start.getTime(), t.end.getTime());
+      if (g.result === "aborted") {
+        await invoke("task_delete", { id: t.id });
+        for (const w of weekCache.values()) w.delete(t.id);
+        rebuildTasks();
+        return { ok: false, source: "cancelada", error: "cancelada" };
+      }
+      if (g.startAt !== t.start.getTime() || g.endAt !== t.end.getTime()) {
+        await moveTask(t.id, g.startAt, g.endAt);
+      }
+    }
     return { ok: true, source: r.source };
   } catch (e) {
     if (myId !== nlReqId) return { ok: false, source: "stale", error: "cancelada" };

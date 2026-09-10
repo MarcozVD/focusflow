@@ -1,5 +1,19 @@
 <script lang="ts">
-  import { DAYS_ES, tasks as tasksStore, cat, openTaskDetail, moveTask, type Task } from "./data.svelte";
+  import {
+    DAYS_ES,
+    tasks as tasksStore,
+    cat,
+    openTaskDetail,
+    openStudyDetail,
+    moveTask,
+    moveStudy,
+    guardClassConflict,
+    guardStudyConflicts,
+    classList,
+    studySessions,
+    type Task,
+  } from "./data.svelte";
+  import { classConflictsIn, DAY_MS } from "./classLogic";
   import EventBlock from "./EventBlock.svelte";
   import {
     sameDay,
@@ -12,6 +26,7 @@
     layoutMetrics,
     type Segment,
   } from "./taskDayLogic";
+  import { studiesOnDay, studySegment, type StudySession } from "./studyLogic";
 
   let {
     view,
@@ -20,6 +35,84 @@
   }: { view: "mes" | "semana" | "dia"; date: Date; onSelectDate: (d: Date) => void } = $props();
 
   const tasks = $derived(tasksStore());
+  const studies = $derived(studySessions());
+
+  /**
+   * Las sesiones de estudio comparten el MISMO sistema de layout que las
+   * tareas (segmentFor + layoutMetrics) vía el adapter studyTaskLike, pero
+   * viven en la lista `studies` (entidad propia, no son tareas).
+   */
+  interface StudyPlaced {
+    s: StudySession;
+    seg: Segment;
+    top: number;
+    height: number;
+    left: number;
+    width: number;
+  }
+  function layoutStudies(d: Date): StudyPlaced[] {
+    const items: { s: StudySession; seg: Segment; sMin: number; eMin: number }[] = [];
+    for (const s of studiesOnDay(studies, d)) {
+      const seg = studySegment(s, d);
+      if (!seg) continue;
+      const ref = dayStartMs(seg.start);
+      items.push({
+        s,
+        seg,
+        sMin: (seg.start.getTime() - ref) / 60_000,
+        eMin: (seg.end.getTime() - ref) / 60_000,
+      });
+    }
+    items.sort((a, b) => a.sMin - b.sMin || b.eMin - a.eMin);
+    // Columnas: mismo algoritmo de clústeres que las tareas para que una
+    // sesión y una tarea solapadas se repartan lado a lado.
+    const clusters: typeof items[] = [];
+    let cur: typeof items = [];
+    let curMaxEnd = -1;
+    for (const it of items) {
+      if (cur.length === 0 || it.sMin < curMaxEnd) {
+        cur.push(it);
+        curMaxEnd = Math.max(curMaxEnd, it.eMin);
+      } else {
+        clusters.push(cur);
+        cur = [it];
+        curMaxEnd = it.eMin;
+      }
+    }
+    if (cur.length) clusters.push(cur);
+    const placed: StudyPlaced[] = [];
+    for (const group of clusters) {
+      const n = group.length;
+      const cols: { e: number }[] = [];
+      for (const it of group) {
+        let ci = cols.findIndex((c) => it.sMin >= c.e);
+        if (ci === -1) {
+          ci = cols.length;
+          cols.push({ e: it.eMin });
+        } else {
+          cols[ci].e = Math.max(cols[ci].e, it.eMin);
+        }
+        const { top, height } = layoutMetrics(it.seg, grid.lo, grid.hi, pxH);
+        placed.push({ s: it.s, seg: it.seg, top, height, left: (ci / n) * 100, width: 100 / n });
+      }
+    }
+    return placed;
+  }
+  const studyLayouts = $derived.by(() => {
+    const m = new Map<string, StudyPlaced[]>();
+    if (view === "mes") return m; // regla 17: NO se representan en el mes
+    for (const d of days) m.set(d.toDateString(), layoutStudies(d));
+    return m;
+  });
+
+  /** ¿La sesión solapa una clase activa en el día d? (borde de conflicto) */
+  function studyClashesWithClass(s: StudySession, d: Date): boolean {
+    if (view === "mes") return false;
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const st = Math.max(midnight, s.start.getTime());
+    const en = Math.min(midnight + DAY_MS - 1, s.end.getTime());
+    return en > st && classInstancesOf(d).some((i) => st < i.end_at && en > i.start_at);
+  }
 
   // ---- utilidades ----
   const isToday = $derived((d: Date) => sameDay(d, new Date()));
@@ -184,6 +277,42 @@
     return view === "dia" ? all : all.slice(0, 8);
   }
 
+  /**
+   * Reglas 8 y 22–25: las clases ACTIVAS (vigencia y día correctos) se ven
+   * como franjas tenues bajo las tareas, y las tareas que las invaden
+   * después de confirmar muestran un borde de conflicto. Solo en día/semana
+   * (regla: las clases NO se muestran en mes).
+   */
+  const classInstances = $derived(
+    view === "mes"
+      ? []
+      : classConflictsIn(
+          classList(),
+          days[0].getTime(),
+          days[days.length - 1].getTime() + DAY_MS - 1,
+        ),
+  );
+  function classInstancesOf(d: Date) {
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    return classInstances.filter((i) => i.date_ms === midnight);
+  }
+  function stripMetrics(ins: { start_at: number; end_at: number; date_ms: number }) {
+    const sMin = (ins.start_at - ins.date_ms) / 60_000;
+    const eMin = (ins.end_at - ins.date_ms) / 60_000;
+    return {
+      top: (sMin / 60 - grid.lo) * pxH,
+      height: Math.max(10, ((eMin - sMin) / 60) * pxH),
+    };
+  }
+  /** ¿La tarea p solapa una clase activa en el día d? (borde de conflicto) */
+  function taskClashesWithClass(t: Task, d: Date): boolean {
+    if (view === "mes" || t.allDay) return false;
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const s = Math.max(midnight, t.start.getTime());
+    const e = Math.min(midnight + DAY_MS - 1, t.end.getTime());
+    return e > s && classInstancesOf(d).some((i) => s < i.end_at && e > i.start_at);
+  }
+
   function hourLabel(h: number): string {
     if (h === 0) return "12 a";
     if (h === 12) return "12 p";
@@ -224,9 +353,11 @@
     return Math.min(last + 4, (grid.hi - grid.lo) * pxH);
   }
 
-  // ---- drag & drop + redimensionado ----
+  // ---- drag & drop + redimensionado (TAREAS y SESIONES comparten máquina) ----
   interface DragState {
     task: Task;
+    /** Si no es null, el arrastre mueve una SESIÓN DE ESTUDIO (no la tarea). */
+    study: StudySession | null;
     mode: "move" | "resize-start" | "resize-end";
     startAt: number;
     endAt: number;
@@ -288,7 +419,12 @@
     return clientY >= r.top && clientY < r.bottom;
   }
 
-  function onEventPointerDown(t: Task, mode: "move" | "resize-start" | "resize-end", e: PointerEvent) {
+  function onEventPointerDown(
+    t: Task,
+    mode: "move" | "resize-start" | "resize-end",
+    e: PointerEvent,
+    study: StudySession | null = null,
+  ) {
     if (e.button !== 0 || view === "mes") return;
     e.stopPropagation();
     e.preventDefault();
@@ -297,14 +433,16 @@
     // Punto de agarre en píxeles: el evento NO se mueve al iniciar, el cursor
     // conserva exactamente la misma posición relativa durante todo el arrastre.
     const grabY = e.clientY - rect.top;
+    const from = study ?? t;
     drag = {
       task: t,
+      study,
       mode,
-      startAt: t.start.getTime(),
-      endAt: t.end.getTime(),
+      startAt: from.start.getTime(),
+      endAt: from.end.getTime(),
       grabY,
-      curStart: t.start.getTime(),
-      curEnd: t.end.getTime(),
+      curStart: from.start.getTime(),
+      curEnd: from.end.getTime(),
       moved: false,
       dropAllDay: false,
     };
@@ -387,7 +525,7 @@
     const d = drag;
     if (!d) return;
     const moved = d.moved;
-    const dropAllDay = d.dropAllDay;
+    const dropAllDay = d.dropAllDay && !d.study;
     // El snap a 5 minutos ocurre al soltar, nunca durante el arrastre:
     // así el evento sigue al cursor sin saltos y solo se redondea al persistir.
     let start = d.curStart;
@@ -408,6 +546,26 @@
       setTimeout(() => (suppressClick = false), 0);
     }
     if (!moved || (want.start === d.startAt && want.end === d.endAt && !dropAllDay)) return;
+    // SESIÓN DE ESTUDIO: conflicto con clases (regla 10, diálogo propio con
+    // "Continuar de todas formas") y aviso de tareas (regla 11). Nunca se
+    // mueve automáticamente; una sesión no puede soltarse en "Todo el día".
+    if (d.study) {
+      const g = await guardStudyConflicts(d.study, want.start, want.end);
+      if (g.result === "aborted") return;
+      const r = await moveStudy(d.study.id, g.startAt, g.endAt);
+      if (!r.ok) {
+        toastMsg = `No se pudo mover: ${r.error ?? "horario no válido"}`;
+        setTimeout(() => (toastMsg = ""), 4000);
+      }
+      return;
+    }
+    // regla 22: las clases del horario también preguntan al soltar
+    if (!dropAllDay && d.mode !== "resize-start") {
+      const g = await guardClassConflict(d.task.title, want.start, want.end);
+      if (g.result === "aborted") return;
+      want.start = g.startAt;
+      want.end = g.endAt;
+    }
     const r = await moveTask(d.task.id, want.start, want.end, dropAllDay || undefined);
     if (!r.ok) {
       toastMsg = `No se pudo mover: ${r.error ?? "conflicto de horario"}`;
@@ -421,6 +579,10 @@
   function openFromCard(t: Task) {
     if (!drag && !suppressClick) openTaskDetail(t);
   }
+  /** Click en una sesión: abre SU editor/visor (no el de la tarea). */
+  function openFromStudyCard(s: StudySession) {
+    if (!drag && !suppressClick) openStudyDetail(s.id);
+  }
 
   let suppressClick = $state(false);
 
@@ -429,7 +591,8 @@
       ? segmentFor({ ...drag.task, start: new Date(drag.curStart), end: new Date(drag.curEnd) }, new Date(drag.curStart))
       : null,
   );
-  /** Mismas métricas que layoutDay: el fantasma coincide exactamente con el original. */
+  /** Color del fantasma: el de la categoría o el de las sesiones de estudio. */
+  const ghostColor = $derived(drag?.study ? "var(--study)" : drag ? cat(drag.task.categoryId).color : "#888");
   function ghostTop(): number {
     if (!drag || !ghostSeg) return 0;
     return layoutMetrics(ghostSeg, grid.lo, grid.hi, pxH).top;
@@ -558,6 +721,11 @@
             {#if isToday(d) && nowInRange}
               <div class="now-line" style="top: {nowTop()}px"></div>
             {/if}
+            {#each classInstancesOf(d) as ci (ci.class_id + "-" + ci.date_ms)}
+              <div class="class-strip" style="top: {stripMetrics(ci).top}px; height: {stripMetrics(ci).height}px">
+                <span class="class-strip-label">{ci.title} · {fmtTime(new Date(ci.start_at))}–{fmtTime(new Date(ci.end_at))}</span>
+              </div>
+            {/each}
             {#each placedOf(d) as p (p.t.id)}
               <EventBlock
                 task={p.t}
@@ -566,8 +734,33 @@
                 height={p.height}
                 left={p.left}
                 width={p.width}
+                conflict={taskClashesWithClass(p.t, d)}
                 onPointerDown={onEventPointerDown}
                 onClick={openFromCard}
+              />
+            {/each}
+            {#each (studyLayouts.get(d.toDateString()) ?? []) as sp (sp.s.id)}
+              <EventBlock
+                task={sp.s.taskId != null
+                  ? (tasks.find((t) => t.id === sp.s.taskId) ?? {
+                      id: sp.s.taskId, title: "", start: sp.s.start, end: sp.s.end,
+                      allDay: false, status: "pendiente", priority: "normal",
+                      categoryId: 0, description: "", reminders: [],
+                    })
+                  : {
+                      id: -1, title: "", start: sp.s.start, end: sp.s.end,
+                      allDay: false, status: "pendiente", priority: "normal",
+                      categoryId: 0, description: "", reminders: [],
+                    }}
+                seg={sp.seg}
+                top={sp.top}
+                height={sp.height}
+                left={sp.left}
+                width={sp.width}
+                conflict={studyClashesWithClass(sp.s, d)}
+                study={sp.s}
+                onPointerDown={(t, mode, e) => onEventPointerDown(t, mode, e, sp.s)}
+                onClick={() => openFromStudyCard(sp.s)}
               />
             {/each}
             {#if view === "semana" && (fullLayouts.get(d.toDateString())?.length ?? 0) > 8}
@@ -578,12 +771,17 @@
             {#if drag && !drag.dropAllDay && sameDay(d, new Date(drag.curStart)) && ghostSeg}
               <div
                 class="evt ghost {drag.mode}"
-                style="top: {ghostTop()}px; height: {ghostHeight()}px; left: 6px; right: 6px; --c: {cat(drag.task.categoryId).color}"
+                style="top: {ghostTop()}px; height: {ghostHeight()}px; left: 6px; right: 6px; --c: {ghostColor}"
               >
                 <span class="evt-time">
+                  {#if drag.study}
+                    <span class="study-tag" aria-hidden="true">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19V19H6.5A2.5 2.5 0 0 0 4 21.5V5.5Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
+                    </span>
+                  {/if}
                   {fmtTime(ghostSeg.start)} – {fmtTime(ghostSeg.end)}
                 </span>
-                <span class="evt-title">{drag.task.title}</span>
+                <span class="evt-title">{drag.study?.title ?? drag.task.title}</span>
               </div>
             {/if}
           </div>
@@ -1020,6 +1218,29 @@
     border-radius: var(--r-full);
     z-index: 2;
     pointer-events: none;
+  }
+  /* Regla 8: franja tenue de clase bajo las tareas (día/semana) */
+  .class-strip {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    background: var(--primary-soft);
+    border-left: 2px solid var(--primary);
+    border-radius: 6px;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .class-strip-label {
+    display: block;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--primary);
+    opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .now-line::after {
     content: "";

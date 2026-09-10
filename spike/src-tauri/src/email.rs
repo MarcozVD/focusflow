@@ -319,7 +319,11 @@ pub mod gmail {
             Self::short_gmail_error(status, body, retry_after)
         }
 
-        fn short_gmail_error(status: reqwest::StatusCode, body: &str, retry_after: Option<u64>) -> String {
+        fn short_gmail_error(
+            status: reqwest::StatusCode,
+            body: &str,
+            retry_after: Option<u64>,
+        ) -> String {
             let code = status.as_u16();
             match code {
                 401 => "La sesión de Google caducó: cierra sesión y vuelve a entrar en Ajustes."
@@ -692,7 +696,11 @@ mod tests {
         let e = gmail::GmailClient::short_gmail_error_for_test(StatusCode::UNAUTHORIZED, "", None);
         assert!(e.contains("caducó"), "{e}");
         // 403 permisos normales
-        let e = gmail::GmailClient::short_gmail_error_for_test(StatusCode::FORBIDDEN, "forbidden", None);
+        let e = gmail::GmailClient::short_gmail_error_for_test(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            None,
+        );
         assert!(e.contains("permiso"), "{e}");
         // 5xx → temporal
         let e = gmail::GmailClient::short_gmail_error_for_test(

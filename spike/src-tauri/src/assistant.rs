@@ -59,7 +59,8 @@ REGLAS:
 5. duration_minutes: la duración si se menciona; si no, 60 para eventos.
 6. task_title: usa el título EXACTO de una tarea del contexto. Si ninguna tarea del contexto coincide, NO uses mode action: usa mode answer y pregunta a cuál te refieres.
 7. DESCONOCIDO = null. Jamás inventes tareas, fechas ni duraciones.
-8. context: usa el contexto dado (tareas pendientes, horas libres, hoy). Para cálculos de tiempo libre, responde con números del contexto.
+8. context: usa el contexto dado (tareas pendientes, sesiones de estudio, horas libres, hoy). Para cálculos de tiempo libre, responde con números del contexto.
+8.b Las "study_sessions" del contexto son TIEMPO YA RESERVADO por el usuario (bloques que él decidió dedicar a estudiar): NO son pendientes, NO se planifican y NO debes proponer tareas ni nuevos bloques encima de ellas (las horas libres ya las excluyen). Si el usuario ya tiene una sesión reservada para un tema, reconócelo en lugar de proponer otra.
 9. note: breve resumen en español de lo que se hará o por qué (máx 2 frases).
 10. Todo con mayúscula o en español: los títulos conservan el idioma del usuario.
 "#;
@@ -283,6 +284,39 @@ pub fn context_snapshot(db: &Db) -> String {
         })
         .unwrap_or(0);
 
+    // Sesiones de estudio (regla 12): el asistente las CONOCE y las distingue
+    // de tareas y clases, pero NO son pendientes: van en su propia lista, con
+    // su propio rótulo, y nunca aparecen en `pending_tasks`.
+    let study_sessions: Vec<serde_json::Value> = db
+        .study_list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s.end_at > now && s.start_at < now + 30 * 24 * 3_600_000)
+        .take(40)
+        .map(|s| {
+            let day = chrono::Local
+                .timestamp_millis_opt(s.start_at)
+                .earliest()
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            let hm = |ms: i64| {
+                chrono::Local
+                    .timestamp_millis_opt(ms)
+                    .earliest()
+                    .map(|d| d.format("%H:%M").to_string())
+                    .unwrap_or_default()
+            };
+            serde_json::json!({
+                "id": s.id,
+                "title": s.title,
+                "day": day,
+                "from": hm(s.start_at),
+                "to": hm(s.end_at),
+                "task_id": s.task_id,
+            })
+        })
+        .collect();
+
     serde_json::json!({
         "today": today.format("%Y-%m-%d").to_string(),
         "now_local": chrono::Local::now().format("%H:%M").to_string(),
@@ -291,6 +325,7 @@ pub fn context_snapshot(db: &Db) -> String {
         "pending_tasks": tasks,
         "pending_total": total,
         "overdue": overdue,
+        "study_sessions": study_sessions,
         "free_hours_next_days": free_days,
         "free_windows_next_days": free_windows,
     })

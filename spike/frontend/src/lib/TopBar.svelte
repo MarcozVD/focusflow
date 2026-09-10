@@ -7,18 +7,35 @@
     view,
     navigate,
     goToday,
-  }: { date: Date; view: string; navigate: (d: -1 | 1) => void; goToday: () => void } = $props();
+    hmode = "semana",
+    setHmode = () => {},
+  }: {
+    date: Date;
+    view: string;
+    navigate: (d: -1 | 1) => void;
+    goToday: () => void;
+    hmode?: "semana" | "dia";
+    setHmode?: (m: "semana" | "dia") => void;
+  } = $props();
 
   const title = $derived(
     view === "mes"
       ? `${MONTHS_ES[date.getMonth()]} ${date.getFullYear()}`
       : view === "dia"
         ? date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })
-        : view === "sugerencias"
-          ? "Eventos detectados"
-          : view === "ajustes"
-            ? "Ajustes"
-            : "Semana",
+        : view === "horario"
+          ? hmode === "dia"
+            ? date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })
+            : "Mi horario"
+          : view === "sesiones"
+            ? hmode === "dia"
+              ? date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })
+              : "Sesiones de estudio"
+            : view === "sugerencias"
+            ? "Eventos detectados"
+            : view === "ajustes"
+              ? "Ajustes"
+              : "Semana",
   );
 </script>
 
@@ -34,6 +51,12 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 5L16 12L9 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <button class="today" onclick={goToday}>Hoy</button>
+      </div>
+    {/if}
+    {#if view === "horario" || view === "sesiones"}
+      <div class="switcher">
+        <button class="sw {hmode === 'semana' ? 'on' : ''}" onclick={() => setHmode("semana")}>Semana</button>
+        <button class="sw {hmode === 'dia' ? 'on' : ''}" onclick={() => setHmode("dia")}>Día</button>
       </div>
     {/if}
   </div>
@@ -100,5 +123,32 @@
   .today:hover {
     color: var(--primary);
     box-shadow: var(--e2);
+  }
+  .switcher {
+    display: inline-flex;
+    background: var(--surface);
+    border-radius: 12px;
+    box-shadow: var(--shadow-inset-sm);
+    padding: 3px;
+    gap: 2px;
+  }
+  .sw {
+    border: none;
+    background: transparent;
+    border-radius: 9px;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-3);
+    font-family: inherit;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .sw:hover {
+    color: var(--text-1);
+  }
+  .sw.on {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: var(--e1);
   }
 </style>

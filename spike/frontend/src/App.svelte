@@ -7,18 +7,23 @@
   import TopBar from "./lib/TopBar.svelte";
   import Sidebar from "./lib/Sidebar.svelte";
   import Calendar from "./lib/Calendar.svelte";
-  import Agenda from "./lib/Agenda.svelte";
+  import Schedule from "./lib/Schedule.svelte";
+  import ClassConflictDialog from "./lib/ClassConflictDialog.svelte";
+  import StudySessions from "./lib/StudySessions.svelte";
   import WidgetPage from "./lib/WidgetPage.svelte";
   import Suggestions from "./lib/Suggestions.svelte";
   import Assistant from "./lib/Assistant.svelte";
   import Settings from "./lib/Settings.svelte";
   import Onboarding from "./lib/Onboarding.svelte";
   import Login from "./lib/Login.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding } from "./lib/data.svelte.ts";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies } from "./lib/data.svelte.ts";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
   import ContextualToast from "./lib/ContextualToast.svelte";
 
-  let view = $state<"mes" | "semana" | "dia" | "agenda" | "sugerencias" | "asistente" | "ajustes">("semana");
+  let view = $state<"mes" | "semana" | "dia" | "horario" | "sesiones" | "sugerencias" | "asistente" | "ajustes">("semana");
+  // Submodo semana/día compartido por Horario (clases) y Sesiones de estudio:
+  // mismas interacciones de TopBar y navegación ‹ › para las dos vistas.
+  let hmode = $state<"semana" | "dia">("semana");
   let date = $state(new Date());
   let hash = $state(window.location.hash);
   let isWidget = $state(false);
@@ -73,8 +78,8 @@
       if (t) openTaskDetail(t);
       else refreshAndOpen(id);
     });
-    const un2 = listen("nav:agenda", () => {
-      view = "agenda";
+    const un2 = listen("nav:study", () => {
+      view = "sesiones";
     });
     const un3 = listen("ui:prefs", (e) => {
       applyUiPrefs(e.payload as { theme?: string; accent?: string });
@@ -102,9 +107,10 @@
     if (e.key === "Escape" && taskDetail()) closeTaskDetail();
   });
 
-  function setView(v: "mes" | "semana" | "dia" | "agenda" | "sugerencias" | "asistente" | "ajustes") {
+  function setView(v: "mes" | "semana" | "dia" | "horario" | "sesiones" | "sugerencias" | "asistente" | "ajustes") {
     view = v;
     if (v === "sugerencias") loadSuggestions();
+    if (v === "sesiones") loadStudies();
     if (v === "ajustes") {
       loadAiConfig();
       loadEmailConfig();
@@ -126,8 +132,15 @@
     const d = new Date(date);
     if (view === "mes") d.setMonth(d.getMonth() + dir);
     else if (view === "dia") d.setDate(d.getDate() + dir);
+    else if (view === "horario" || view === "sesiones") d.setDate(d.getDate() + dir * (hmode === "dia" ? 1 : 7));
     else d.setDate(d.getDate() + dir * 7);
     date = d;
+  }
+  function setDate(d: Date) {
+    date = d;
+  }
+  function setHmode(m: "semana" | "dia") {
+    hmode = m;
   }
   function goToday() {
     date = new Date();
@@ -138,7 +151,7 @@
   }
 
   $effect(() => {
-    if (view === "agenda" || view === "sugerencias" || view === "asistente" || view === "ajustes") return;
+    if (view === "sesiones" || view === "sugerencias" || view === "asistente" || view === "ajustes" || view === "horario") return;
     const d = new Date(date);
     const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     let from = start;
@@ -181,9 +194,23 @@
     <div class="body">
       <Sidebar {view} {setView} {navigate} />
       <main class="content">
-        <TopBar {date} {view} {navigate} {goToday} />
-        {#if view === "agenda"}
-          <Agenda />
+        <TopBar {date} {view} {navigate} {goToday} {hmode} {setHmode} />
+        {#if view === "sesiones"}
+          <div class="cal-wrap">
+            {#key "sesiones-" + smode + date.toDateString()}
+              <div transition:fade={{ duration: 160 }}>
+                <StudySessions {date} smode={smode} {setDate} {setHmode} />
+              </div>
+            {/key}
+          </div>
+        {:else if view === "horario"}
+          <div class="cal-wrap">
+            {#key "horario-" + hmode + date.toDateString()}
+              <div transition:fade={{ duration: 160 }}>
+                <Schedule {date} {hmode} {setDate} {setHmode} />
+              </div>
+            {/key}
+          </div>
         {:else if view === "sugerencias"}
           <div class="page-wrap">
             <Suggestions />
@@ -210,6 +237,7 @@
     {#if taskDetail()}
       <TaskDrawer />
     {/if}
+    <ClassConflictDialog />
     {#if !isWidget}
       <ContextualToast onplan={planFromNotif} />
     {/if}

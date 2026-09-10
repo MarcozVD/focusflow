@@ -338,6 +338,17 @@ fn understanding(intents: &[Intent]) -> Vec<UnderstoodView> {
 
 /// Motor con el calendario real: toda tarea activa no completada cuenta
 /// como compromiso duro para la planificación.
+///
+/// Las CLASES del horario (vigentes en los días del horizonte) entran como
+/// bloques duros (`ConstraintEngine.blocks`): tiempo ocupado que el
+/// planificador evita, sin convertir nunca la clase en tarea (reglas 9, 13).
+///
+/// Las SESIONES DE ESTUDIO entran igual (bloques duros), pero con otro
+/// significado: no son tiempo ocupado ajeno al usuario, son tiempo que él YA
+/// reservó para estudiar. El efecto planificador es el mismo y es el exigido
+/// por las reglas 12–15: nunca proponer una tarea encima de un bloque
+/// reservado, y nunca "re-planificar" la sesión como si fuera trabajo
+/// pendiente (las sesiones no están en `tasks`, así que no generan ítems).
 pub fn engine_with_calendar(db: &Db) -> ConstraintEngine {
     let mut e = ConstraintEngine::default();
     if let Ok(tasks) = db.list() {
@@ -347,7 +358,61 @@ pub fn engine_with_calendar(db: &Db) -> ConstraintEngine {
             }
         }
     }
+    push_class_blocks(db, &mut e);
+    push_study_blocks(db, &mut e);
     e
+}
+
+/// Añade al motor una instancia dura por cada SESIÓN DE ESTUDIO vigente en el
+/// horizonte de planificación: el tiempo reservado es intocable para el
+/// planificador (reglas 12, 14 y 15).
+fn push_study_blocks(db: &Db, e: &mut ConstraintEngine) {
+    let Ok(sessions) = db.study_list() else {
+        return;
+    };
+    // horizonte holgado: mismo criterio que las clases (planner mira 14 días)
+    let from = crate::engine::local_midnight(crate::email::now_ms()) - 86_400_000;
+    let to = from + 16 * 86_400_000;
+    for s in sessions {
+        if s.end_at <= s.start_at || s.end_at <= from || s.start_at >= to {
+            continue;
+        }
+        e.blocks.push(crate::engine::Block {
+            interval: crate::engine::Interval {
+                start: s.start_at,
+                end: s.end_at,
+            },
+            label: s.title,
+            severity: crate::engine::Severity::Hard,
+        });
+    }
+}
+
+/// Añade al motor una instancia dura por cada ocurrencia de clase dentro de
+/// [hoy − 1 día, hoy + horizonte]. La vigencia (start_date/end_date) se
+/// evalúa día a día, así una clase vencida o futura no bloquea nada.
+fn push_class_blocks(db: &Db, e: &mut ConstraintEngine) {
+    use crate::commands::classes::class_instances_in_range;
+    let Ok(classes) = db.class_list() else {
+        return;
+    };
+    if classes.is_empty() {
+        return;
+    }
+    // horizonte holgado: el planner por defecto mira 14 días; +1 día de
+    // margen cubre sesiones que arrastran al día siguiente
+    let from = crate::engine::local_midnight(crate::email::now_ms()) - 86_400_000;
+    let to = from + 16 * 86_400_000;
+    for inst in class_instances_in_range(&classes, from, to) {
+        e.blocks.push(crate::engine::Block {
+            interval: crate::engine::Interval {
+                start: inst.start_at,
+                end: inst.end_at,
+            },
+            label: inst.title,
+            severity: crate::engine::Severity::Hard,
+        });
+    }
 }
 
 /// Ítem trivial para compromisos de hora fija ("domingo viaje 7am"): no hay

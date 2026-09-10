@@ -834,17 +834,15 @@ pub fn scheduler_loop(app: AppHandle) {
             }
             tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
             let h2 = app.clone();
-            let outcome = tauri::async_runtime::spawn_blocking(move || {
-                match run_sync(&h2) {
-                    Ok(s) => {
-                        crate::append_log(
-                            &h2,
-                            &format!("scheduler_sync_ok suggestions={}", s.total_suggestions),
-                        );
-                        None
-                    }
-                    Err(e) => Some(e),
+            let outcome = tauri::async_runtime::spawn_blocking(move || match run_sync(&h2) {
+                Ok(s) => {
+                    crate::append_log(
+                        &h2,
+                        &format!("scheduler_sync_ok suggestions={}", s.total_suggestions),
+                    );
+                    None
                 }
+                Err(e) => Some(e),
             })
             .await
             .unwrap_or_else(|_| Some("sync abortado".into()));

@@ -178,6 +178,20 @@ macro_rules! for_each_command {
             task_duplicate: commands::tasks::task_duplicate,
             task_from_text: commands::tasks::task_from_text,
 
+            class_list: commands::classes::class_list,
+            class_instances: commands::classes::class_instances,
+            class_create: commands::classes::class_create,
+            class_update: commands::classes::class_update,
+            class_delete: commands::classes::class_delete,
+            class_conflicts: commands::classes::class_conflicts,
+
+            study_list_range: commands::study::study_list_range,
+            study_create: commands::study::study_create,
+            study_update: commands::study::study_update,
+            study_move: commands::study::study_move,
+            study_delete: commands::study::study_delete,
+            study_conflicts: commands::study::study_conflicts,
+
             ai_config_get: commands::email::ai_config_get,
             ai_config_set: commands::email::ai_config_set,
             ai_test: commands::email::ai_test,
@@ -233,7 +247,7 @@ macro_rules! for_each_command {
             onboarding_complete: commands::ui::onboarding_complete,
             onboarding_reset: commands::ui::onboarding_reset,
             open_task: commands::ui::open_task,
-            open_agenda: commands::ui::open_agenda,
+            open_study: commands::ui::open_study,
             open_assistant: commands::ui::open_assistant,
             open_website: commands::ui::open_website,
             report_send: commands::ui::report_send,
@@ -388,6 +402,36 @@ fn test_hooks(handle: AppHandle) {
 
 // ---------------- arranque ----------------
 
+/// Watcher del CLI: el binario `ff` escribe `cli-change.flag` en el data_dir
+/// tras cada mutación; aquí se sondea y se emite `tasks:changed` para que la
+/// app abierta y el widget recarguen sin reiniciar. Muy barato: lee stat del
+/// archivo cada 2 s, y sólo emite si el mtime cambió.
+fn cli_watch_loop(app: tauri::AppHandle, data_dir: PathBuf) {
+    let flag = data_dir.join("cli-change.flag");
+    std::thread::spawn(move || {
+        let mut last: Option<SystemTime> = std::fs::metadata(&flag)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let cur = std::fs::metadata(&flag)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            match (cur, last) {
+                (Some(c), Some(l)) if c == l => {}
+                (Some(_), _) => {
+                    last = cur;
+                    append_log(&app, "cli_change_detected");
+                    // El CLI puede haber tocado tareas o clases: refresca ambos.
+                    let _ = app.emit("tasks:changed", ());
+                    let _ = app.emit("classes:changed", ());
+                }
+                (None, _) => {}
+            }
+        }
+    });
+}
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -507,6 +551,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             sync::scheduler_loop(handle.clone());
             reminders::reminder_loop(handle.clone());
+            cli_watch_loop(handle.clone(), data_dir.clone());
             // prune inicial al arrancar: limpiar resoluciones viejas pendientes de archivar
             {
                 let db = app.state::<Mutex<Db>>();
