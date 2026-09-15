@@ -629,10 +629,11 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                         }
                         // fase 2: IA sin lock (HTTP hasta 90 s)
                         let intents = analyze_email(app, provider.as_ref(), ai_configured, raw)?;
-                        if intents.is_empty() {
-                            return Ok(0);
-                        }
-                        // fase 3: insertar sugerencias (lock breve)
+                        // fase 3: insertar sugerencias y marcar el correo como
+                        // visto AUNQUE no se produzca ningún intent (contrato de
+                        // commit_email): sin esto, un correo sin compromisos
+                        // volvía a la IA en CADA sync, quemando la cuota de
+                        // tokens (429 de Groq) y repartiendo el mismo trabajo.
                         with_db(app, |db| commit_email(app, db, raw, &intents))
                     })();
                     match outcome {

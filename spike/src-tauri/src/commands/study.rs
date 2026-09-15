@@ -12,7 +12,7 @@
 
 use super::with_db;
 use crate::append_log;
-use crate::store::{lock_recover, StudyRow, Db};
+use crate::store::{lock_recover, Db, StudyRow};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 
@@ -222,7 +222,14 @@ mod tests {
         let d = Db::open_memory_clean_pub().unwrap();
         let t = today() + 9 * HOUR;
         let task = d
-            .create("Preparar parcial de cálculo", "uni", "alta", t, t + HOUR, false)
+            .create(
+                "Preparar parcial de cálculo",
+                "uni",
+                "alta",
+                t,
+                t + HOUR,
+                false,
+            )
             .unwrap();
 
         let s = d
@@ -247,7 +254,11 @@ mod tests {
         let s = d.study_create("Sesión", t, t + HOUR, None, "").unwrap();
         // sin estado de completado y fuera de la lista de tareas/pendientes
         assert!(d.list().unwrap().is_empty(), "una sesión no es una tarea");
-        assert_eq!(d.count().unwrap(), 0, "no cuenta en los contadores de tareas");
+        assert_eq!(
+            d.count().unwrap(),
+            0,
+            "no cuenta en los contadores de tareas"
+        );
         // sigue existiendo y se puede mover (movible y editable)
         let m = d.study_move(s.id, t + HOUR, t + 3 * HOUR).unwrap();
         assert_eq!(m.start_at, t + HOUR);
@@ -262,7 +273,13 @@ mod tests {
         let t = today();
         let start = t + 14 * HOUR;
         let s = d
-            .study_create("Sesión de estudio: Cálculo", start, start + 2 * HOUR, None, "")
+            .study_create(
+                "Sesión de estudio: Cálculo",
+                start,
+                start + 2 * HOUR,
+                None,
+                "",
+            )
             .unwrap();
         let e = engine_with_calendar(&d);
         let has = e.blocks.iter().any(|b| {
@@ -289,8 +306,15 @@ mod tests {
             .num_days_from_monday() as i64;
         d.class_create("Programación", dow, 600, 720, t - DAY, t + 28 * DAY)
             .unwrap();
-        d.create("Informe de redes", "uni", "media", t + 11 * HOUR, t + 12 * HOUR, false)
-            .unwrap();
+        d.create(
+            "Informe de redes",
+            "uni",
+            "media",
+            t + 11 * HOUR,
+            t + 12 * HOUR,
+            false,
+        )
+        .unwrap();
 
         // sesión 11:00–13:00: solapa con la clase y con la tarea
         let s_start = t + 11 * HOUR;

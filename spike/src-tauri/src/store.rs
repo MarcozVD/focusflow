@@ -1107,7 +1107,15 @@ impl Db {
             "UPDATE study_sessions SET title = ?2, start_at = ?3, end_at = ?4,
                task_id = ?5, notes = ?6, updated_at = ?7
              WHERE id = ?1",
-            rusqlite::params![id, title.trim(), start_at, end_at, task_id, notes.trim(), now_ms()],
+            rusqlite::params![
+                id,
+                title.trim(),
+                start_at,
+                end_at,
+                task_id,
+                notes.trim(),
+                now_ms()
+            ],
         )?;
         if n == 0 {
             return Err(rusqlite::Error::QueryReturnedNoRows);

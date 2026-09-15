@@ -172,21 +172,27 @@ fn sesion_add(args: Vec<String>, json_out: bool) -> i32 {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--fecha" => {
-                let Some(v) = need("--fecha", &mut it) else { return 1 };
+                let Some(v) = need("--fecha", &mut it) else {
+                    return 1;
+                };
                 match parse_date_ms(&v) {
                     Some(ms) => fecha = Some(ms),
                     None => return fail(&format!("--fecha inválida: {v} (usa YYYY-MM-DD)")),
                 }
             }
             "--from" => {
-                let Some(v) = need("--from", &mut it) else { return 1 };
+                let Some(v) = need("--from", &mut it) else {
+                    return 1;
+                };
                 match parse_min(&v, false) {
                     Some(m) => from = Some(m),
                     None => return fail(&format!("--from inválido: {v} (HH:MM)")),
                 }
             }
             "--to" => {
-                let Some(v) = need("--to", &mut it) else { return 1 };
+                let Some(v) = need("--to", &mut it) else {
+                    return 1;
+                };
                 match parse_min(&v, true) {
                     Some(m) => to = Some(m),
                     None => return fail(&format!("--to inválido: {v} (HH:MM, permite 24:00)")),
@@ -201,7 +207,9 @@ fn sesion_add(args: Vec<String>, json_out: bool) -> i32 {
                 None => return fail("--task necesita el id de una tarea (ff list)"),
             },
             "--notas" => {
-                let Some(v) = need("--notas", &mut it) else { return 1 };
+                let Some(v) = need("--notas", &mut it) else {
+                    return 1;
+                };
                 if !notes.is_empty() {
                     notes.push(' ');
                 }
@@ -271,7 +279,9 @@ fn sesion_add(args: Vec<String>, json_out: bool) -> i32 {
 
 fn sesion_move(args: Vec<String>, json_out: bool) -> i32 {
     let Some(id) = args.first().and_then(|s| s.parse::<i64>().ok()) else {
-        return fail("uso: ff sesiones move <id> <YYYY-MM-DD> [--from HH:MM] [--to HH:MM | --dur MIN]");
+        return fail(
+            "uso: ff sesiones move <id> <YYYY-MM-DD> [--from HH:MM] [--to HH:MM | --dur MIN]",
+        );
     };
     let mut fecha: Option<i64> = None;
     let mut from: Option<i64> = None;
@@ -380,8 +390,14 @@ fn sesion_edit(args: Vec<String>, json_out: bool) -> i32 {
     };
     let new_task = if task_given { task_id } else { cur.task_id };
     let new_notes = notes.unwrap_or_else(|| cur.notes.clone());
-    let row = match db.study_update(id, &cur.title, cur.start_at, cur.end_at, new_task, &new_notes)
-    {
+    let row = match db.study_update(
+        id,
+        &cur.title,
+        cur.start_at,
+        cur.end_at,
+        new_task,
+        &new_notes,
+    ) {
         Ok(r) => r,
         Err(e) => {
             return fail(&format!(

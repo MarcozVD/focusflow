@@ -254,21 +254,28 @@ pub mod gmail {
     }
 
     #[derive(serde::Deserialize)]
-    struct GetResponse {
+    // Gmail API responde en camelCase (internalDate, messagesTotal,
+    // emailAddress). Sin el rename, serde busca snake_case, el campo queda
+    // vacío por `default` y `msg_uid` cae AL FALLBACK DE HASH: un uid sin
+    // orden temporal (p. ej. 4202791636 ≈ año 2103) que envenena el
+    // checkpoint y deja el sync mudo para siempre. Regresión real.
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct GetResponse {
         /// Mensaje completo MIME en base64url (format=raw).
         #[serde(default)]
-        raw: String,
+        pub(crate) raw: String,
         /// Milisegundos desde época (string) de la fecha interna del mensaje.
         #[serde(default)]
-        internal_date: String,
+        pub(crate) internal_date: String,
     }
 
     #[derive(serde::Deserialize)]
-    struct Profile {
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct Profile {
         #[serde(default)]
-        messages_total: u32,
+        pub(crate) messages_total: u32,
         #[serde(default)]
-        email_address: String,
+        pub(crate) email_address: String,
     }
 
     impl GmailClient {
@@ -375,9 +382,17 @@ pub mod gmail {
             } else {
                 format!("label:{mailbox}")
             };
-            if checkpoint.uid > 0 {
+            // Autorreparo: un checkpoint cuyo uid cae en el futuro (p. ej. el
+            // hash de un id interpretado como segundos → año 2103) envenena la
+            // ventana `after:` y el sync devuelve 0 correos para siempre. Se
+            // reinicia a la ventana `since_days` (el dedupe por message_id y
+            // email_seen evita re-analizar lo ya procesado).
+            let checkpoint_uid = guard_future_uid(checkpoint.uid);
+            let now_epoch = chrono::Local::now().timestamp().max(0) as u32;
+
+            if checkpoint_uid > 0 {
                 // margen de 1 día: emails cuyo Date difiere de internalDate
-                let cp_date = chrono::DateTime::from_timestamp(checkpoint.uid as i64, 0)
+                let cp_date = chrono::DateTime::from_timestamp(checkpoint_uid as i64, 0)
                     .map(|d| d.with_timezone(&chrono::Local).date_naive())
                     .unwrap_or_else(|| chrono::Local::now().date_naive())
                     - chrono::Duration::days(1);
@@ -398,7 +413,7 @@ pub mod gmail {
 
             let cutoff = chrono::Utc::now() - chrono::Duration::days(since_days as i64);
             let mut emails = Vec::new();
-            let mut max_uid: u32 = checkpoint.uid;
+            let mut max_uid: u32 = checkpoint_uid;
 
             for m in &list.messages {
                 if m.id.is_empty() {
@@ -408,11 +423,16 @@ pub mod gmail {
                 let gtext = self.get(&get_path)?;
                 let g: GetResponse =
                     serde_json::from_str(&gtext).map_err(|e| format!("get {}: {e}", m.id))?;
+                // un uid en el futuro (hash de id por fallback, reloj
+                // desalineado) no es un cursor temporal válido: se ancla a
+                // `now_epoch` para no envenenar el checkpoint (próximos syncs
+                // ciegos) ni el rollback; el dedupe real es por message_id.
                 let uid = msg_uid(&g.internal_date, &m.id);
+                let uid = uid.min(now_epoch);
                 if uid > max_uid {
                     max_uid = uid;
                 }
-                if uid <= checkpoint.uid {
+                if uid <= checkpoint_uid {
                     continue; // ya cubierto por el checkpoint (o anterior a él)
                 }
 
@@ -478,6 +498,25 @@ pub mod gmail {
         }
 
         pub fn logout(&self) {}
+    }
+
+    /// Un uid de checkpoint que cae en el futuro (> ahora + 1 día) proviene de
+    /// el fallback hash-del-id de `msg_uid` (un hash no es una fecha: puede
+    /// apuntar a 2078 o 2103). Persistido, envenena la ventana `after:` y el
+    /// filtro `uid <= checkpoint.uid` y el sync queda mudo para siempre.
+    /// Función pura para poder testearla.
+    pub(crate) fn guard_future_uid(uid: u32) -> u32 {
+        let now_epoch = chrono::Local::now().timestamp().max(0) as u32;
+        if uid > now_epoch + 86_400 {
+            0
+        } else {
+            uid
+        }
+    }
+
+    #[cfg(test)]
+    pub fn guard_future_uid_for_test(uid: u32) -> u32 {
+        guard_future_uid(uid)
     }
 
     /// Cursor a partir de `internalDate` (ms desde época, string JSON).
@@ -661,6 +700,20 @@ mod tests {
     }
 
     #[test]
+    fn gmail_json_camel_case_fields_populate_structs() {
+        // regresión real: Gmail responde camelCase; si serde no lo renombra,
+        // internalDate cae a "" y msg_uid usa el hash (checkpoint envenenado)
+        let g: gmail::GetResponse =
+            serde_json::from_str(r#"{"id":"abc","raw":"aGk","internalDate":"1788912000000"}"#)
+                .unwrap();
+        assert_eq!(g.internal_date, "1788912000000");
+        let p: gmail::Profile =
+            serde_json::from_str(r#"{"emailAddress":"me@x.com","messagesTotal":4242}"#).unwrap();
+        assert_eq!(p.messages_total, 4242);
+        assert_eq!(p.email_address, "me@x.com");
+    }
+
+    #[test]
     fn internal_date_maps_to_epoch_seconds_cursor() {
         // 2026-09-09T00:00:00Z = 1_788_912_000 s (cabe en u32)
         assert_eq!(
@@ -672,6 +725,24 @@ mod tests {
         let h2 = gmail::msg_uid_for_test("", "abc");
         assert_eq!(h1, h2);
         assert_ne!(h1, gmail::msg_uid_for_test("", "xyz"));
+    }
+
+    #[test]
+    fn future_checkpoint_uid_is_self_healed() {
+        // 2026-09-09 ≈ 1_789_000_000 s. Un uid de hash (2103 → 4_202_791_636,
+        // el bug real que dejó el sync mudo) debe tratarse como "sin checkpoint"
+        // para que la ventana since_days vuelva a cubrir los correos.
+        let now = chrono::Local::now().timestamp() as u32;
+        assert_eq!(
+            gmail::guard_future_uid_for_test(now - 1_000_000),
+            now - 1_000_000
+        );
+        assert_eq!(gmail::guard_future_uid_for_test(4_202_791_636), 0);
+        assert_eq!(gmail::guard_future_uid_for_test(3_427_686_704), 0);
+        // un desfase pequeño de reloj (≤ 1 día) NO se cura: sigue siendo cursor
+        assert_eq!(gmail::guard_future_uid_for_test(now + 3_600), now + 3_600);
+        // más de un día en el futuro → reset a la ventana since_days
+        assert_eq!(gmail::guard_future_uid_for_test(now + 2 * 86_400), 0);
     }
 
     #[test]
