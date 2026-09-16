@@ -898,11 +898,12 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
     // los conozca (los excluimos: las sesiones del plan ya los rodean)
     let mut event_ids: Vec<i64> = Vec::new();
     for (start, end, title, _) in &event_spans {
-        let u = plan
-            .understanding
-            .iter()
-            .find(|u| u.title == *title)
-            .expect("evento");
+        let Some(u) = plan.understanding.iter().find(|u| u.title == *title) else {
+            // propuesta editada/legado sin el título en understanding: se
+            // omite el evento en vez de panic (bug M4: un `.expect` aquí
+            // tumbaba la app entera con panic=abort)
+            continue;
+        };
         let t = db
             .create(
                 title,

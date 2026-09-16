@@ -219,33 +219,47 @@ pub async fn task_from_text(
         // Rango multi-día ("inicia hoy y finaliza el lunes a las 4pm") →
         // bloque de inicio + bloque "(entrega)"; un solo día → una tarea.
         let blocks = planning::split_range_blocks(&parsed.title, parsed.start_ms, parsed.end_ms);
-        let mut created = Vec::with_capacity(blocks.len());
-        for (title, s, e, all_day) in &blocks {
-            let t = db
-                .create(
-                    title,
-                    &parsed.category_id,
-                    &parsed.priority,
-                    *s,
-                    *e,
-                    *all_day,
-                )
-                .map_err(|e| e.to_string())?;
-            created.push(t);
+        // transacción: si un bloque falla, no queda el rango a medias (bug L5)
+        db.tx_begin().map_err(|e| e.to_string())?;
+        let result = (|| -> Result<(TaskRow, Vec<TaskRow>), String> {
+            let mut created = Vec::with_capacity(blocks.len());
+            for (title, s, e, all_day) in &blocks {
+                let t = db
+                    .create(
+                        title,
+                        &parsed.category_id,
+                        &parsed.priority,
+                        *s,
+                        *e,
+                        *all_day,
+                    )
+                    .map_err(|e| e.to_string())?;
+                created.push(t);
+            }
+            let t = created
+                .first()
+                .cloned()
+                .ok_or_else(|| "no se pudo crear la tarea".to_string())?;
+            // conservar el recordatorio sugerido por la IA ("1d", "3h", ...)
+            if let Some(min) = parsed
+                .reminders
+                .first()
+                .and_then(|s| reminders::parse_reminder_minutes(s))
+            {
+                db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
+            }
+            Ok((t, created))
+        })();
+        match result {
+            Ok(v) => {
+                db.tx_commit().map_err(|e| e.to_string())?;
+                v
+            }
+            Err(e) => {
+                let _ = db.tx_rollback();
+                return Err(e);
+            }
         }
-        let t = created
-            .first()
-            .cloned()
-            .ok_or_else(|| "no se pudo crear la tarea".to_string())?;
-        // conservar el recordatorio sugerido por la IA ("1d", "3h", ...)
-        if let Some(min) = parsed
-            .reminders
-            .first()
-            .and_then(|s| reminders::parse_reminder_minutes(s))
-        {
-            db.set_task_reminder(t.id, min).map_err(|e| e.to_string())?;
-        }
-        (t, created)
     };
     append_log(
         &app,

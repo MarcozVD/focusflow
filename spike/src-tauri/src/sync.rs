@@ -280,14 +280,30 @@ pub fn revert_suggestion(db: &Db, id: i64) -> Result<(), String> {
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sugerencia no encontrada".to_string())?;
-    let _ = db
-        .unlink_and_delete_suggestion_tasks(id)
-        .map_err(|e| e.to_string())?;
-    db.set_suggestion_status(id, "pending")
-        .map_err(|e| e.to_string())?;
-    db.set_suggestion_result_task(id, 0)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    // todo el revert va en una transacción (bug L2): si el cambio de estado
+    // fallaba tras borrar la tarea, la sugerencia quedaba "accepted"
+    // apuntando a una tarea inexistente — ni aceptable ni reversible
+    db.tx_begin().map_err(|e| e.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let _ = db
+            .unlink_and_delete_suggestion_tasks(id)
+            .map_err(|e| e.to_string())?;
+        db.set_suggestion_status(id, "pending")
+            .map_err(|e| e.to_string())?;
+        db.set_suggestion_result_task(id, 0)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            db.tx_commit().map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = db.tx_rollback();
+            Err(e)
+        }
+    }
 }
 
 /// Fase 1 (DB, lock breve): ¿hay que procesar este correo? Devuelve false si
@@ -492,7 +508,14 @@ fn insert_intent_suggestion(
                     raw.uid, raw.sender
                 ),
             ),
-            Err(e) => crate::append_log(app, &format!("email_auto_approve_fail: {e}")),
+            Err(e) => {
+                // sin rollback, la bandeja muestra "Auto-aprobada" SIN tarea
+                // creada y sin botón de acción (settled) — el compromiso se
+                // pierde silenciosamente. Devolverla a pending la hace
+                // aceptable/rechazable por el usuario (bug M5).
+                crate::append_log(app, &format!("email_auto_approve_fail: {e}"));
+                let _ = db.set_suggestion_status(id, "pending");
+            }
         }
     }
     Ok(1)

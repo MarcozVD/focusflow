@@ -880,10 +880,15 @@ pub fn apply_action(db: &Db, action: &AssistantAction) -> Result<String, String>
             } else {
                 action.title.clone()
             };
-            let (start, end) = (
-                action.start_ms.unwrap_or_else(crate::email::now_ms),
-                action.end_ms.unwrap_or_else(crate::email::now_ms),
-            );
+            // end ausente o anterior al inicio → duración de 1 h por defecto
+            // (un evento invertido o de cero minutos era invisible/inútil,
+            // bug M6); all-day sin fin cubre el día completo
+            let start = action.start_ms.unwrap_or_else(crate::email::now_ms);
+            let end = match action.end_ms {
+                Some(e) if e > start => e,
+                _ if action.all_day => crate::engine::local_midnight(start) + crate::engine::DAY_MS,
+                _ => start + crate::engine::HOUR_MS,
+            };
             let t = db
                 .create(
                     &title,

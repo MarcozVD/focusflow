@@ -1525,13 +1525,18 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
     // Preguntar DESPUÉS de crear: Editar mueve al hueco libre; Cancelar
     // deshace la creación (la tarea aún no es visible para el usuario).
     const created = r.created.length > 0 ? r.created : [r.task];
-    for (const row of created) {
-      const t = toTask(row as TaskRow);
+    for (let i = 0; i < created.length; i++) {
+      const t = toTask(created[i] as TaskRow);
       if (t.allDay || t.status === "completada") continue;
       const g = await guardClassConflict(t.title, t.start.getTime(), t.end.getTime());
       if (g.result === "aborted") {
-        await invoke("task_delete", { id: t.id });
-        for (const w of weekCache.values()) w.delete(t.id);
+        // deshacer la creación completa: borrar TODOS los bloques (un rango
+        // multi-día dejó inicio + entrega; borrar solo el actual dejaba el
+        // inicio huérfano — bug M3)
+        for (const w of created) {
+          await invoke("task_delete", { id: (w as TaskRow).id });
+          for (const c of weekCache.values()) c.delete((w as TaskRow).id);
+        }
         rebuildTasks();
         return { ok: false, source: "cancelada", error: "cancelada" };
       }
