@@ -1299,6 +1299,19 @@ impl Db {
         end_at: i64,
         all_day: Option<bool>,
     ) -> rusqlite::Result<()> {
+        // mismas reglas de span que create/update_task_full (bug M1 vía drag):
+        // all-day cubre 24 h mínimo; un rango invertido se aplana
+        let stored_all_day: Option<bool> = self
+            .conn
+            .query_row(
+                "SELECT all_day FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                [id],
+                |r| Ok(r.get::<_, i64>(0)? != 0),
+            )
+            .optional()?;
+        let effective_all_day = all_day.or(stored_all_day).unwrap_or(false);
+        let (start_at, end_at) = normalize_task_span(start_at, end_at, effective_all_day);
+        let end_at = end_at.max(start_at);
         self.conn.execute(
             "UPDATE tasks SET start_at = ?2, end_at = ?3,
                     all_day = CASE WHEN ?5 IS NULL THEN all_day ELSE ?5 END,
