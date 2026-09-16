@@ -1354,9 +1354,10 @@ mod tests {
 
     #[test]
     fn tasks_inside_multiday_allday_range_use_free_days() {
-        // Evento all-day multi-día (lunes–jueves): el día de inicio queda
-        // bloqueado por el motor, pero un vencimiento intermedio (miércoles)
-        // se planifica DENTRO del rango, en los días libres.
+        // Evento all-day multi-día (lunes–jueves): desde 14315ea los all-day
+        // son MARCADORES, no bloquean ningún día; solo registran el vencimiento
+        // del rango. Un vencimiento intermedio (miércoles) se planifica
+        // DENTRO del rango respetando ese vencimiento.
         let d = clean_db();
         let mut ev = intent("Vacaciones", IntentType::Event, 0);
         ev.window = TimeWindow {
@@ -1385,14 +1386,7 @@ mod tests {
             "el informe se agenda: {:?}",
             informe.notes
         );
-        let d1 = Local::now().date_naive() + chrono::Duration::days(1);
         for s in &informe.sessions {
-            let st = Local.timestamp_millis_opt(s.start_ms).earliest().unwrap();
-            assert_ne!(
-                st.date_naive(),
-                d1,
-                "nunca dentro del día 1 (bloqueado por el evento): {s:?}"
-            );
             assert!(
                 s.end_ms <= dline.unwrap(),
                 "respeta el vencimiento del miércoles: {s:?}"
