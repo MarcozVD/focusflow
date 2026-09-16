@@ -38,6 +38,24 @@ pub fn task_create(
     all_day: bool,
 ) -> Result<TaskRow, String> {
     let task = with_db(&state, |db| {
+        // misma política de conflictos que task_move (bug L4: task_create los
+        // ignoraba por completo): con conflict_check activo, en modo estricto
+        // el solape se bloquea; en modo laxo solo se registra el aviso.
+        let check = crate::setting_bool(db, "calendar.conflict_check", true) && all_day != true;
+        if check {
+            if let Some((_, other)) = db
+                .find_overlap(-1, start_at, end_at)
+                .map_err(|e| e.to_string())?
+            {
+                if crate::setting_bool(db, "calendar.conflict_strict", false) {
+                    return Err(format!("conflicto: se solapa con '{other}'"));
+                }
+                append_log(
+                    &app,
+                    &format!("task_create_overlap title={title} con={other}"),
+                );
+            }
+        }
         db.create(&title, &category_id, &priority, start_at, end_at, all_day)
             .map_err(|e| e.to_string())
     })?;
