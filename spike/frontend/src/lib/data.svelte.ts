@@ -1144,7 +1144,10 @@ export async function addTask(t: Omit<Task, "id">) {
       putInCache(task);
       rebuildTasks();
     } catch (e) {
+      // error real (p. ej. conflicto bloqueado por calendar.conflict_strict):
+      // mostrarlo, no tragárselo en la consola (bug L4)
       console.error("addTask", e);
+      setNlToast(`No se pudo crear: ${e}`, "error");
     }
     return;
   }

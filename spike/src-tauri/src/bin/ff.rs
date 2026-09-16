@@ -306,6 +306,11 @@ fn cmd_add(args: Vec<String>, json_out: bool) -> i32 {
     };
     // Rango multi-día → bloque inicio + bloque "(entrega)", igual que la app.
     let blocks = planning::split_range_blocks(&parsed.title, parsed.start_ms, parsed.end_ms);
+    // transacción como task_from_text: un fallo a mitad no deja el rango a
+    // medias en la BD compartida (bug L5)
+    if let Err(e) = db.tx_begin() {
+        return fail(&format!("error iniciando transacción: {e}"));
+    }
     let mut created: Vec<store::TaskRow> = Vec::with_capacity(blocks.len());
     for (title, s, e, all_day) in &blocks {
         match db.create(
@@ -317,7 +322,10 @@ fn cmd_add(args: Vec<String>, json_out: bool) -> i32 {
             *all_day,
         ) {
             Ok(t) => created.push(t),
-            Err(e) => return fail(&format!("error creando tarea: {e}")),
+            Err(e) => {
+                let _ = db.tx_rollback();
+                return fail(&format!("error creando tarea: {e}"));
+            }
         }
     }
     if let Some(min) = parsed
@@ -327,9 +335,14 @@ fn cmd_add(args: Vec<String>, json_out: bool) -> i32 {
     {
         if let Some(t) = created.first() {
             if let Err(e) = db.set_task_reminder(t.id, min) {
+                let _ = db.tx_rollback();
                 return fail(&format!("error asignando recordatorio: {e}"));
             }
         }
+    }
+    if let Err(e) = db.tx_commit() {
+        let _ = db.tx_rollback();
+        return fail(&format!("error confirmando: {e}"));
     }
     touch_flag(&data_dir());
 
