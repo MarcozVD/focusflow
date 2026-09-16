@@ -1776,15 +1776,21 @@ impl Db {
         // `start_at IS NULL` (compromiso sin fecha, p. ej. intent "task"
         // "llamar a Juan") NUNCA pasa un BETWEEN — caía del dedupe y el mismo
         // compromiso en varios correos generaba una sugerencia por correo
-        // (bug A2). Se consideran candidatas tanto las sin fecha como las
-        // dentro de la ventana.
-        let mut stmt = self.conn.prepare(
+        // (bug A2). Solo cuando la BUSQUEDA es sin fecha participan las
+        // sugerencias sin fecha: una nueva CON fecha no debe fusionarse con
+        // una vaga de otro correo (perdería su hora concreta).
+        let null_clause = if start_at.is_some() {
+            ""
+        } else {
+            "start_at IS NULL OR "
+        };
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT id, title FROM suggested_events
              WHERE status IN ('pending','auto_approved')
-               AND (start_at IS NULL OR start_at BETWEEN ?1 AND ?2)
+               AND ({null_clause} start_at BETWEEN ?1 AND ?2)
                AND (?4 IS NULL OR source_email_id != ?4)
              ORDER BY created_at ASC",
-        )?;
+        ))?;
         let candidates: Vec<(i64, String)> = stmt
             .query_map(
                 rusqlite::params![window_start, window_end, window_end, exclude_email_id],

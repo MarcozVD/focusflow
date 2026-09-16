@@ -1280,6 +1280,19 @@ mod tests {
             .find_similar_suggestion("Llamar a la doctora", None, None, Some("<b@x>"))
             .unwrap();
         assert!(hit.is_some(), "sugerencia sin fecha participa del dedupe");
+        // una búsqueda CON fecha no se fusiona con la vaga (perdería su hora)
+        let dated = db
+            .find_similar_suggestion(
+                "Llamar a la doctora",
+                Some(crate::email::now_ms() + 86_400_000),
+                None,
+                Some("<b@x>"),
+            )
+            .unwrap();
+        assert!(
+            dated.is_none(),
+            "la sugerencia vaga no secuestra una fechada"
+        );
     }
 
     #[test]
