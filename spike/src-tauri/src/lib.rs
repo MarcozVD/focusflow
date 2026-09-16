@@ -556,12 +556,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             {
                 let db = app.state::<Mutex<Db>>();
                 let db = lock_recover(&db);
-                let retention_min: i64 = db
-                    .settings_get("email.suggestion_retention_minutes")
-                    .ok()
-                    .flatten()
-                    .and_then(|v| v.trim().parse().ok())
-                    .unwrap_or(60);
+                let retention_min: i64 = crate::sync::retention_min(&db);
                 if let Ok(n) = db.prune_suggestions(email::now_ms() - retention_min * 60_000) {
                     if n > 0 {
                         append_log(&handle, &format!("suggestions_pruned_startup count={n}"));

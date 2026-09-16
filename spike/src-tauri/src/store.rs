@@ -82,6 +82,33 @@ fn sanitize_category(id: &str) -> &str {
     }
 }
 
+/// Prioridad válida whitelist (mismo criterio que el CHECK de la tabla).
+/// Una prioridad inválida desde IPC/IA cae a "media" en vez de provocar un
+/// error de restricción opaco para el usuario (bug L7).
+fn sanitize_priority(p: &str) -> &str {
+    match p {
+        "alta" | "media" | "baja" => p,
+        _ => "media",
+    }
+}
+
+/// Normaliza el span de un marcador TODO EL DÍA: un all-day sin duración
+/// cubre [inicio, inicio + 24 h). Si se guarda con end <= start, `coversDay`
+/// del frontend exige end > dayStart y la tarea queda invisible en
+/// mes/día/semana (bug M1, mismo síntoma que la regresión all-day de b0f894b).
+///
+/// IMPORTANTE: con hora (all_day=false) end == start es un modelo de datos
+/// INTENCIONAL — "tarea flexible sin horario fijo" que el backlog de
+/// "organiza mi semana/día" consume (`flexible_backlog` filtra
+/// end_at <= start_at). NO se toca ese caso aquí ni en `create`.
+pub(crate) fn normalize_task_span(start: i64, end: i64, all_day: bool) -> (i64, i64) {
+    if all_day && end <= start {
+        (start, start + crate::engine::DAY_MS)
+    } else {
+        (start, end)
+    }
+}
+
 /// Recordatorio máximo: 4 semanas en minutos. Clampa entradas de IPC/IA para
 /// evitar valores negativos (disparo tras el inicio) u overflow en
 /// `start_at - reminder_minutes * 60000` (auditoría 17, hallazgo #13).
@@ -308,7 +335,7 @@ impl Db {
     /// "migración aplicada" de "columna preexistente", y una futura migración
     /// con transformación de datos necesita ese punto de anclaje
     /// (auditoría 17, hallazgo #7).
-    const SCHEMA_VERSION: i64 = 13;
+    const SCHEMA_VERSION: i64 = 14;
 
     fn migrate(&self) -> rusqlite::Result<()> {
         let v: i64 = self
@@ -353,8 +380,30 @@ impl Db {
         if v < 13 {
             self.migrate_0013()?;
         }
+        if v < 14 {
+            self.migrate_0014()?;
+        }
         self.conn
             .pragma_update(None, "user_version", Self::SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    /// Trazabilidad sugerencia → TODAS las tareas creadas: aceptar una
+    /// sugerencia de rango multi-día crea varios bloques (inicio +
+    /// "(entrega)") pero `result_task_id` solo apunta al primero; revertir
+    /// o borrar dejaba los demás huérfanos en el calendario (bug A1).
+    /// Se rellena con el vínculo único existente para datos viejos.
+    fn migrate_0014(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS suggestion_tasks (
+                suggestion_id INTEGER NOT NULL,
+                task_id       INTEGER NOT NULL,
+                PRIMARY KEY (suggestion_id, task_id)
+            );
+            INSERT OR IGNORE INTO suggestion_tasks (suggestion_id, task_id)
+                SELECT id, result_task_id FROM suggested_events
+                WHERE result_task_id IS NOT NULL AND result_task_id != 0;",
+        )?;
         Ok(())
     }
 
@@ -1183,6 +1232,13 @@ impl Db {
         all_day: bool,
     ) -> rusqlite::Result<TaskRow> {
         let now = now_ms();
+        let priority = sanitize_priority(priority);
+        let (start_at, end_at) = normalize_task_span(start_at, end_at, all_day);
+        // span invertido (end < start) con hora: se aplana a un instante —
+        // la duracion cero con all_day=false es el modelo legitimo de "sin
+        // horario fijo" que consume el backlog flexible, pero un rango
+        // negativo nunca debe guardarse
+        let end_at = end_at.max(start_at);
         self.conn.execute(
             "INSERT INTO tasks (title, category_id, priority, status, start_at, end_at, all_day, created_at, updated_at)
              VALUES (?1, ?2, ?3, 'pendiente', ?4, ?5, ?6, ?7, ?7)",
@@ -1268,15 +1324,23 @@ impl Db {
         all_day: Option<bool>,
     ) -> rusqlite::Result<()> {
         let reminder_minutes = sanitize_reminder(reminder_minutes);
-        let prev: Option<i64> = self
+        let priority = sanitize_priority(priority);
+        let prev: Option<(Option<i64>, bool)> = self
             .conn
             .query_row(
-                "SELECT reminder_minutes FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT reminder_minutes, all_day FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
                 [id],
-                |r| r.get::<_, Option<i64>>(0),
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)? != 0)),
             )
-            .optional()?
-            .flatten();
+            .optional()?;
+        let prev_reminder = prev.as_ref().and_then(|p| p.0);
+        // all_day=None conserva el valor actual de la tarea; la normalización
+        // del span debe usar ESE all_day efectivo (bug M1: editar/fusionar una
+        // sugerencia con inicio==fin guardaba un marcador all-day de duración
+        // cero, invisible en mes/día/semana).
+        let effective_all_day = all_day.unwrap_or_else(|| prev.map(|p| p.1).unwrap_or(false));
+        let (start_at, end_at) = normalize_task_span(start_at, end_at, effective_all_day);
+        let end_at = end_at.max(start_at);
         self.conn.execute(
             "UPDATE tasks SET title = ?2, category_id = ?3, priority = ?4,
                     start_at = ?5, end_at = ?6, description = ?7, tags = ?8, notes = ?9,
@@ -1301,7 +1365,7 @@ impl Db {
             ],
         )?;
         // FR-30: cambiar el recordatorio rearma el disparo (no refirar si no cambió)
-        if prev != reminder_minutes {
+        if prev_reminder != reminder_minutes {
             self.conn.execute(
                 "UPDATE tasks SET reminder_fired_at = NULL WHERE id = ?1 AND reminder_fired_at IS NOT NULL",
                 [id],
@@ -1696,10 +1760,15 @@ impl Db {
     ) -> rusqlite::Result<Option<(i64, String)>> {
         let window_start = start_at.unwrap_or(i64::MIN).saturating_sub(48 * 3_600_000);
         let window_end = end_at.unwrap_or(i64::MAX).saturating_add(48 * 3_600_000);
+        // `start_at IS NULL` (compromiso sin fecha, p. ej. intent "task"
+        // "llamar a Juan") NUNCA pasa un BETWEEN — caía del dedupe y el mismo
+        // compromiso en varios correos generaba una sugerencia por correo
+        // (bug A2). Se consideran candidatas tanto las sin fecha como las
+        // dentro de la ventana.
         let mut stmt = self.conn.prepare(
             "SELECT id, title FROM suggested_events
              WHERE status IN ('pending','auto_approved')
-               AND start_at BETWEEN ?1 AND ?2
+               AND (start_at IS NULL OR start_at BETWEEN ?1 AND ?2)
                AND (?4 IS NULL OR source_email_id != ?4)
              ORDER BY created_at ASC",
         )?;
@@ -1718,19 +1787,10 @@ impl Db {
     }
 
     /// Elimina la sugerencia por completo (control del usuario: "borrar").
-    /// Si tenía una tarea creada, también se borra.
+    /// Si tenía tareas creadas (una o varias — rango multi-día), también se
+    /// borran (bug A1: antes solo se borraba result_task_id).
     pub fn delete_suggestion(&self, id: i64) -> rusqlite::Result<()> {
-        let task_id: Option<i64> = self
-            .conn
-            .query_row(
-                "SELECT result_task_id FROM suggested_events WHERE id = ?1 AND result_task_id IS NOT NULL AND result_task_id != 0",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(tid) = task_id {
-            let _ = self.delete(tid);
-        }
+        self.unlink_and_delete_suggestion_tasks(id)?;
         self.conn
             .execute("DELETE FROM suggested_events WHERE id = ?1", [id])?;
         Ok(())
@@ -1840,6 +1900,61 @@ impl Db {
         Ok(())
     }
 
+    /// Registra UNA de las tareas creadas por una sugerencia (puede ser más
+    /// de una: rangos multi-día generan bloque de inicio + "(entrega)").
+    pub fn link_suggestion_task(&self, suggestion_id: i64, task_id: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO suggestion_tasks (suggestion_id, task_id) VALUES (?1, ?2)",
+            rusqlite::params![suggestion_id, task_id],
+        )?;
+        Ok(())
+    }
+
+    /// Todas las tareas creadas por la sugerencia (orden de creación).
+    pub fn suggestion_task_ids(&self, suggestion_id: i64) -> rusqlite::Result<Vec<i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT task_id FROM suggestion_tasks WHERE suggestion_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([suggestion_id], |r| r.get(0))?;
+        let ids: Vec<i64> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        // compatibilidad: sugerencias aceptadas antes de la migración 0014
+        // solo tenían result_task_id
+        if ids.is_empty() {
+            let main: Option<i64> = self
+                .conn
+                .query_row(
+                    "SELECT result_task_id FROM suggested_events
+                     WHERE id = ?1 AND result_task_id IS NOT NULL AND result_task_id != 0",
+                    [suggestion_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            return Ok(main.into_iter().collect());
+        }
+        Ok(ids)
+    }
+
+    /// Desvincula y elimina TODAS las tareas creadas por la sugerencia.
+    /// Devuelve cuántas tareas existían todavía (las ya borradas no cuentan).
+    pub fn unlink_and_delete_suggestion_tasks(
+        &self,
+        suggestion_id: i64,
+    ) -> rusqlite::Result<usize> {
+        let ids = self.suggestion_task_ids(suggestion_id)?;
+        let mut alive = 0usize;
+        for tid in &ids {
+            if self.get_task(*tid)?.is_some() {
+                self.delete(*tid)?;
+                alive += 1;
+            }
+        }
+        self.conn.execute(
+            "DELETE FROM suggestion_tasks WHERE suggestion_id = ?1",
+            [suggestion_id],
+        )?;
+        Ok(alive)
+    }
+
     pub fn update_suggestion_data(
         &self,
         id: i64,
@@ -1852,13 +1967,14 @@ impl Db {
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE suggested_events SET title = ?2, category_id = ?3, priority = ?4,
-                    start_at = ?5, end_at = ?6, description = ?7, updated_at = ?8
+                    start_at = ?5, end_at = ?6, description = ?7, updated_at = ?8,
+                    deadline_at = CASE WHEN deadline_at IS NOT NULL THEN ?6 ELSE deadline_at END
              WHERE id = ?1",
             rusqlite::params![
                 id,
                 title,
                 sanitize_category(category_id),
-                priority,
+                sanitize_priority(priority),
                 start_at,
                 end_at,
                 description,

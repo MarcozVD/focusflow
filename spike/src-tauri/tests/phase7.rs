@@ -64,9 +64,12 @@ fn core_loop_end_to_end() {
     assert!(item.sessions.len() <= 6, "fragmentación controlada");
     assert!(item.complete, "4 horas caben antes del viernes");
     // el límite del examen es su ventana (el proveedor local la pone en el
-    // evento, no en `deadline`)
+    // evento, no en `deadline`). Un marcador all-day rige hasta las 22:00 de
+    // su día — misma convención que push_commitment (medianoche como límite
+    // haría el plan inviable testándolo de noche).
     let bound = view.understanding[0]
         .window_start
+        .map(|s| focusflow_spike_lib::engine::local_midnight(s) + 22 * 3_600_000)
         .expect("ventana del examen");
     for s in &item.sessions {
         assert!(s.is_prep, "sesión de preparación");
@@ -113,6 +116,12 @@ fn core_loop_end_to_end() {
     assert!(item2.complete);
     for s in &item2.sessions {
         for t in &tasks {
+            // los marcadores all-day (el evento-examen de 24 h) no bloquean:
+            // misma regla que find_overlap (14315ea) — el día es del examen,
+            // pero estudiar por la mañana ANTES de su límite (22:00) es válido
+            if t.all_day {
+                continue;
+            }
             let overlap = s.start_ms < t.end_at && s.end_ms > t.start_at;
             assert!(
                 !overlap,

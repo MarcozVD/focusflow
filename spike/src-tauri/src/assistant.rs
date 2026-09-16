@@ -1122,7 +1122,10 @@ mod tests {
 
     #[test]
     fn apply_reschedule_moves_via_service() {
-        let d = db();
+        // DB limpia: con el seed demo, "Estudiar cálculo" (now+9h..now+11h)
+        // invade mañana 09:00 cuando se testea de noche y el solape hace el
+        // test dependiente de la hora real (flaky).
+        let d = crate::store::Db::open_memory_clean_pub().unwrap();
         let t = d
             .create(
                 "Estudiar",

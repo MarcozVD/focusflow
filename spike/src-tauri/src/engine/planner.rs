@@ -176,7 +176,22 @@ fn order_items(intents: &[Intent]) -> Vec<ItemSpec> {
         if task_min == 0 && prep_min == 0 {
             continue; // no dimensionable (availability/constraint/task backlog)
         }
-        let bound = if is_fixed { i.window.start } else { i.deadline };
+        // Un evento MARCADOR all-day ("examen pasado mañana", sin hora) no
+        // ocurre a medianoche: rige hasta las 22:00 de su día, la misma
+        // convención que `push_commitment` para rangos all-day. Usar la
+        // medianoche como bound dejaba la preparación fuera cuando faltaba
+        // un solo día y hacía el plan dependiente de la hora real (flaky).
+        let bound = if is_fixed {
+            match i.window.start {
+                Some(s) if i.window.all_day => {
+                    let d0 = super::local_midnight(s);
+                    Some((d0 + 22 * 60 * MIN_MS).max(s))
+                }
+                other => other,
+            }
+        } else {
+            i.deadline
+        };
         items.push(ItemSpec {
             title: i.title.clone(),
             intent_type: i.intent_type,
@@ -406,6 +421,21 @@ impl Planner {
                     // hoy: el intervalo se recorta a partir de "ahora" (no
                     // se planifica en horas pasadas del día actual)
                     let f = clamp_today(f, day);
+                    // el vencimiento recorta TAMBIÉN por hora: sin esto, un
+                    // deadline con hora dentro del día (p. ej. examen a
+                    // 01:00 por cierre de rango) dejaba agendar sesiones
+                    // DESPUÉS del vencimiento ese mismo día — solo se
+                    // limitaba por día (`day > dd`).
+                    let f = match deadline_bound_ms {
+                        // la recuperación de vencidas (deadline en el pasado)
+                        // se agenda HOY completa: recortar por hora la
+                        // bloquearía toda (mismo criterio que `!overdue` arriba)
+                        Some(b) if !overdue && b <= f.end => Interval {
+                            end: b.max(f.start),
+                            ..f
+                        },
+                        _ => f,
+                    };
                     let iv_len = ((f.end - f.start) / MIN_MS) as u32;
                     if iv_len == 0 {
                         continue;
@@ -1105,7 +1135,11 @@ mod tests {
     fn overdue_deadline_schedules_today_not_later() {
         // Si queda una tarea vencida (deadline de ayer), el plan de hoy la
         // agenda HOY para recuperarla; no se salta a mañana ni la ignora.
-        let e = engine_free();
+        let mut e = engine_free();
+        // 24 h: con horario 06–22, testear después de las 20:00 no deja 120
+        // min libres "hoy" y el plan se va a mañana — el test medía la
+        // recuperación de vencidas, no la ventana laboral (flaky).
+        e.working_hours = None;
         let p = planner(e);
         let today = Local::now().date_naive();
         let past = super::super::local_ms(

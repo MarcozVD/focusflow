@@ -12,11 +12,7 @@ use crate::{append_log, sync};
 use super::with_db;
 
 fn retention_min(db: &Db) -> i64 {
-    db.settings_get("email.suggestion_retention_minutes")
-        .ok()
-        .flatten()
-        .and_then(|v| v.trim().parse().ok())
-        .unwrap_or(60)
+    sync::retention_min(db)
 }
 
 #[tauri::command]
@@ -161,6 +157,14 @@ pub fn suggestion_merge(
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sugerencia no encontrada".to_string())?;
+    // solo una sugerencia pendiente puede fusionarse: una ya aceptada tiene
+    // (o debe tener) su propia tarea, y fusionarla la duplicaba (bug M2)
+    if s.status != "pending" {
+        return Err(format!(
+            "la sugerencia ya fue procesada (estado: {})",
+            s.status
+        ));
+    }
     let existing = db
         .get_task(task_id)
         .map_err(|e| e.to_string())?

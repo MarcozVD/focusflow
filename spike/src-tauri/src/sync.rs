@@ -82,6 +82,19 @@ pub fn rollback_uid(
     candidate.min(new_cp_uid)
 }
 
+/// Retención (minutos) de sugerencias resueltas antes de auto-archivarlas.
+/// Compartida por la bandeja, el prune de arranque y el loop horario.
+/// Valores negativos o absurdos (entrada manual en Ajustes) dejarían la
+/// bandeja de resueltas vacía o eterna: corte saneado 0–7 días (bug L3).
+pub fn retention_min(db: &crate::store::Db) -> i64 {
+    db.settings_get("email.suggestion_retention_minutes")
+        .ok()
+        .flatten()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .map(|v| v.clamp(0, 7 * 24 * 60))
+        .unwrap_or(60)
+}
+
 /// Acepta una sugerencia: crea la tarea real y marca la sugerencia.
 /// Idempotente: solo una sugerencia `pending` puede aceptarse; re-aceptar
 /// una ya procesada devuelve la tarea existente en vez de duplicarla
@@ -182,8 +195,15 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
             // frontend exige end > dayStart y la tarea queda invisible en
             // mes/día/semana. Igual que split_range_blocks hace con los
             // marcadores de día (s_day, s_day + DAY_MS).
-            let be = if all_day && *be <= *bs {
-                *bs + crate::engine::DAY_MS
+            // Con hora explícita (deadline "a las 18:00" start == end) el
+            // bloque dura 1 h por defecto — cero duración era invisible e
+            // inútil (bug M7).
+            let be = if *be <= *bs {
+                if all_day {
+                    *bs + crate::engine::DAY_MS
+                } else {
+                    *bs + crate::engine::HOUR_MS
+                }
             } else {
                 *be
             };
@@ -225,6 +245,13 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
             .map_err(|e| e.to_string())?;
         db.set_suggestion_result_task(id, task.id)
             .map_err(|e| e.to_string())?;
+        // trazabilidad de TODOS los bloques (rango multi-día = inicio +
+        // "(entrega)"): revertir o borrar la sugerencia debe eliminarlos todos
+        // (bug A1).
+        for t in &created {
+            db.link_suggestion_task(id, t.id)
+                .map_err(|e| e.to_string())?;
+        }
         // re-fetch main para incluir la descripción, luego reemplazar en el vec
         let main = db
             .get_task(task.id)
@@ -245,15 +272,17 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
     }
 }
 
-/// Revierte la decisión: vuelve a "pending" y, si había tarea creada, la elimina.
+/// Revierte la decisión: vuelve a "pending" y, si había tareas creadas, las
+/// elimina TODAS (un rango multi-día dejó inicio + "(entrega)": borrar solo
+/// result_task_id dejaba la entrega huérfana y re-aceptar la duplicaba — A1).
 pub fn revert_suggestion(db: &Db, id: i64) -> Result<(), String> {
-    let s = db
+    let _s = db
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sugerencia no encontrada".to_string())?;
-    if let Some(task_id) = s.result_task_id {
-        let _ = db.delete(task_id);
-    }
+    let _ = db
+        .unlink_and_delete_suggestion_tasks(id)
+        .map_err(|e| e.to_string())?;
     db.set_suggestion_status(id, "pending")
         .map_err(|e| e.to_string())?;
     db.set_suggestion_result_task(id, 0)
@@ -806,13 +835,7 @@ pub fn scheduler_loop(app: AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
             let h = prune_app.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || {
-                let retention_min: i64 = with_db(&h, |db| {
-                    db.settings_get("email.suggestion_retention_minutes")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.trim().parse().ok())
-                        .unwrap_or(60)
-                });
+                let retention_min: i64 = with_db(&h, |db| crate::sync::retention_min(db));
                 let pruned = with_db(&h, |db| {
                     db.prune_suggestions(email::now_ms() - retention_min * 60_000)
                 });
@@ -1142,5 +1165,184 @@ mod tests {
         );
         assert!(db.email_seen("<legacy-2@x.com>").unwrap());
         assert!(db.email_seen("<legacy@x.com>").unwrap());
+    }
+
+    // ---- auditoría 2026-09-15: regresiones de sugerencias/tareas ----
+
+    fn sug(
+        db: &crate::store::Db,
+        kind: &str,
+        title: &str,
+        email_id: Option<&str>,
+        start: Option<i64>,
+        end: Option<i64>,
+    ) -> i64 {
+        db.insert_suggestion(
+            "email",
+            email_id,
+            Some("profe@a.com"),
+            "asunto",
+            kind,
+            title,
+            "",
+            "uni",
+            "media",
+            start,
+            end,
+            None,
+            0,
+            "",
+            "[]",
+            0.9,
+            "test",
+            None,
+            "",
+            "pending",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn revert_and_delete_remove_all_multiday_blocks() {
+        // A1: una disponibilidad multi-día crea inicio + "(entrega)"; revertir
+        // o borrar la sugerencia debe eliminar AMBAS tareas (antes quedaba la
+        // entrega huérfana y re-aceptar la duplicaba).
+        const DAY_MS: i64 = crate::engine::DAY_MS;
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let now = crate::email::now_ms();
+        let id = sug(
+            &db,
+            "availability",
+            "Ventana proyecto",
+            None,
+            Some(now + DAY_MS),
+            Some(now + 4 * DAY_MS),
+        );
+        let tasks = accept_suggestion(&db, id).unwrap();
+        assert_eq!(tasks.len(), 2, "inicio + (entrega)");
+        assert_eq!(db.suggestion_task_ids(id).unwrap().len(), 2);
+
+        revert_suggestion(&db, id).unwrap();
+        for t in &tasks {
+            assert!(db.get_task(t.id).unwrap().is_none(), "tarea huérfana");
+        }
+        // re-aceptar no duplica: exactamente 2 tareas otra vez
+        let tasks2 = accept_suggestion(&db, id).unwrap();
+        assert_eq!(tasks2.len(), 2);
+        assert_eq!(
+            db.list().unwrap().len(),
+            2,
+            "sin duplicados tras revert+accept"
+        );
+
+        // borrar la sugerencia elimina también todas sus tareas
+        db.delete_suggestion(id).unwrap();
+        assert!(db.list().unwrap().is_empty(), "delete limpia ambos bloques");
+    }
+
+    #[test]
+    fn dedupe_matches_undated_suggestions() {
+        // A2: el mismo compromiso sin fecha detectado en OTRO correo debe
+        // deduplicarse; `start_at BETWEEN` con NULL nunca coincidía.
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        sug(
+            &db,
+            "task",
+            "Llamar a la doctora",
+            Some("<a@x>"),
+            None,
+            None,
+        );
+        let hit = db
+            .find_similar_suggestion("Llamar a la doctora", None, None, Some("<b@x>"))
+            .unwrap();
+        assert!(hit.is_some(), "sugerencia sin fecha participa del dedupe");
+    }
+
+    #[test]
+    fn accept_deadline_with_explicit_time_gets_one_hour() {
+        // M7: deadline "a las 18:00" (start == end con hora explícita) no debe
+        // materializarse como tarea de duración cero.
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let day11 =
+            crate::engine::local_midnight(crate::email::now_ms()) + 2 * crate::engine::DAY_MS;
+        let at18 = day11 + 18 * 3_600_000;
+        let id = sug(
+            &db,
+            "deadline",
+            "Entregar informe",
+            None,
+            Some(at18),
+            Some(at18),
+        );
+        let tasks = accept_suggestion(&db, id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        let t = &tasks[0];
+        assert!(!t.all_day, "conserva su hora");
+        assert_eq!(t.end_at - t.start_at, 3_600_000, "1 h por defecto");
+    }
+
+    #[test]
+    fn update_task_full_normalizes_allday_marker() {
+        // M1: editar una sugerencia aceptada con inicio == fin (all-day) debe
+        // quedar con 24 h de cobertura; si no, coversDay la esconde.
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let day = crate::engine::local_midnight(crate::email::now_ms()) + 3 * crate::engine::DAY_MS;
+        let t = db
+            .create("Entrega", "uni", "media", day, day, true)
+            .unwrap();
+        assert_eq!(t.end_at - t.start_at, crate::engine::DAY_MS);
+        // ruta update (suggestion_edit/merge con all_day=None conserva el
+        // all_day almacenado y normaliza igual)
+        db.update_task_full(
+            t.id, "Entrega", "uni", "media", day, day, "", "[]", "", "", None, None,
+        )
+        .unwrap();
+        let t2 = db.get_task(t.id).unwrap().unwrap();
+        assert!(t2.all_day);
+        assert_eq!(
+            t2.end_at - t2.start_at,
+            crate::engine::DAY_MS,
+            "24 h tras editar"
+        );
+        // y un span invertido se aplana, no se guarda negativo
+        db.update_task_full(
+            t.id,
+            "Entrega",
+            "uni",
+            "media",
+            day,
+            day - 5_000,
+            "",
+            "[]",
+            "",
+            "",
+            None,
+            Some(false),
+        )
+        .unwrap();
+        let t3 = db.get_task(t.id).unwrap().unwrap();
+        assert!(t3.end_at >= t3.start_at, "sin span invertido");
+    }
+
+    #[test]
+    fn create_sanitizes_priority_and_negative_span() {
+        // L7/L4: prioridad inválida cae a "media" (evita el error CHECK opaco)
+        // y end < start no se persiste invertido.
+        let db = crate::store::Db::open_memory_clean_pub().unwrap();
+        let now = crate::email::now_ms();
+        let t = db
+            .create("X", "uni", "urgentísima", now, now + 60_000, false)
+            .unwrap();
+        assert_eq!(t.priority, "media");
+        let t2 = db
+            .create("Y", "uni", "alta", now, now - 60_000, false)
+            .unwrap();
+        assert!(t2.end_at >= t2.start_at);
+        // la prioridad válida NO se toca
+        let t3 = db
+            .create("Z", "uni", "baja", now, now + 60_000, false)
+            .unwrap();
+        assert_eq!(t3.priority, "baja");
     }
 }

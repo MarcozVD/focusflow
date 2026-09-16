@@ -466,7 +466,12 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
             // hereda 1 h de duración por defecto. Sin esto el ítem no se
             // crea (fill_fixed_item exige ambos extremos) y aceptar no
             // registra nada en el calendario.
-            if i.window.start.is_some() && i.window.end.is_none() {
+            // SOLO para eventos con hora: un marcador all-day con fecha y sin
+            // fin ("examen pasado mañana") debe conservarse como all-day — si
+            // se convertía a 00:00–01:00 timed, la regla de cierre lo
+            // deslizaba a 01:00–03:00 (la preparación se planificaba después
+            // del examen — flaky de phase7 que reveló el bug real).
+            if i.window.start.is_some() && i.window.end.is_none() && !i.window.all_day {
                 let s = i.window.start.unwrap();
                 i.window = TimeWindow {
                     start: Some(s),
@@ -844,11 +849,19 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         if u.intent_type != IntentType::Event || edited_event_titles.contains(&u.title) {
             continue;
         }
-        // Evento con inicio pero sin fin ("7pm lunes"): hereda 1 h. Sin esto
-        // el span no se crea y aceptar no registra nada (propuestas viejas
-        // u otras rutas pueden llegar sin `window_end`).
+        // Evento con inicio pero sin fin:
+        // - all-day ("examen pasado mañana"): marcador del día COMPLETO
+        //   [medianoche, +24h) — un span 00:00–01:00 se veía como evento de
+        //   una hora y su preparación caía después del examen.
+        // - con hora ("7pm lunes"): hereda 1 h. Sin esto el span no se crea y
+        //   aceptar no registra nada (propuestas viejas u otras rutas pueden
+        //   llegar sin `window_end`).
         if let Some(s) = u.window_start {
-            let e = u.window_end.unwrap_or(s + crate::engine::HOUR_MS);
+            let e = match u.window_end {
+                Some(e) => e,
+                None if u.all_day => crate::engine::local_midnight(s) + crate::engine::DAY_MS,
+                None => s + crate::engine::HOUR_MS,
+            };
             if e > s {
                 event_spans.push((s, e, u.title.clone(), u.all_day));
             }
@@ -1579,8 +1592,10 @@ mod tests {
     #[test]
     fn deleted_event_does_not_break_proposal() {
         // borrar una tarea existente no rompe propuestas pendientes: el
-        // aceptar revalida contra el calendario actual (sin la tarea)
-        let d = db();
+        // aceptar revalida contra el calendario actual (sin la tarea).
+        // DB limpia: el seed "Estudiar cálculo" (now+9h..now+11h) invade el
+        // slot de mañana cuando se testea después de las 23:00 (flaky).
+        let d = clean_db();
         let intents = vec![intent("Estudiar", IntentType::Task, 60)];
         let view = plan_from_text(&d, "estudiar", &intents, "local").unwrap();
         let slot = day(1) + 10 * 3_600_000;
