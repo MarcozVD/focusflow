@@ -265,6 +265,18 @@ pub(crate) fn validate_class(
     Ok(())
 }
 
+/// Resultado devuelto al frontend tras una importación: cuántos registros
+/// se insertaron en cada tabla (los que ya existían se ignoran por id).
+#[derive(serde::Serialize, Default)]
+pub struct ImportSummary {
+    pub tasks: usize,
+    pub suggestions: usize,
+    pub classes: usize,
+    pub study_sessions: usize,
+    pub trusted_senders: usize,
+    pub settings: usize,
+}
+
 impl Db {
     pub fn open(data_dir: &PathBuf) -> rusqlite::Result<Self> {
         std::fs::create_dir_all(data_dir).ok();
@@ -808,6 +820,264 @@ impl Db {
             "trusted_senders": trusted,
             "settings": settings,
         }))
+    }
+
+    /// Importa datos desde un JSON previamente exportado por `export_data`.
+    /// Estrategia: INSERT OR IGNORE por id en todas las tablas (no borra ni
+    /// sobreescribe datos existentes; idempotente si se importa dos veces).
+    /// Las settings se restauran solo si su clave está en la whitelist
+    /// `EXPORTABLE_SETTINGS`. Nunca toca config de correo, tokens ni claves.
+    pub fn import_data(&self, json: &str) -> Result<ImportSummary, String> {
+        let v: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("JSON inválido: {e}"))?;
+        if v.get("app").and_then(|a| a.as_str()) != Some("focusflow") {
+            return Err(
+                "El archivo no es un export de FocusFlow (falta «app: focusflow»)".into(),
+            );
+        }
+
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+
+        // Helpers para extraer valores del JSON con fallback seguro
+        fn str_val<'a>(obj: &'a serde_json::Value, key: &str) -> &'a str {
+            obj.get(key).and_then(|v| v.as_str()).unwrap_or("")
+        }
+        fn i64_val(obj: &serde_json::Value, key: &str) -> i64 {
+            obj.get(key).and_then(|v| v.as_i64()).unwrap_or(0)
+        }
+        fn opt_i64(obj: &serde_json::Value, key: &str) -> Option<i64> {
+            obj.get(key).and_then(|v| v.as_i64())
+        }
+        fn f64_val(obj: &serde_json::Value, key: &str) -> f64 {
+            obj.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
+        }
+
+        let mut summary = ImportSummary::default();
+
+        // ── Tareas ──────────────────────────────────────────────────────────
+        if let Some(tasks) = v.get("tasks").and_then(|t| t.as_array()) {
+            for t in tasks {
+                let title = str_val(t, "title");
+                if title.trim().is_empty() {
+                    continue;
+                }
+                let cat = sanitize_category(str_val(t, "category_id"));
+                let prio = sanitize_priority(str_val(t, "priority"));
+                let status = match str_val(t, "status") {
+                    "completada" => "completada",
+                    "en-curso" => "en-curso",
+                    _ => "pendiente",
+                };
+                let n = tx
+                    .execute(
+                        "INSERT OR IGNORE INTO tasks
+                         (id, title, category_id, priority, status,
+                          start_at, end_at, all_day, progress,
+                          completed_at, created_at, updated_at, deleted_at,
+                          description, notes, links, tags, metadata,
+                          reminder_minutes, reminder_fired_at)
+                         VALUES
+                         (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
+                          ?14,?15,?16,?17,?18,?19,?20)",
+                        rusqlite::params![
+                            opt_i64(t, "id"),
+                            title,
+                            cat,
+                            prio,
+                            status,
+                            i64_val(t, "start_at"),
+                            i64_val(t, "end_at"),
+                            i64_val(t, "all_day"),
+                            i64_val(t, "progress").clamp(0, 100),
+                            opt_i64(t, "completed_at"),
+                            i64_val(t, "created_at"),
+                            i64_val(t, "updated_at"),
+                            opt_i64(t, "deleted_at"),
+                            str_val(t, "description"),
+                            str_val(t, "notes"),
+                            str_val(t, "links"),
+                            str_val(t, "tags"),
+                            str_val(t, "metadata"),
+                            opt_i64(t, "reminder_minutes")
+                                .map(|m| m.clamp(0, MAX_REMINDER_MINUTES)),
+                            opt_i64(t, "reminder_fired_at"),
+                        ],
+                    )
+                    .map_err(|e| format!("task insert: {e}"))?;
+                summary.tasks += n;
+            }
+        }
+
+        // ── Sugerencias ──────────────────────────────────────────────────────
+        if let Some(sug) = v.get("suggestions").and_then(|s| s.as_array()) {
+            for s in sug {
+                let title = str_val(s, "title");
+                if title.trim().is_empty() {
+                    continue;
+                }
+                let prio = sanitize_priority(str_val(s, "priority"));
+                let cat = sanitize_category(str_val(s, "category_id"));
+                let status = match str_val(s, "status") {
+                    "accepted" | "rejected" | "merged" | "auto_approved" => str_val(s, "status"),
+                    _ => "pending",
+                };
+                let n = tx
+                    .execute(
+                        "INSERT OR IGNORE INTO suggested_events
+                         (id, source, source_email_id, source_sender,
+                          title, description, category_id, priority,
+                          start_at, end_at, location, tags, confidence,
+                          reason, status, dedupe_task_id, dedupe_note,
+                          created_at, updated_at)
+                         VALUES
+                         (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
+                          ?14,?15,?16,?17,?18,?19)",
+                        rusqlite::params![
+                            opt_i64(s, "id"),
+                            str_val(s, "source"),
+                            s.get("source_email_id").and_then(|v| v.as_str()),
+                            s.get("source_sender").and_then(|v| v.as_str()),
+                            title,
+                            str_val(s, "description"),
+                            cat,
+                            prio,
+                            opt_i64(s, "start_at"),
+                            opt_i64(s, "end_at"),
+                            str_val(s, "location"),
+                            str_val(s, "tags"),
+                            f64_val(s, "confidence"),
+                            str_val(s, "reason"),
+                            status,
+                            opt_i64(s, "dedupe_task_id"),
+                            str_val(s, "dedupe_note"),
+                            i64_val(s, "created_at"),
+                            i64_val(s, "updated_at"),
+                        ],
+                    )
+                    .map_err(|e| format!("suggestion insert: {e}"))?;
+                summary.suggestions += n;
+            }
+        }
+
+        // ── Clases ───────────────────────────────────────────────────────────
+        if let Some(classes) = v.get("classes").and_then(|c| c.as_array()) {
+            for c in classes {
+                let title = str_val(c, "title");
+                if title.trim().is_empty() {
+                    continue;
+                }
+                let n = tx
+                    .execute(
+                        "INSERT OR IGNORE INTO classes
+                         (id, title, day_of_week, start_min, end_min,
+                          start_date, end_date, created_at, updated_at)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                        rusqlite::params![
+                            opt_i64(c, "id"),
+                            title,
+                            i64_val(c, "day_of_week").clamp(0, 6),
+                            i64_val(c, "start_min").clamp(0, 1439),
+                            i64_val(c, "end_min").clamp(1, 1440),
+                            i64_val(c, "start_date"),
+                            i64_val(c, "end_date"),
+                            i64_val(c, "created_at"),
+                            i64_val(c, "updated_at"),
+                        ],
+                    )
+                    .map_err(|e| format!("class insert: {e}"))?;
+                summary.classes += n;
+            }
+        }
+
+        // ── Sesiones de estudio ───────────────────────────────────────────────
+        if let Some(sessions) = v.get("study_sessions").and_then(|s| s.as_array()) {
+            for s in sessions {
+                let title = str_val(s, "title");
+                if title.trim().is_empty() {
+                    continue;
+                }
+                let start_at = i64_val(s, "start_at");
+                let end_at = i64_val(s, "end_at");
+                if end_at <= start_at {
+                    continue; // sesión inválida: fin <= inicio
+                }
+                let n = tx
+                    .execute(
+                        "INSERT OR IGNORE INTO study_sessions
+                         (id, title, start_at, end_at, task_id, notes,
+                          created_at, updated_at)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                        rusqlite::params![
+                            opt_i64(s, "id"),
+                            title,
+                            start_at,
+                            end_at,
+                            opt_i64(s, "task_id"),
+                            str_val(s, "notes"),
+                            i64_val(s, "created_at"),
+                            i64_val(s, "updated_at"),
+                        ],
+                    )
+                    .map_err(|e| format!("study_session insert: {e}"))?;
+                summary.study_sessions += n;
+            }
+        }
+
+        // ── Remitentes de confianza ───────────────────────────────────────────
+        if let Some(senders) = v.get("trusted_senders").and_then(|s| s.as_array()) {
+            for s in senders {
+                let sender = s.as_str().unwrap_or("").trim().to_string();
+                if sender.is_empty() {
+                    continue;
+                }
+                let n = tx
+                    .execute(
+                        "INSERT OR IGNORE INTO trusted_senders (sender, added_at)
+                         VALUES (?1, ?2)",
+                        rusqlite::params![sender, now_ms()],
+                    )
+                    .map_err(|e| format!("trusted_sender insert: {e}"))?;
+                summary.trusted_senders += n;
+            }
+        }
+
+        // ── Settings (solo whitelist) ─────────────────────────────────────────
+        if let Some(settings) = v.get("settings").and_then(|s| s.as_array()) {
+            for entry in settings {
+                // El export guarda settings como [[key, value], ...]
+                let (key, value) = if let Some(arr) = entry.as_array() {
+                    let k = arr.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let val = arr.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    (k, val)
+                } else if let Some(obj) = entry.as_object() {
+                    let k = obj.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let val = obj.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    (k, val)
+                } else {
+                    continue;
+                };
+                if key.is_empty() {
+                    continue;
+                }
+                // Solo restauramos claves de la whitelist
+                if !EXPORTABLE_SETTINGS.iter().any(|p| key.starts_with(p)) {
+                    continue;
+                }
+                let n = tx
+                    .execute(
+                        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                        rusqlite::params![key, value],
+                    )
+                    .map_err(|e| format!("setting insert: {e}"))?;
+                summary.settings += n;
+            }
+        }
+
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(summary)
     }
 
     /// Borra TODOS los datos del usuario: tareas, sugerencias, propuestas,
@@ -2898,4 +3168,31 @@ mod tests {
         );
         let _ = t;
     }
+
+    #[test]
+    fn import_data_roundtrip_and_idempotent() {
+        let db1 = Db::open_memory_clean_pub().unwrap();
+        let now = now_ms();
+        db1.create("Tarea Importable", "uni", "alta", now, now + 3_600_000, false)
+            .unwrap();
+        db1.settings_set("ui.theme", "dark").unwrap();
+        let exported = db1.export_data().unwrap();
+        let json_str = serde_json::to_string(&exported).unwrap();
+
+        // Importar en una BD vacía
+        let db2 = Db::open_memory_clean_pub().unwrap();
+        let summary = db2.import_data(&json_str).unwrap();
+        assert_eq!(summary.tasks, 1);
+        assert_eq!(summary.settings, 1);
+        let tasks = db2.list().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Tarea Importable");
+        assert_eq!(db2.settings_get("ui.theme").unwrap().as_deref(), Some("dark"));
+
+        // Importar de nuevo: debe ser idempotente (0 tareas nuevas insertadas)
+        let summary2 = db2.import_data(&json_str).unwrap();
+        assert_eq!(summary2.tasks, 0);
+        assert_eq!(db2.list().unwrap().len(), 1);
+    }
 }
+

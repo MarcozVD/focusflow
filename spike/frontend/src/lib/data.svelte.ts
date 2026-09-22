@@ -1805,6 +1805,47 @@ export async function exportData() {
   }
 }
 
+export interface ImportSummary {
+  tasks: number;
+  suggestions: number;
+  classes: number;
+  study_sessions: number;
+  trusted_senders: number;
+  settings: number;
+}
+
+/**
+ * Abre el selector de archivos nativo, lee el JSON elegido e importa los datos
+ * mediante el comando `data_import`. Devuelve `ImportSummary` si tuvo éxito o
+ * lanza un error con el mensaje del backend.
+ */
+export function importData(): Promise<ImportSummary> {
+  return new Promise((resolve, reject) => {
+    if (!inTauri()) {
+      reject(new Error("Solo disponible en la app de escritorio"));
+      return;
+    }
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        reject(new Error("No se seleccionó ningún archivo"));
+        return;
+      }
+      try {
+        const json = await file.text();
+        const summary = await invoke<ImportSummary>("data_import", { json });
+        resolve(summary);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    input.click();
+  });
+}
+
 /** Borra todos los datos (DB, log y credenciales del sistema). Irreversible. */
 export async function wipeData() {
   if (!inTauri()) return;

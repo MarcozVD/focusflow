@@ -30,6 +30,8 @@
     signInWithGoogle,
     signOutGoogle,
     exportData,
+    importData,
+    type ImportSummary,
     wipeData,
   } from "./data.svelte";
 
@@ -67,34 +69,43 @@
 
   let exporting = $state(false);
   let exportMsg = $state("");
+  let importing = $state(false);
+  let importMsg = $state("");
+  let importOk = $state(false);
   let wiping = $state(false);
   let confirmWipe = $state(false);
 
-  // ── Módulo opcional "Reportar errores" (backend: report.rs) ──
-  let repDesc = $state("");
-  let repSending = $state(false);
-  let repMsg = $state("");
-  let repOk = $state(false);
-  async function sendReport() {
-    repSending = true;
-    repMsg = "";
-    try {
-      repMsg = await invoke<string>("report_send", { description: repDesc });
-      repOk = true;
-      repDesc = "";
-    } catch (e) {
-      repMsg = String(e);
-      repOk = false;
-    } finally {
-      repSending = false;
-    }
-  }
 
   async function doExport() {
     exporting = true;
     const ok = await exportData();
     exportMsg = ok ? "Exportación descargada (sin claves ni contraseñas)." : "No se pudo exportar.";
     exporting = false;
+  }
+  async function doImport() {
+    importing = true;
+    importMsg = "";
+    importOk = false;
+    try {
+      const s = await importData();
+      const parts: string[] = [];
+      if (s.tasks > 0) parts.push(`${s.tasks} tareas`);
+      if (s.classes > 0) parts.push(`${s.classes} clases`);
+      if (s.study_sessions > 0) parts.push(`${s.study_sessions} sesiones`);
+      if (s.suggestions > 0) parts.push(`${s.suggestions} sugerencias`);
+      if (s.trusted_senders > 0) parts.push(`${s.trusted_senders} remitentes`);
+      if (s.settings > 0) parts.push(`${s.settings} ajustes`);
+      importMsg =
+        parts.length > 0
+          ? `Importados: ${parts.join(", ")}.`
+          : "Nada nuevo que importar (todos los registros ya existían).";
+      importOk = true;
+    } catch (e) {
+      importMsg = String(e);
+      importOk = false;
+    } finally {
+      importing = false;
+    }
   }
   async function doWipe() {
     confirmWipe = true;
@@ -751,27 +762,6 @@
     </details>
   </section>
 
-  <section>
-    <h2>Reportar un error</h2>
-    <p class="hint">
-      Envía un correo al desarrollador con tu descripción y los últimos errores del log,
-      usando la cuenta de correo que configuraste arriba. Sin datos personales: solo el
-      mensaje que escribas y líneas técnicas del registro.
-    </p>
-    <textarea
-      bind:value={repDesc}
-      placeholder="¿Qué estabas haciendo cuando falló? ¿Qué esperabas que pasara?"
-      rows="4"
-    ></textarea>
-    <div class="row">
-      <button class="btn primary" onclick={sendReport} disabled={repSending}>
-        {repSending ? "Enviando…" : "Enviar reporte"}
-      </button>
-    </div>
-    {#if repMsg}
-      <p class="test {repOk ? 'ok' : 'err'}">{repMsg}</p>
-    {/if}
-  </section>
 
   <section>
     <h2>Privacidad y datos</h2>
@@ -785,12 +775,18 @@
       <button class="btn" onclick={doExport} disabled={exporting}>
         {exporting ? "Exportando…" : "Exportar mis datos (JSON)"}
       </button>
+      <button class="btn" onclick={doImport} disabled={importing}>
+        {importing ? "Importando…" : "Importar datos (JSON)"}
+      </button>
       <button class="btn danger" onclick={doWipe} disabled={wiping}>
         {wiping ? "Borrando…" : "Borrar todos mis datos"}
       </button>
     </div>
     {#if exportMsg}
       <p class="hint">{exportMsg}</p>
+    {/if}
+    {#if importMsg}
+      <p class="test {importOk ? 'ok' : 'err'}">{importMsg}</p>
     {/if}
     {#if confirmWipe}
       <div class="errbox">

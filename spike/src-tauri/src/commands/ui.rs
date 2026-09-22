@@ -1,5 +1,4 @@
-//! Dominio UI/AJUSTES: generales, notificaciones, preferencias visuales,
-//! onboarding, datos (export/borrado), reporte de errores y navegación
+//! onboarding, datos (export/import/borrado) y navegación
 //! abierta desde el widget (open_task/open_study/open_assistant/website).
 
 use serde::Serialize;
@@ -7,7 +6,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::store::{lock_recover, Db};
-use crate::{append_log, auth, report, sync};
+use crate::{append_log, sync};
 
 use super::with_db;
 
@@ -306,6 +305,24 @@ pub fn data_export(state: State<'_, Mutex<Db>>) -> Result<String, String> {
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
 
+/// Importa datos desde un JSON exportado previamente. No borra datos
+/// existentes: usa INSERT OR IGNORE por id (idempotente). Devuelve un
+/// resumen con los conteos de registros insertados en cada tabla.
+#[tauri::command]
+pub fn data_import(
+    app: AppHandle,
+    state: State<'_, Mutex<Db>>,
+    json: String,
+) -> Result<crate::store::ImportSummary, String> {
+    let summary = with_db(&state, |db| db.import_data(&json))?;
+    let _ = app.emit("tasks:changed", ());
+    let _ = app.emit("suggestions:changed", ());
+    let _ = app.emit("classes:changed", ());
+    let _ = app.emit("study:changed", ());
+    append_log(&app, "data_import done");
+    Ok(summary)
+}
+
 /// Borra TODO: datos en DB y log local. Destructivo e irreversible.
 /// Los secretos ya no viven en Credential Manager (ver CAMBIO 1); el logout
 /// de Google se hace con `auth_google_sign_out` (borra tokens de la DB).
@@ -333,26 +350,6 @@ pub fn data_wipe(
     Ok(())
 }
 
-// ---------------- reporte de errores (módulo opcional) ----------------
-
-/// MÓDULO OPCIONAL de reporte de errores (ver report.rs): envía un correo con
-/// la descripción y los últimos errores del log usando la cuenta configurada.
-#[tauri::command]
-pub fn report_send(
-    app: AppHandle,
-    state: State<'_, Mutex<Db>>,
-    description: String,
-) -> Result<String, String> {
-    let (cfg, token) = {
-        let db = lock_recover(&state);
-        let cfg = sync::load_email_config(&db);
-        let token = auth::access_token(&db)?;
-        (cfg, token)
-    };
-    let r = report::send_report(&cfg, &token, &description);
-    append_log(&app, &format!("report_send ok={}", r.is_ok()));
-    r
-}
 
 // ---------------- navegación abierta desde el widget ----------------
 

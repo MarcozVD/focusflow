@@ -26,7 +26,6 @@ pub mod engine;
 pub mod notify;
 pub mod planning;
 pub mod reminders;
-pub mod report; // MÓDULO OPCIONAL de reporte de errores — ver cabecera de report.rs para retirarlo
 pub mod store;
 pub mod sync;
 #[cfg(windows)]
@@ -242,6 +241,7 @@ macro_rules! for_each_command {
             ui_prefs_get: commands::ui::ui_prefs_get,
             ui_prefs_set: commands::ui::ui_prefs_set,
             data_export: commands::ui::data_export,
+            data_import: commands::ui::data_import,
             data_wipe: commands::ui::data_wipe,
             onboarding_status: commands::ui::onboarding_status,
             onboarding_complete: commands::ui::onboarding_complete,
@@ -250,7 +250,6 @@ macro_rules! for_each_command {
             open_study: commands::ui::open_study,
             open_assistant: commands::ui::open_assistant,
             open_website: commands::ui::open_website,
-            report_send: commands::ui::report_send,
         }
     };
 }
