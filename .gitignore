@@ -55,7 +55,7 @@ landing/
 # ---------- graphify (output generado) ----------
 graphify-out/
 opencode.jsonc
-
+.playwright-cli
 *.bat
 *.png
 # Binarios compilados / payloads MSIX (contienen secretos embebidos al compilar)
