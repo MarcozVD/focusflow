@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use chrono::TimeZone;
@@ -276,10 +277,28 @@ pub fn accept_suggestion(db: &Db, id: i64) -> Result<Vec<crate::store::TaskRow>,
 /// elimina TODAS (un rango multi-día dejó inicio + "(entrega)": borrar solo
 /// result_task_id dejaba la entrega huérfana y re-aceptar la duplicaba — A1).
 pub fn revert_suggestion(db: &Db, id: i64) -> Result<(), String> {
-    let _s = db
+    let s = db
         .get_suggestion(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sugerencia no encontrada".to_string())?;
+    // validación de estado en backend (no solo en la UI): una fusión
+    // modificó una tarea existente sin guardar su estado previo — revertirla
+    // no deshacía nada y re-aceptarla duplicaba la tarea. Una pendiente no
+    // tiene nada que revertir.
+    match s.status.as_str() {
+        "accepted" | "auto_approved" | "rejected" => {}
+        "merged" => {
+            return Err(
+                "una sugerencia fusionada no se puede revertir: edita la tarea directamente"
+                    .into(),
+            )
+        }
+        other => {
+            return Err(format!(
+                "no hay nada que revertir (estado: {other})"
+            ))
+        }
+    }
     // todo el revert va en una transacción (bug L2): si el cambio de estado
     // fallaba tras borrar la tarea, la sugerencia quedaba "accepted"
     // apuntando a una tarea inexistente — ni aceptable ni reversible
@@ -350,6 +369,13 @@ fn analyze_email(
                 retry_after.map(|s| format!(" {s}")).unwrap_or_default()
             ))
         }
+        // IA no configurada o red caída: NO es culpa del correo → aborta sin
+        // contar como fallo del correo (ver `counts_as_mail_fail`)
+        // 4xx de la IA (salvo 401/403/408/429) = el PROPIO correo provoca un
+        // rechazo determinista (moderación, request inválida, 413): cuenta
+        // como fallo del correo para poder saltarlo tras MAX_SYNC_RETRIES
+        // en vez de bloquear el buzón entero para siempre.
+        Err(AiError::Http(e)) if is_per_request_4xx(&e) => Err(format!("{IA_FAIL_MAIL} {e}")),
         Err(AiError::Http(e)) | Err(AiError::NotConfigured(e)) => Err(format!("ia_fail {e}")),
         Err(AiError::BadResponse(e)) if e.contains("intención inválida") => {
             // Permanente: la IA produjo intents que nunca pasarán la
@@ -360,7 +386,8 @@ fn analyze_email(
             crate::append_log(app, &format!("email_intent_invalid uid={} {e}", raw.uid));
             Ok(Vec::new())
         }
-        Err(AiError::BadResponse(e)) => Err(format!("ia_fail {e}")),
+        // respuesta mal formada para ESTE correo: cuenta como fallo del correo
+        Err(AiError::BadResponse(e)) => Err(format!("{IA_FAIL_MAIL} {e}")),
         Err(AiError::InvalidJson(e)) => {
             crate::append_log(
                 app,
@@ -397,27 +424,80 @@ fn analyze_email(
 /// Fase 3 (DB, lock breve): inserta las sugerencias y marca el correo como
 /// revisado. El visto se registra AUNQUE no haya intents: el correo ya se
 /// analizó y no debe volver a la IA (con sugerencias o sin ellas).
+///
+/// Visto + sugerencias van en UNA transacción: antes, si fallaba un insert a
+/// mitad, el correo quedaba visto (o con sugerencias parciales, que el
+/// dedupe de `prepare_email` también trata como visto) y el resto de
+/// compromisos se perdía. La auto-aprobación va DESPUÉS del commit porque
+/// `accept_suggestion` abre su propia transacción (no anidables); si falla,
+/// la sugerencia vuelve a pending como antes.
 fn commit_email(
     app: &AppHandle,
     db: &Db,
     raw: &RawEmail,
     intents: &[crate::ai::intent::Intent],
 ) -> Result<usize, String> {
-    db.email_mark_seen(&raw.message_id)
-        .map_err(|e| e.to_string())?;
-    let mut count = 0;
-    for it in intents {
-        count += insert_intent_suggestion(app, db, raw, it)?;
+    db.tx_begin().map_err(|e| e.to_string())?;
+    let inserted = (|| -> Result<Vec<(i64, bool)>, String> {
+        db.email_mark_seen(&raw.message_id)
+            .map_err(|e| e.to_string())?;
+        intents
+            .iter()
+            .map(|it| insert_intent_suggestion(db, raw, it))
+            .collect()
+    })();
+    let inserted = match inserted {
+        Ok(v) => {
+            db.tx_commit().map_err(|e| e.to_string())?;
+            v
+        }
+        Err(e) => {
+            let _ = db.tx_rollback();
+            return Err(e);
+        }
+    };
+    for (id, auto) in &inserted {
+        if *auto {
+            auto_approve(app, db, raw, *id);
+        }
     }
-    Ok(count)
+    Ok(inserted.len())
 }
 
+/// Dominio del remitente para logs (sin la dirección completa: dato personal).
+fn sender_domain(sender: &str) -> String {
+    let addr = email::sender_email(sender);
+    addr.split('@').nth(1).unwrap_or("?").to_string()
+}
+
+fn auto_approve(app: &AppHandle, db: &Db, raw: &RawEmail, id: i64) {
+    match accept_suggestion(db, id) {
+        Ok(_) => crate::append_log(
+            app,
+            &format!(
+                "email_auto_approved uid={} dominio={} sugerencia={id}",
+                raw.uid,
+                sender_domain(&raw.sender)
+            ),
+        ),
+        Err(e) => {
+            // sin rollback, la bandeja muestra "Auto-aprobada" SIN tarea
+            // creada y sin botón de acción (settled) — el compromiso se
+            // pierde silenciosamente. Devolverla a pending la hace
+            // aceptable/rechazable por el usuario (bug M5).
+            crate::append_log(app, &format!("email_auto_approve_fail: {e}"));
+            let _ = db.set_suggestion_status(id, "pending");
+        }
+    }
+}
+
+/// Inserta la sugerencia de un intent. Devuelve `(id, auto_aprobar)`; la
+/// aceptación automática la hace el llamador tras cerrar la transacción.
 fn insert_intent_suggestion(
-    app: &AppHandle,
     db: &Db,
     raw: &RawEmail,
     it: &crate::ai::intent::Intent,
-) -> Result<usize, String> {
+) -> Result<(i64, bool), String> {
     use crate::ai::intent::IntentType;
 
     let kind = ai::email_intent::suggestion_kind(&it.intent_type);
@@ -498,27 +578,7 @@ fn insert_intent_suggestion(
             status,
         )
         .map_err(|e| e.to_string())?;
-
-    if status == "auto_approved" {
-        match accept_suggestion(db, id) {
-            Ok(_) => crate::append_log(
-                app,
-                &format!(
-                    "email_auto_approved uid={} sender={} kind={kind}",
-                    raw.uid, raw.sender
-                ),
-            ),
-            Err(e) => {
-                // sin rollback, la bandeja muestra "Auto-aprobada" SIN tarea
-                // creada y sin botón de acción (settled) — el compromiso se
-                // pierde silenciosamente. Devolverla a pending la hace
-                // aceptable/rechazable por el usuario (bug M5).
-                crate::append_log(app, &format!("email_auto_approve_fail: {e}"));
-                let _ = db.set_suggestion_status(id, "pending");
-            }
-        }
-    }
-    Ok(1)
+    Ok((id, status == "auto_approved"))
 }
 
 fn priority_str(p: crate::ai::intent::Priority) -> String {
@@ -529,8 +589,87 @@ fn priority_str(p: crate::ai::intent::Priority) -> String {
     }
 }
 
+/// Error estable cuando ya hay un sync corriendo (el scheduler lo trata como
+/// "skip", no como fallo).
+pub const SYNC_BUSY: &str = "sincronización en curso: espera a que termine";
+
+/// Prefijo de un fallo de IA atribuible al CORREO (respuesta mal formada
+/// para ese contenido). Empieza por `ia_fail` para que el frontend y
+/// `retry_delay_hint` lo sigan tratando como transitorio.
+const IA_FAIL_MAIL: &str = "ia_fail_mail";
+
+/// ¿Este error cuenta para el contador de reintentos DEL CORREO
+/// (`register_fail` → saltarlo tras MAX_SYNC_RETRIES)? Solo errores
+/// deterministas del contenido. 429, IA no configurada o red caída no son
+/// culpa del correo: contarlos hacía que tras 3 syncs sin IA se saltara (y
+/// perdiera) un correo válido.
+fn counts_as_mail_fail(err: &str) -> bool {
+    err.starts_with(IA_FAIL_MAIL)
+}
+
+/// `AiError::Http` empieza por el status HTTP ("400 Bad Request …"). 4xx
+/// excepto credenciales (401/403), timeout (408) y cuota (429) → el error
+/// depende de la petición (del correo), no del proveedor ni de la red.
+fn is_per_request_4xx(http_err: &str) -> bool {
+    match http_err.split_whitespace().next().and_then(|c| c.parse::<u16>().ok()) {
+        Some(code) => (400..500).contains(&code) && !matches!(code, 401 | 403 | 408 | 429),
+        None => false,
+    }
+}
+
+static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Guard de exclusión: syncs solapados (arranque + manual + scheduler)
+/// duplicaban sugerencias y quemaban cuota de IA.
+struct SyncGuard;
+
+impl SyncGuard {
+    fn acquire() -> Option<SyncGuard> {
+        SYNC_RUNNING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| SyncGuard)
+    }
+}
+
+impl Drop for SyncGuard {
+    fn drop(&mut self) {
+        SYNC_RUNNING.store(false, Ordering::Release);
+    }
+}
+
 /// Ejecuta una sincronización completa. Comandos y scheduler la llaman.
+/// Cualquier `Err` (salvo "ya en curso") emite `email:sync-error` para que
+/// la UI no quede atascada en "Comprobando…"; `invalid_grant` emite además
+/// `auth:expired`.
 pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
+    let Some(_guard) = SyncGuard::acquire() else {
+        return Err(SYNC_BUSY.into());
+    };
+    let res = run_sync_locked(app);
+    if let Err(e) = &res {
+        if crate::auth::is_session_expired(e) {
+            let _ = app.emit("auth:expired", e);
+        }
+        // precondiciones (email desactivado / sin configurar / sin sesión):
+        // el sync ni empezó (no hubo `sync-progress`, la UI no quedó en
+        // "Comprobando…"). Emitirlas desde el sync automático mostraba un
+        // error en Ajustes en CADA arranque a usuarios sin email; el sync
+        // manual ya recibe el Err por el `invoke`.
+        if !is_precondition_error(e) {
+            let _ = app.emit("email:sync-error", e);
+        }
+    }
+    res
+}
+
+fn is_precondition_error(e: &str) -> bool {
+    e.starts_with("email deshabilitado")
+        || e.starts_with("email no configurado")
+        || e.contains("no hay sesión de Google")
+}
+
+fn run_sync_locked(app: &AppHandle) -> Result<SyncSummary, String> {
     let started = email::now_ms();
     let mut summary = SyncSummary {
         started_at: started,
@@ -566,27 +705,8 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
     let provider = ai::provider_from_config(&ai_cfg).map_err(|e| e.to_string())?;
     // token OAuth2 de Google (CAMBIO 2): se lee la sesión con lock breve y el
     // refresco (red) ocurre FUERA del lock para no congelar otros comandos.
-    let session = with_db(app, |db| db.auth_load().ok().flatten());
-    let oauth_token = {
-        let Some(mut s) = session else {
-            return Err("no hay sesión de Google: inicia sesión para sincronizar Gmail".into());
-        };
-        if !s.access_token.is_empty() && s.expires_at > crate::store::now_ms() {
-            s.access_token
-        } else if !s.refresh_token.is_empty() {
-            let (new_access, expires_in) = crate::auth::refresh(&s.refresh_token)?;
-            s.access_token = new_access;
-            s.expires_at = crate::store::now_ms() + (expires_in as i64) * 1000;
-            with_db(app, |db| {
-                let _ = db.auth_save(&s);
-            });
-            s.access_token
-        } else {
-            return Err(
-                "la sesión de Google no tiene token válido; cierra sesión y vuelve a entrar".into(),
-            );
-        }
-    };
+    // Guardado condicionado: no resucita la sesión si se cerró entretanto.
+    let oauth_token = crate::auth::access_token_unlocked(&app.state::<Mutex<Db>>())?;
     let ai_configured = !ai_cfg.endpoint.is_empty()
         && !ai_cfg.model.is_empty()
         && ai_cfg.provider_name() != "local";
@@ -632,7 +752,12 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
         });
 
         match email::fetch_mailbox(&mut session, mailbox, &checkpoint, since_days) {
-            Ok((emails, mut new_cp)) => {
+            Ok((emails, mut new_cp, parse_failures)) => {
+                // MIME/base64 roto: no se puede reintentar con éxito; se da
+                // por procesado pero queda en el log (sin contenido)
+                for id in &parse_failures {
+                    crate::append_log(app, &format!("email_parse_fail {source} id={id}"));
+                }
                 let mut mb = crate::sync::MailboxSummary {
                     mailbox: mailbox.clone(),
                     found: 0,
@@ -650,11 +775,13 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                         (emails, Vec::new())
                     };
                 for e in &excluded {
+                    // sin remitente completo ni asunto (datos personales)
                     crate::append_log(
                         app,
                         &format!(
-                            "email_filtered uid={} sender={} asunto={}",
-                            e.uid, e.sender, e.subject
+                            "email_filtered uid={} dominio={}",
+                            e.uid,
+                            sender_domain(&e.sender)
                         ),
                     );
                 }
@@ -700,9 +827,11 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncSummary, String> {
                             // seguidas (p. ej. proveedor saturado por horas),
                             // se salta para no congelar el sync entero; un
                             // rescan manual puede recuperarlo después.
-                            let transient = e.starts_with("ia_429") || e.starts_with("ia_fail");
+                            // solo fallos deterministas del correo cuentan;
+                            // 429 / IA sin configurar / red abortan sin
+                            // tocar fail_count (el correo no tiene la culpa)
                             let mut cp2 = checkpoint.clone();
-                            if transient {
+                            if counts_as_mail_fail(&e) {
                                 let (next, skip) =
                                     crate::email::register_fail(&checkpoint, raw.uid);
                                 cp2 = next;
@@ -841,6 +970,7 @@ pub fn scheduler_loop(app: AppHandle) {
     {
         let h = app.clone();
         tauri::async_runtime::spawn(async move {
+            // los Err ya emiten `email:sync-error` dentro de run_sync
             let _ = tauri::async_runtime::spawn_blocking(move || match run_sync(&h) {
                 Ok(s) => crate::append_log(
                     &h,
@@ -872,14 +1002,25 @@ pub fn scheduler_loop(app: AppHandle) {
         }
     });
     tauri::async_runtime::spawn(async move {
+        // Duerme en pasos cortos y relee intervalo + último sync real: un
+        // intervalo nuevo en Ajustes aplica ya (antes esperaba al final de la
+        // espera anterior, hasta 8 h) y la hora coincide con el
+        // `next_sync_at` que muestra la UI (último sync + intervalo).
+        let mut last_attempt = email::now_ms(); // el sync de arranque
         loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             let h = app.clone();
-            let interval_ms = with_db(&h, interval_hours) * 3_600_000;
-            if interval_ms == 0 {
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let (interval_ms, last_sync) = with_db(&h, |db| {
+                let last = db
+                    .sync_history_last(1)
+                    .ok()
+                    .and_then(|v| v.first().map(|r| r.started_at));
+                (interval_hours(db) as i64 * 3_600_000, last)
+            });
+            if !scheduler_due(email::now_ms(), interval_ms, last_sync, last_attempt) {
                 continue;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+            last_attempt = email::now_ms();
             let h2 = app.clone();
             let outcome = tauri::async_runtime::spawn_blocking(move || match run_sync(&h2) {
                 Ok(s) => {
@@ -887,6 +1028,13 @@ pub fn scheduler_loop(app: AppHandle) {
                         &h2,
                         &format!("scheduler_sync_ok suggestions={}", s.total_suggestions),
                     );
+                    // error de un buzón (429/5xx/red de Gmail) dentro de un
+                    // sync "ok": también programa el reintento
+                    s.error
+                }
+                // otro sync (manual/arranque) ya en curso: skip, no fallo
+                Err(e) if e == SYNC_BUSY => {
+                    crate::append_log(&h2, "scheduler_sync_skip: sincronización en curso");
                     None
                 }
                 Err(e) => Some(e),
@@ -917,11 +1065,29 @@ pub fn scheduler_loop(app: AppHandle) {
     });
 }
 
+/// ¿Toca sync programado? `interval_ms == 0` = desactivado. Se cuenta desde
+/// el último sync registrado o el último intento del scheduler (lo más
+/// reciente: un sync que falla antes de escribir historial no debe
+/// reintentarse cada minuto).
+fn scheduler_due(now: i64, interval_ms: i64, last_sync: Option<i64>, last_attempt: i64) -> bool {
+    if interval_ms <= 0 {
+        return false;
+    }
+    let base = last_sync.unwrap_or(0).max(last_attempt);
+    now >= base + interval_ms
+}
+
 /// Hint de reintento para errores transitorios de sync (segundos de espera).
 /// `None` = fallo permanente (configuración), no reintentar.
+///
+/// Alineado con los mensajes REALES: `ia_429 [s] …` / `ia_fail…` (IA),
+/// `short_gmail_error` de email.rs (429 "Límite de consultas a Gmail…
+/// ~N s", 5xx/otros "…se reintentará automáticamente"), errores de red
+/// `gmail api: …` y `conexión fallida: …`. Los errores de buzón llegan como
+/// `"{mailbox}: {mensaje}"`, por eso se busca por contenido.
 pub fn retry_delay_hint(err: &str) -> Option<u64> {
     const DEFAULT_RETRY: u64 = 300;
-    if let Some(rest) = err.strip_prefix("ia_429 ") {
+    if let Some(rest) = err.strip_prefix("ia_429") {
         // `ia_429 [segundos] detalle`
         let secs = rest
             .split_whitespace()
@@ -929,11 +1095,25 @@ pub fn retry_delay_hint(err: &str) -> Option<u64> {
             .and_then(|t| t.parse::<u64>().ok());
         return Some(secs.unwrap_or(DEFAULT_RETRY).clamp(30, 3600));
     }
-    if err.starts_with("ia_fail") || err.contains("gmail api 4") || err.contains("conexión fallida")
+    if err.contains("Límite de consultas a Gmail") {
+        // `… Reintento automático en ~{s} s.` (Retry-After de Gmail)
+        let secs = err
+            .split('~')
+            .nth(1)
+            .and_then(|r| r.split_whitespace().next())
+            .and_then(|t| t.parse::<u64>().ok());
+        return Some(secs.unwrap_or(DEFAULT_RETRY).clamp(30, 3600));
+    }
+    if err.starts_with("ia_fail")
+        || err.contains("gmail api:")
+        || err.contains("gmail api body:")
+        || err.contains("conexión fallida")
+        || err.contains("se reintentará")
     {
         return Some(DEFAULT_RETRY);
     }
-    // fallo de configuración (email deshabilitado, sin sesión de Google, …)
+    // fallo de configuración (email deshabilitado, sin sesión de Google,
+    // sesión expirada, sin permisos, …)
     None
 }
 
@@ -952,14 +1132,43 @@ mod tests {
 
     #[test]
     fn retry_hint_transitorios_y_permanentes() {
+        // Corregido (auditoría lote A #9): el test usaba cadenas irreales
+        // ("gmail api 429 Too Many Requests") que el cliente ya no produce;
+        // ahora se prueban los mensajes REALES de short_gmail_error.
+        use reqwest::StatusCode;
+        let real = |code: StatusCode, retry: Option<u64>| {
+            format!(
+                "INBOX: {}",
+                crate::email::gmail::GmailClient::short_gmail_error_for_test(code, "", retry)
+            )
+        };
         assert_eq!(retry_delay_hint("ia_fail timeout"), Some(300));
+        assert_eq!(retry_delay_hint("ia_fail_mail falta choices"), Some(300));
         assert_eq!(
-            retry_delay_hint("INBOX: gmail api 429 Too Many Requests"),
+            retry_delay_hint(&real(StatusCode::TOO_MANY_REQUESTS, Some(90))),
+            Some(90)
+        );
+        assert_eq!(
+            retry_delay_hint(&real(StatusCode::TOO_MANY_REQUESTS, None)),
+            Some(300)
+        );
+        assert_eq!(
+            retry_delay_hint(&real(StatusCode::BAD_GATEWAY, None)),
+            Some(300)
+        );
+        assert_eq!(
+            retry_delay_hint("INBOX: gmail api: error sending request"),
             Some(300)
         );
         assert_eq!(
             retry_delay_hint("conexión fallida: gmail api timeout"),
             Some(300)
+        );
+        // sin permisos / sesión caducada → no reintentar a ciegas
+        assert_eq!(retry_delay_hint(&real(StatusCode::FORBIDDEN, None)), None);
+        assert_eq!(
+            retry_delay_hint(crate::auth::SESSION_EXPIRED),
+            None
         );
         // permanentes → sin reintento
         assert_eq!(retry_delay_hint("email deshabilitado en Ajustes"), None);
@@ -967,6 +1176,50 @@ mod tests {
             retry_delay_hint("no hay sesión de Google: inicia sesión para sincronizar Gmail"),
             None
         );
+    }
+
+    #[test]
+    fn ai_4xx_per_request_counts_but_network_and_auth_do_not() {
+        assert!(is_per_request_4xx("400 Bad Request {\"error\":\"moderation\"}"));
+        assert!(is_per_request_4xx("413 Payload Too Large"));
+        assert!(!is_per_request_4xx("401 Unauthorized"));
+        assert!(!is_per_request_4xx("403 Forbidden"));
+        assert!(!is_per_request_4xx("429 Too Many Requests"));
+        assert!(!is_per_request_4xx("503 Service Unavailable"));
+        assert!(!is_per_request_4xx("error sending request"));
+    }
+
+    #[test]
+    fn only_deterministic_mail_errors_count_towards_skip() {
+        // #3: IA sin configurar / red / 429 NO cuentan como fallo del correo
+        assert!(!counts_as_mail_fail("ia_429 60 quota"));
+        assert!(!counts_as_mail_fail("ia_fail sin clave"));
+        assert!(!counts_as_mail_fail("ia_fail error sending request"));
+        assert!(counts_as_mail_fail("ia_fail_mail falta choices[0]"));
+    }
+
+    #[test]
+    fn scheduler_due_follows_interval_changes() {
+        const H: i64 = 3_600_000;
+        let t0 = 1_000 * H;
+        // intervalo 8 h, último sync hace 2 h → no toca
+        assert!(!scheduler_due(t0, 8 * H, Some(t0 - 2 * H), t0 - 2 * H));
+        // el usuario baja el intervalo a 1 h → toca YA (sin esperar 8 h)
+        assert!(scheduler_due(t0, H, Some(t0 - 2 * H), t0 - 2 * H));
+        // desactivado
+        assert!(!scheduler_due(t0, 0, None, 0));
+        // sin historial (sync falló pronto): cuenta desde el último intento
+        assert!(!scheduler_due(t0, H, None, t0 - 10 * 60_000));
+    }
+
+    #[test]
+    fn sync_guard_is_exclusive_and_released_on_drop() {
+        // #4: un segundo sync mientras corre el primero → rechazado
+        let g = SyncGuard::acquire().expect("primer sync");
+        assert!(SyncGuard::acquire().is_none(), "sync solapado");
+        drop(g);
+        let g2 = SyncGuard::acquire().expect("liberado al terminar");
+        drop(g2);
     }
 
     #[test]

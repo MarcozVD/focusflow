@@ -186,53 +186,54 @@ pub fn matches_filters(e: &RawEmail, f: &EmailFilters) -> bool {
     true
 }
 
+/// Corta `s` a `max` CARACTERES (nunca en mitad de un carácter UTF-8).
+pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
+/// Cuerpo legible del correo. Recorre el árbol MIME completo (p. ej.
+/// multipart/mixed → multipart/alternative → text/plain): primero el primer
+/// text/plain no vacío; si no hay, el primer text/html convertido a texto.
+/// `get_body()` decodifica transfer-encoding Y charset (latin-1, etc.); el
+/// antiguo `get_body_raw` + `from_utf8_lossy` solo miraba el primer nivel y
+/// rompía acentos de correos no-UTF-8.
 fn parse_body(pm: &mailparse::ParsedMail) -> String {
-    let try_sub = |sub: &mailparse::ParsedMail| -> Option<String> {
-        let ct = sub.ctype.mimetype.as_str();
-        if ct == "text/plain" {
-            let raw = sub.get_body_raw().unwrap_or_default();
-            let txt = String::from_utf8_lossy(&raw).to_string();
-            if !txt.trim().is_empty() {
-                return Some(txt);
+    fn first_of(pm: &mailparse::ParsedMail, mime: &str) -> Option<String> {
+        if pm.subparts.is_empty() {
+            if pm.ctype.mimetype.eq_ignore_ascii_case(mime) {
+                let txt = pm.get_body().unwrap_or_else(|_| {
+                    String::from_utf8_lossy(&pm.get_body_raw().unwrap_or_default()).to_string()
+                });
+                if !txt.trim().is_empty() {
+                    return Some(txt);
+                }
             }
+            return None;
         }
-        None
-    };
-    for sub in &pm.subparts {
-        if let Some(t) = try_sub(sub) {
-            return t;
-        }
+        pm.subparts.iter().find_map(|sub| first_of(sub, mime))
     }
-    for sub in &pm.subparts {
-        let ct = sub.ctype.mimetype.as_str();
-        if ct == "text/html" {
-            let raw = sub.get_body_raw().unwrap_or_default();
-            let txt = String::from_utf8_lossy(&raw).to_string();
-            if !txt.trim().is_empty() {
-                return html_to_text(&txt);
-            }
-        }
+    if let Some(t) = first_of(pm, "text/plain") {
+        return t;
     }
-    let ct = pm.ctype.mimetype.as_str();
-    if ct == "text/plain" {
-        let raw = pm.get_body_raw().unwrap_or_default();
-        return String::from_utf8_lossy(&raw).to_string();
-    }
-    if ct == "text/html" {
-        let raw = pm.get_body_raw().unwrap_or_default();
-        return html_to_text(&String::from_utf8_lossy(&raw));
+    if let Some(h) = first_of(pm, "text/html") {
+        return html_to_text(&h);
     }
     String::new()
 }
 
 pub type ImapSession = gmail::GmailClient;
 
-/// Cliente REST de Gmail API (scope `gmail.readonly`, SENSIBLE — no
-/// restringido). Sustituye al IMAP XOAUTH2 (scope `mail.google.com`,
-/// RESTRINGIDO → verificación + CASA anual de pago). Mantiene el contrato
+/// Cliente REST de Gmail API (scope `gmail.readonly`). OJO: Google clasifica
+/// TODOS los scopes de Gmail (incluido gmail.readonly) como RESTRINGIDOS →
+/// verificación de OAuth + CASA anual de pago. No existe scope de Gmail
+/// no-restringido. Este cliente no usa IMAP/SMTP (mail.google.com, también
+/// restricted). Mantiene el contrato
 /// que usa sync.rs: `connect` → `fetch_mailbox` → `logout`.
 pub mod gmail {
-    use super::{now_ms, parse_body, RawEmail, SyncCheckpoint, MAX_BODY_CHARS, MAX_FETCH_PER_SYNC};
+    use super::{
+        now_ms, parse_body, truncate_chars, RawEmail, SyncCheckpoint, MAX_BODY_CHARS,
+        MAX_FETCH_PER_SYNC,
+    };
 
     const GMAIL_API: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -248,10 +249,22 @@ pub mod gmail {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct ListResponse {
         #[serde(default)]
         messages: Vec<MsgRef>,
+        #[serde(default)]
+        next_page_token: Option<String>,
     }
+
+    /// Ids por página de messages.list (máx. de la API: 500).
+    const LIST_PAGE_SIZE: usize = 500;
+    /// Tope de páginas por sync (5000 ids): suficiente para la ventana
+    /// since_days/checkpoint; evita bucles infinitos si la API se porta mal.
+    const MAX_LIST_PAGES: usize = 10;
+    /// Margen (s) de la ventana `after:` respecto al checkpoint.
+    const CHECKPOINT_MARGIN_SECS: u32 = 3600;
+
 
     #[derive(serde::Deserialize)]
     // Gmail API responde en camelCase (internalDate, messagesTotal,
@@ -373,7 +386,7 @@ pub mod gmail {
             mailbox: &str,
             checkpoint: &SyncCheckpoint,
             since_days: u32,
-        ) -> Result<(Vec<RawEmail>, SyncCheckpoint), String> {
+        ) -> Result<(Vec<RawEmail>, SyncCheckpoint, Vec<String>), String> {
             let mut new_checkpoint = checkpoint.clone();
 
             // consulta Gmail: bandeja + ventana temporal
@@ -391,56 +404,64 @@ pub mod gmail {
             let now_epoch = chrono::Local::now().timestamp().max(0) as u32;
 
             if checkpoint_uid > 0 {
-                // margen de 1 día: emails cuyo Date difiere de internalDate
-                let cp_date = chrono::DateTime::from_timestamp(checkpoint_uid as i64, 0)
-                    .map(|d| d.with_timezone(&chrono::Local).date_naive())
-                    .unwrap_or_else(|| chrono::Local::now().date_naive())
-                    - chrono::Duration::days(1);
-                query.push_str(&format!(" after:{}", cp_date.format("%Y/%m/%d")));
+                // `after:` en segundos epoch (Gmail lo acepta) con margen de
+                // 1 h. Antes era la FECHA del checkpoint −1 día: con la
+                // paginación completa eso listaba ~2 días de correo y cada
+                // sync descargaba en crudo cientos de mensajes ya revisados
+                // solo para descartarlos por `uid <= checkpoint`.
+                let after = checkpoint_uid.saturating_sub(CHECKPOINT_MARGIN_SECS);
+                query.push_str(&format!(" after:{after}"));
             } else if since_days > 0 {
                 let since =
                     chrono::Local::now().date_naive() - chrono::Duration::days(since_days as i64);
                 query.push_str(&format!(" after:{}", since.format("%Y/%m/%d")));
             }
 
-            let path = format!(
-                "/messages?maxResults={MAX_FETCH_PER_SYNC}&q={}",
-                urlencode(&query)
-            );
-            let text = self.get(&path)?;
-            let list: ListResponse =
-                serde_json::from_str(&text).map_err(|e| format!("list gmail: {e} ({text})"))?;
+            // Paginación completa (bug: solo se leía la 1.ª página de 50 y el
+            // checkpoint saltaba al más nuevo → correos viejos perdidos).
+            let ids = list_all_ids(|p| self.get(p), &query)?;
 
             let cutoff = chrono::Utc::now() - chrono::Duration::days(since_days as i64);
             let mut emails = Vec::new();
+            let mut parse_failures: Vec<String> = Vec::new();
             let mut max_uid: u32 = checkpoint_uid;
-
-            for m in &list.messages {
-                if m.id.is_empty() {
-                    continue;
+            // Gmail lista de más nuevo a más viejo: se procesa de VIEJO a
+            // NUEVO para que, si el tope MAX_FETCH_PER_SYNC corta el lote,
+            // el checkpoint quede en el último procesado y el siguiente sync
+            // continúe desde ahí (en vez de saltar por encima de los viejos).
+            let mut fetched_new = 0usize;
+            let mut capped = false;
+            for id in ids.iter().rev() {
+                if fetched_new >= MAX_FETCH_PER_SYNC {
+                    capped = true; // el resto lo recoge el siguiente sync
+                    break;
                 }
-                let get_path = format!("/messages/{}?format=raw", m.id);
+                let get_path = format!("/messages/{id}?format=raw");
                 let gtext = self.get(&get_path)?;
                 let g: GetResponse =
-                    serde_json::from_str(&gtext).map_err(|e| format!("get {}: {e}", m.id))?;
+                    serde_json::from_str(&gtext).map_err(|e| format!("get {id}: {e}"))?;
                 // un uid en el futuro (hash de id por fallback, reloj
                 // desalineado) no es un cursor temporal válido: se ancla a
                 // `now_epoch` para no envenenar el checkpoint (próximos syncs
                 // ciegos) ni el rollback; el dedupe real es por message_id.
-                let uid = msg_uid(&g.internal_date, &m.id);
+                let uid = msg_uid(&g.internal_date, id);
                 let uid = uid.min(now_epoch);
-                if uid > max_uid {
-                    max_uid = uid;
-                }
                 if uid <= checkpoint_uid {
                     continue; // ya cubierto por el checkpoint (o anterior a él)
                 }
+                fetched_new += 1;
+                if uid > max_uid {
+                    max_uid = uid;
+                }
 
-                let mime_bytes = match b64url_decode(&g.raw) {
-                    Some(b) => b,
-                    None => continue,
+                // MIME roto: se cuenta como procesado (no se puede reintentar
+                // con éxito) pero queda registrado, sin contenido, para el log.
+                let Some(mime_bytes) = b64url_decode(&g.raw) else {
+                    parse_failures.push(id.clone());
+                    continue;
                 };
                 let Ok(pm) = mailparse::parse_mail(&mime_bytes) else {
+                    parse_failures.push(id.clone());
                     continue;
                 };
 
@@ -462,8 +483,10 @@ pub mod gmail {
                     }
                 }
 
-                let mut body_text = parse_body(&pm);
-                body_text.truncate(MAX_BODY_CHARS);
+                // tope por CARACTERES: `String::truncate` corta por bytes y
+                // hace panic en mitad de un carácter multibyte (á, emoji) →
+                // con panic=abort la app se cerraba en bucle al arrancar.
+                let body_text = truncate_chars(&parse_body(&pm), MAX_BODY_CHARS);
 
                 // hilo: In-Reply-To (padre inmediato) + References (toda la cadena)
                 let thread: Vec<String> = [header("In-Reply-To"), header("References")]
@@ -479,7 +502,7 @@ pub mod gmail {
                     message_id: {
                         let mid = header("Message-ID");
                         if mid.is_empty() {
-                            format!("gmail-{}", m.id)
+                            format!("gmail-{id}")
                         } else {
                             mid
                         }
@@ -492,9 +515,25 @@ pub mod gmail {
                 });
             }
 
-            new_checkpoint.uid = max_uid;
+            // cortado por tope: el cursor (segundos) queda 1 s antes del
+            // último procesado para no saltar correos del MISMO segundo que
+            // quedaron fuera; el re-fetch de ese segundo lo absorbe el dedupe
+            // por message_id (email_seen)
+            new_checkpoint.uid = if capped {
+                let back = max_uid.saturating_sub(1);
+                // si retroceder 1 s deja el cursor donde estaba (≥ tope de
+                // correos en el mismo segundo) el sync reprocesaría el mismo
+                // lote para siempre: se avanza al segundo completo
+                if back <= checkpoint_uid {
+                    max_uid
+                } else {
+                    back
+                }
+            } else {
+                max_uid
+            };
             new_checkpoint.last_reviewed_date = now_ms();
-            Ok((emails, new_checkpoint))
+            Ok((emails, new_checkpoint, parse_failures))
         }
 
         pub fn logout(&self) {}
@@ -517,6 +556,36 @@ pub mod gmail {
     #[cfg(test)]
     pub fn guard_future_uid_for_test(uid: u32) -> u32 {
         guard_future_uid(uid)
+    }
+
+    /// Lista TODOS los ids de la consulta siguiendo `nextPageToken` (tope
+    /// MAX_LIST_PAGES páginas por seguridad). `get` = GET relativo a la API;
+    /// inyectable para testear sin red.
+    pub(crate) fn list_all_ids(
+        mut get: impl FnMut(&str) -> Result<String, String>,
+        query: &str,
+    ) -> Result<Vec<String>, String> {
+        let mut ids: Vec<String> = Vec::new();
+        let mut page_token: Option<String> = None;
+        for _ in 0..MAX_LIST_PAGES {
+            let mut path = format!(
+                "/messages?maxResults={LIST_PAGE_SIZE}&q={}",
+                urlencode(query)
+            );
+            if let Some(t) = &page_token {
+                path.push_str(&format!("&pageToken={}", urlencode(t)));
+            }
+            let text = get(&path)?;
+            // sin el cuerpo crudo en el error (puede ser largo/ruidoso)
+            let list: ListResponse =
+                serde_json::from_str(&text).map_err(|e| format!("list gmail: {e}"))?;
+            ids.extend(list.messages.into_iter().map(|m| m.id).filter(|id| !id.is_empty()));
+            match list.next_page_token.filter(|t| !t.is_empty()) {
+                Some(t) => page_token = Some(t),
+                None => return Ok(ids),
+            }
+        }
+        Ok(ids)
     }
 
     /// Cursor a partir de `internalDate` (ms desde época, string JSON).
@@ -596,7 +665,7 @@ pub fn fetch_mailbox(
     mailbox: &str,
     checkpoint: &SyncCheckpoint,
     since_days: u32,
-) -> Result<(Vec<RawEmail>, SyncCheckpoint), String> {
+) -> Result<(Vec<RawEmail>, SyncCheckpoint, Vec<String>), String> {
     session.fetch_mailbox(mailbox, checkpoint, since_days)
 }
 
@@ -743,6 +812,86 @@ mod tests {
         assert_eq!(gmail::guard_future_uid_for_test(now + 3_600), now + 3_600);
         // más de un día en el futuro → reset a la ventana since_days
         assert_eq!(gmail::guard_future_uid_for_test(now + 2 * 86_400), 0);
+    }
+
+    #[test]
+    fn truncate_chars_never_splits_multibyte() {
+        // regresión #1: `String::truncate(8000)` sobre 'á' (2 bytes) caía en
+        // mitad de un carácter → panic (abort en release)
+        let body = "á".repeat(MAX_BODY_CHARS + 10);
+        let t = truncate_chars(&body, MAX_BODY_CHARS);
+        assert_eq!(t.chars().count(), MAX_BODY_CHARS);
+        let emoji = "📅".repeat(5);
+        assert_eq!(truncate_chars(&emoji, 3), "📅📅📅");
+        assert_eq!(truncate_chars("corto", 100), "corto");
+    }
+
+    #[test]
+    fn parse_body_walks_nested_mime_and_decodes_charset() {
+        // multipart/mixed → multipart/alternative → text/plain (latin-1 QP)
+        let raw = concat!(
+            "From: a@x.com\r\n",
+            "Subject: t\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: multipart/mixed; boundary=\"OUT\"\r\n\r\n",
+            "--OUT\r\n",
+            "Content-Type: multipart/alternative; boundary=\"IN\"\r\n\r\n",
+            "--IN\r\n",
+            "Content-Type: text/plain; charset=iso-8859-1\r\n",
+            "Content-Transfer-Encoding: quoted-printable\r\n\r\n",
+            "Entrega el mi=E9rcoles a las 10\r\n",
+            "--IN\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n\r\n",
+            "<p>html</p>\r\n",
+            "--IN--\r\n",
+            "--OUT\r\n",
+            "Content-Type: application/pdf\r\n\r\n",
+            "xx\r\n",
+            "--OUT--\r\n"
+        );
+        let pm = mailparse::parse_mail(raw.as_bytes()).unwrap();
+        let body = parse_body(&pm);
+        assert!(body.contains("miércoles"), "charset latin-1 decodificado: {body}");
+        assert!(!body.contains("<p>"), "prefiere text/plain");
+
+        // solo html anidado → texto
+        let raw = concat!(
+            "Content-Type: multipart/mixed; boundary=\"B\"\r\n\r\n",
+            "--B\r\n",
+            "Content-Type: multipart/alternative; boundary=\"C\"\r\n\r\n",
+            "--C\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n\r\n",
+            "<p>Examen <b>viernes</b></p>\r\n",
+            "--C--\r\n",
+            "--B--\r\n"
+        );
+        let pm = mailparse::parse_mail(raw.as_bytes()).unwrap();
+        let body = parse_body(&pm);
+        assert!(body.contains("Examen") && body.contains("viernes"), "{body}");
+        assert!(!body.contains("<b>"), "{body}");
+    }
+
+    #[test]
+    fn list_all_ids_follows_next_page_token() {
+        // regresión #2: solo se leía la primera página de messages.list
+        let mut calls: Vec<String> = Vec::new();
+        let ids = gmail::list_all_ids(
+            |p| {
+                calls.push(p.to_string());
+                Ok(if p.contains("pageToken=T2") {
+                    r#"{"messages":[{"id":"c"}]}"#.to_string()
+                } else {
+                    r#"{"messages":[{"id":"a"},{"id":"b"}],"nextPageToken":"T2"}"#.to_string()
+                })
+            },
+            "in:inbox",
+        )
+        .unwrap();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+        assert_eq!(calls.len(), 2);
+        // sin mensajes → lista vacía, sin error
+        let ids = gmail::list_all_ids(|_| Ok("{}".to_string()), "q").unwrap();
+        assert!(ids.is_empty());
     }
 
     #[test]

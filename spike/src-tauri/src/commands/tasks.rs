@@ -89,6 +89,32 @@ pub struct TaskMoveResult {
     pub conflict: Option<String>,
 }
 
+/// Política de conflictos común a task_move / task_update / widget
+/// (posponer): con `calendar.conflict_check` activo, un solape con otra
+/// tarea con hora se bloquea en modo estricto (`calendar.conflict_strict`)
+/// y en modo laxo se devuelve como aviso. Los all-day no ocupan horas.
+pub(crate) fn check_conflict(
+    db: &Db,
+    id: i64,
+    start_at: i64,
+    end_at: i64,
+    all_day: bool,
+) -> Result<Option<String>, String> {
+    if all_day || !crate::setting_bool(db, "calendar.conflict_check", true) {
+        return Ok(None);
+    }
+    match db
+        .find_overlap(id, start_at, end_at)
+        .map_err(|e| e.to_string())?
+    {
+        Some((_, other)) if crate::setting_bool(db, "calendar.conflict_strict", false) => {
+            Err(format!("conflicto: se solapa con '{other}'"))
+        }
+        Some((_, other)) => Ok(Some(other)),
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
 pub fn task_move(
     app: AppHandle,
@@ -98,25 +124,13 @@ pub fn task_move(
     end_at: i64,
     all_day: Option<bool>,
 ) -> Result<TaskMoveResult, String> {
-    let mut conflict = None;
+    let conflict;
     {
         let db = lock_recover(&state);
         // validación de conflictos configurables (solapamiento) antes de guardar.
         // Por defecto el movimiento se permite y solo se avisa; si el usuario activa
         // `calendar.conflict_strict` (restricciones), el movimiento conflictivo se bloquea.
-        let check_conflicts = crate::setting_bool(&db, "calendar.conflict_check", true);
-        let strict = crate::setting_bool(&db, "calendar.conflict_strict", false);
-        if check_conflicts && all_day != Some(true) {
-            if let Some((_, other)) = db
-                .find_overlap(id, start_at, end_at)
-                .map_err(|e| e.to_string())?
-            {
-                if strict {
-                    return Err(format!("conflicto: se solapa con '{other}'"));
-                }
-                conflict = Some(other);
-            }
-        }
+        conflict = check_conflict(&db, id, start_at, end_at, all_day == Some(true))?;
         db.move_to(id, start_at, end_at, all_day)
             .map_err(|e| e.to_string())?;
     }
@@ -144,8 +158,22 @@ pub fn task_update(
     links: String,
     reminder_minutes: Option<i64>,
     all_day: bool,
-) -> Result<(), String> {
-    with_db(&state, |db| {
+) -> Result<TaskMoveResult, String> {
+    let conflict = with_db(&state, |db| -> Result<Option<String>, String> {
+        // misma política de conflictos que task_create/task_move: editar la
+        // hora desde el formulario no validaba solapes
+        // solo si cambia el horario: en modo estricto una tarea que YA se
+        // solapaba (import, correo, asistente) no se podía editar en nada,
+        // ni siquiera el título
+        let prev = db.get_task(id).map_err(|e| e.to_string())?;
+        let time_changed = prev
+            .map(|t| t.start_at != start_at || t.end_at != end_at || t.all_day != all_day)
+            .unwrap_or(true);
+        let conflict = if time_changed {
+            check_conflict(db, id, start_at, end_at, all_day)?
+        } else {
+            None
+        };
         db.update_task_full(
             id,
             &title,
@@ -160,14 +188,15 @@ pub fn task_update(
             reminder_minutes,
             Some(all_day),
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        Ok(conflict)
     })?;
     append_log(
         &app,
-        &format!("task_updated id={id} title={title} all_day={all_day}"),
+        &format!("task_updated id={id} title={title} all_day={all_day} conflict={conflict:?}"),
     );
     let _ = app.emit("tasks:changed", ());
-    Ok(())
+    Ok(TaskMoveResult { conflict })
 }
 
 #[tauri::command]
@@ -236,7 +265,14 @@ pub async fn task_from_text(
         let db = lock_recover(&state);
         // Rango multi-día ("inicia hoy y finaliza el lunes a las 4pm") →
         // bloque de inicio + bloque "(entrega)"; un solo día → una tarea.
-        let blocks = planning::split_range_blocks(&parsed.title, parsed.start_ms, parsed.end_ms);
+        // Sin hora (parsed.all_day) → marcador de día completo de 24 h, no una
+        // tarea 00:00–00:00 invisible que el backlog flexible reprogramaba.
+        let blocks = planning::text_task_blocks(
+            &parsed.title,
+            parsed.start_ms,
+            parsed.end_ms,
+            parsed.all_day,
+        );
         // transacción: si un bloque falla, no queda el rango a medias (bug L5)
         db.tx_begin().map_err(|e| e.to_string())?;
         let result = (|| -> Result<(TaskRow, Vec<TaskRow>), String> {

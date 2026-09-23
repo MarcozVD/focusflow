@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AiError;
 
-use chrono::{TimeZone, Timelike};
+use chrono::Timelike;
 
 pub fn extract_json(raw: &str) -> Option<serde_json::Value> {
     let trimmed = raw.trim();
@@ -140,12 +140,8 @@ fn parse_time(s: &str) -> Option<chrono::NaiveTime> {
 /// zona del usuario) a milisegundos. Antes se interpretaba como UTC y la
 /// tarea quedaba desplazada (8pm → 3pm con UTC-5).
 pub fn naive_to_ms(date: chrono::NaiveDate, time: chrono::NaiveTime) -> i64 {
-    let dt = date.and_time(time);
-    chrono::Local
-        .from_local_datetime(&dt)
-        .earliest()
-        .map(|d| d.timestamp_millis())
-        .unwrap_or_else(|| dt.and_utc().timestamp_millis())
+    // hueco DST: helper común (primera hora válida, no UTC)
+    crate::engine::local_ms(date.and_time(time))
 }
 
 const HOUR: i64 = 3_600_000;

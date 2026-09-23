@@ -3,6 +3,8 @@
 // una tarea "está en un día" si su intervalo [start, end) cubre ese día
 // (`coversDay`), con independencia de dónde se renderice luego.
 //
+// Genéricas en T extends TaskLike: devuelven el mismo tipo que reciben
+// (Task en el calendario) para no perder categoryId/priority.
 // Sin importaciones de Svelte ni DOM: testeable con vitest (env node).
 
 export interface TaskLike {
@@ -60,7 +62,7 @@ export function isMultiDay(t: TaskLike): boolean {
 }
 
 /** Tareas activas (no completadas) que cubren el día. Predicado único. */
-export function tasksOnDay(tasks: TaskLike[], d: Date): TaskLike[] {
+export function tasksOnDay<T extends TaskLike>(tasks: T[], d: Date): T[] {
   return tasks.filter((t) => t.status !== "completada" && coversDay(t, d));
 }
 
@@ -106,25 +108,25 @@ export function segmentFor(t: TaskLike, d: Date): Segment | null {
 // ---------------------------------------------------------------------------
 
 /** Chips "Todo el día": tareas de día completo que cubren el día. */
-export function allDayChipsOn(tasks: TaskLike[], d: Date): TaskLike[] {
+export function allDayChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
   return tasksOnDay(tasks, d).filter((t) => t.allDay);
 }
 
 /** Multi-día con horario (no all-day) en días INTERMEDIOS → chip "cont".
  *  Los días de inicio/fin se representan con su stub en el área de tiempo. */
-export function multiDayChipsOn(tasks: TaskLike[], d: Date): TaskLike[] {
+export function multiDayChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
   return tasksOnDay(tasks, d).filter(
     (t) => !t.allDay && isMultiDay(t) && !sameDay(t.start, d) && !sameDay(new Date(lastCoveredDayMs(t)), d),
   );
 }
 
 /** Chips de la fila superior (semana/día): todo el día + multi-día intermedio. */
-export function topChipsOn(tasks: TaskLike[], d: Date): TaskLike[] {
+export function topChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
   return [...allDayChipsOn(tasks, d), ...multiDayChipsOn(tasks, d)];
 }
 
 /** Tareas de un día para el MES y el POPUP: todo lo que cubre el día. */
-export function monthChipsOn(tasks: TaskLike[], d: Date): TaskLike[] {
+export function monthChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
   return tasksOnDay(tasks, d);
 }
 

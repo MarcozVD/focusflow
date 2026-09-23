@@ -101,7 +101,7 @@
     const daysShown = Array.from({ length: 7 }, (_, i) => weekStart + i * DAY_MS);
     const active = daysShown.some((d) =>
       isActiveOn(
-        { id: 0, title: "x", day_of_week: day, start_min: 0, end_min: 1, created_at: 0, updated_at: 0, start_date: s, end_date: en },
+        { id: 0, title: "x", day_of_week: day, start_min: 0, end_min: 1, start_date: s, end_date: en },
         d,
       ),
     );

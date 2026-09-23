@@ -3,7 +3,7 @@
 //! Añade y gestiona tareas desde el cmd reutilizando el mismo crate: abre la
 //! MISMA base SQLite que la app (`%APPDATA%\com.focusflow.spike`), usa el
 //! parser de lenguaje natural local (`ai::nl::parse_task_nl`), los bloques
-//! multi-día (`planning::split_range_blocks`) y recordatorios. Tras un cambio,
+//! multi-día (`planning::text_task_blocks`) y recordatorios. Tras un cambio,
 //! deja una marca (`cli-change.flag`) que el hilo de la app vigila para emitir
 //! `tasks:changed` y refrescar app + widget en vivo.
 //!
@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use chrono::TimeZone as _;
 
+use focusflow_spike_lib::engine::DAY_MS;
 use focusflow_spike_lib::{ai, planning, reminders, store, store::Db};
 
 #[path = "ff/classes.rs"]
@@ -120,7 +121,18 @@ fn json_task(t: &store::TaskRow) -> serde_json::Value {
 
 fn open_db() -> Result<Db, String> {
     let dir = data_dir();
-    Db::open(&dir).map_err(|e| format!("no se pudo abrir la BD en {}: {e}", dir.display()))
+    // sin backup rotativo: cada comando del CLI rotaría los .bak de la app
+    Db::open_no_backup(&dir).map_err(|e| format!("no se pudo abrir la BD en {}: {e}", dir.display()))
+}
+
+/// La tarea existe y no está borrada. Si no, error y código != 0 SIN tocar
+/// `cli-change.flag` (antes `ff done 9999` decía OK).
+fn require_task(db: &Db, id: i64) -> Result<(), i32> {
+    match db.get_task(id) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(fail(&format!("no existe la tarea #{id}"))),
+        Err(e) => Err(fail(&format!("error: {e}"))),
+    }
 }
 
 const CATS: &[&str] = &["uni", "trab", "per", "fin", "sal", "otr"];
@@ -276,7 +288,9 @@ fn cmd_add(args: Vec<String>, json_out: bool) -> i32 {
     if today_flag {
         let today = chrono::Local::now().date_naive();
         parsed.start_ms = ai::nl::local_ms(today.and_hms_opt(0, 0, 0).unwrap());
-        parsed.end_ms = parsed.start_ms + 86_399_000;
+        // marcador de día completo: [medianoche, medianoche + 24 h) — con
+        // 23:59:59 el marcador solapaba con find_overlap
+        parsed.end_ms = parsed.start_ms + DAY_MS;
         parsed.all_day = true;
     }
     if let Some(c) = cat {
@@ -304,8 +318,15 @@ fn cmd_add(args: Vec<String>, json_out: bool) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(&e),
     };
-    // Rango multi-día → bloque inicio + bloque "(entrega)", igual que la app.
-    let blocks = planning::split_range_blocks(&parsed.title, parsed.start_ms, parsed.end_ms);
+    // Rango multi-día → bloque inicio + bloque "(entrega)", igual que la app;
+    // un solo día respeta el all_day del parser ("Todo el día" no se vuelve
+    // un bloque con hora).
+    let blocks = planning::text_task_blocks(
+        &parsed.title,
+        parsed.start_ms,
+        parsed.end_ms,
+        parsed.all_day,
+    );
     // transacción como task_from_text: un fallo a mitad no deja el rango a
     // medias en la BD compartida (bug L5)
     if let Err(e) = db.tx_begin() {
@@ -473,6 +494,9 @@ fn cmd_done(args: Vec<String>, done: bool, json_out: bool) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(&e),
     };
+    if let Err(code) = require_task(&db, id) {
+        return code;
+    }
     if let Err(e) = db.set_completed(id, done) {
         return fail(&format!("error: {e}"));
     }
@@ -507,6 +531,9 @@ fn cmd_status(args: Vec<String>, json_out: bool) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(&e),
     };
+    if let Err(code) = require_task(&db, id) {
+        return code;
+    }
     // done/undo sólo crean pendiente|completada; en-curso pasa por aquí.
     let res = match status {
         "completada" => db.set_completed(id, true),
@@ -547,12 +574,15 @@ fn cmd_move(args: Vec<String>, json_out: bool) -> i32 {
             let s = day + min as i64 * 60_000;
             (s, s + 3_600_000, false)
         }
-        None => (day, day + 86_399_000, true),
+        None => (day, day + DAY_MS, true),
     };
     let db = match open_db() {
         Ok(d) => d,
         Err(e) => return fail(&e),
     };
+    if let Err(code) = require_task(&db, id) {
+        return code;
+    }
     if let Err(e) = db.move_to(id, start, end, Some(all_day)) {
         return fail(&format!("error: {e}"));
     }
@@ -580,6 +610,9 @@ fn cmd_rm(args: Vec<String>, json_out: bool) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(&e),
     };
+    if let Err(code) = require_task(&db, id) {
+        return code;
+    }
     if let Err(e) = db.delete(id) {
         return fail(&format!("error: {e}"));
     }
@@ -607,4 +640,25 @@ fn cmd_cats(json_out: bool) -> i32 {
 fn cmd_ruta() -> i32 {
     println!("{}", data_dir().display());
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn require_task_rejects_missing_and_deleted() {
+        let db = Db::open_memory_clean_pub().unwrap();
+        let t = db.create("x", "uni", "media", 1, 2, false).unwrap();
+        assert!(require_task(&db, t.id).is_ok());
+        assert_eq!(require_task(&db, 9999), Err(1));
+        db.delete(t.id).unwrap();
+        assert_eq!(require_task(&db, t.id), Err(1), "borrada = no existe");
+    }
+
+    #[test]
+    fn all_day_marker_is_24h() {
+        // ff move sin hora / --today: [medianoche, +24 h), no 23:59:59
+        assert_eq!(DAY_MS, 86_400_000);
+    }
 }

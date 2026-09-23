@@ -1,7 +1,5 @@
 use super::validation::ParsedTask;
 
-use chrono::TimeZone;
-
 pub(crate) fn weekday_num(date: chrono::NaiveDate) -> u8 {
     date.format("%u").to_string().parse().unwrap_or(0)
 }
@@ -16,16 +14,117 @@ pub(crate) fn ymd(date: chrono::NaiveDate) -> (i32, u32, u32) {
     (parts[0] as i32, parts[1], parts[2])
 }
 
+/// Días hasta la próxima ocurrencia de `target` sin hora: si HOY es ese día
+/// cuenta como hoy (0), mismo criterio que `rule_based::next_weekday`.
+#[cfg(test)]
 pub(crate) fn weekday_delta(target: chrono::Weekday) -> i64 {
-    let now = chrono::Local::now().date_naive();
-    let mut d = 1;
-    loop {
-        let wd = now + chrono::Duration::days(d);
-        if weekday_num(wd) as u32 == target.number_from_monday() {
-            return d;
-        }
-        d += 1;
+    weekday_delta_at(target, None)
+}
+
+/// Como `weekday_delta`, pero con la hora pedida (minutos): "el viernes"
+/// dicho un viernes = HOY si no hay hora o la hora aún no pasó; si ya pasó,
+/// el de la semana siguiente (+7).
+#[cfg(test)]
+pub(crate) fn weekday_delta_at(target: chrono::Weekday, minute_of_day: Option<u32>) -> i64 {
+    weekday_delta_next_at(target, minute_of_day, false)
+}
+
+/// Como `weekday_delta_at`; con `next` ("próximo/next martes") nunca es HOY:
+/// dicho un martes, "el próximo martes" es el de la semana siguiente.
+pub(crate) fn weekday_delta_next_at(
+    target: chrono::Weekday,
+    minute_of_day: Option<u32>,
+    next: bool,
+) -> i64 {
+    use chrono::{Datelike, Timelike};
+    let now = chrono::Local::now();
+    let now_min = now.time().hour() * 60 + now.time().minute();
+    weekday_delta_from(now.date_naive().weekday(), now_min, target, minute_of_day, next)
+}
+
+/// Núcleo puro (sin reloj) de `weekday_delta_next_at`: días desde `today`
+/// (a la hora `now_min`) hasta `target`.
+pub(crate) fn weekday_delta_from(
+    today: chrono::Weekday,
+    now_min: u32,
+    target: chrono::Weekday,
+    minute_of_day: Option<u32>,
+    next: bool,
+) -> i64 {
+    let delta = (target.num_days_from_monday() as i64 - today.num_days_from_monday() as i64 + 7) % 7;
+    if delta != 0 {
+        return delta;
     }
+    if next {
+        return 7;
+    }
+    match minute_of_day {
+        Some(m) if m <= now_min => 7,
+        _ => 0,
+    }
+}
+
+/// ¿La palabra anterior es "próximo/próxima/proximo/proxima/next"?
+pub(crate) fn is_next_word(prev: &str) -> bool {
+    matches!(
+        prev.trim_matches(|c: char| !c.is_alphanumeric()),
+        "próximo" | "próxima" | "proximo" | "proxima" | "next"
+    )
+}
+
+/// ¿El texto justo antes de `pos` (byte) termina en "próximo"/"next"…?
+pub(crate) fn preceded_by_next(lower: &str, pos: usize) -> bool {
+    lower
+        .get(..pos)
+        .and_then(|b| b.split_whitespace().next_back())
+        .is_some_and(is_next_word)
+}
+
+/// Hora de inicio mencionada: la del rango ("de 8 a 10") o la suelta.
+fn start_minute(lower: &str) -> Option<u32> {
+    time_range(lower).map(|(s, _)| s).or_else(|| hour_from_text(lower))
+}
+
+/// ¿Menciona "mañana"/"tomorrow" como FECHA? ("viernes a las 10 de la
+/// mañana" no; "mañana por la mañana" sí).
+pub(crate) fn mentions_tomorrow(lower: &str) -> bool {
+    if lower.contains("tomorrow") {
+        return true;
+    }
+    let n = lower.matches("mañana").count() + lower.matches("manana").count();
+    let parts = ["de la mañana", "por la mañana", "en la mañana", "de la manana", "por la manana", "en la manana"]
+        .iter()
+        .map(|p| lower.matches(p).count())
+        .sum::<usize>();
+    n > parts
+}
+
+/// ¿Hay fecha absoluta ("el 15", "el día 3", "15 de agosto")?
+pub(crate) fn has_absolute_date(lower: &str) -> bool {
+    let re = regex::Regex::new(
+        r"\bel (?:día |dia )?\d{1,2}\b|\b\d{1,2} de (?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december) \d{1,2}\b",
+    );
+    re.map(|r| r.is_match(lower)).unwrap_or(false)
+}
+
+/// Siguiente fecha (desde `today`, incluido) cuyo día del mes es `d`:
+/// "el 31" en septiembre salta a octubre (máx. 12 meses).
+fn next_day_of_month(today: chrono::NaiveDate, d: u32) -> Option<chrono::NaiveDate> {
+    let (mut y, mut m, _) = ymd(today);
+    for _ in 0..=12 {
+        if let Some(date) = chrono::NaiveDate::from_ymd_opt(y, m, d) {
+            if date >= today {
+                return Some(date);
+            }
+        }
+        if m == 12 {
+            y += 1;
+            m = 1;
+        } else {
+            m += 1;
+        }
+    }
+    None
 }
 
 pub(crate) fn month_number(name: &str) -> Option<u32> {
@@ -46,102 +145,200 @@ pub(crate) fn month_number(name: &str) -> Option<u32> {
     })
 }
 
+/// Nombre de día de la semana → Weekday. Solo nombres COMPLETOS o
+/// abreviaturas que sean la palabra ENTERA (con o sin punto): antes se
+/// comparaba por prefijo y "Mario" era martes, "monto" lunes, "juego"
+/// jueves, "domicilio" domingo, "saber" sábado y "viene" viernes.
 pub(crate) fn weekday_from_name(s: &str) -> Option<chrono::Weekday> {
     let n = s.trim().to_lowercase();
-    if n.starts_with("dom") || n.starts_with("sun") {
-        Some(chrono::Weekday::Sun)
-    } else if n.starts_with("lun") || n.starts_with("mon") {
-        Some(chrono::Weekday::Mon)
-    } else if n.starts_with("mar") || n.starts_with("tue") || n.starts_with("tues") {
-        Some(chrono::Weekday::Tue)
-    } else if n.starts_with("mié") || n.starts_with("mie") || n.starts_with("wed") {
-        Some(chrono::Weekday::Wed)
-    } else if n.starts_with("jue")
-        || n.starts_with("thu")
-        || n.starts_with("thur")
-        || n.starts_with("thurs")
-    {
-        Some(chrono::Weekday::Thu)
-    } else if n.starts_with("vie") || n.starts_with("fri") {
-        Some(chrono::Weekday::Fri)
-    } else if n.starts_with("sáb") || n.starts_with("sab") || n.starts_with("sat") {
-        Some(chrono::Weekday::Sat)
+    let n = n.trim_end_matches('.');
+    Some(match n {
+        "domingo" | "dom" | "sunday" | "sun" => chrono::Weekday::Sun,
+        "lunes" | "lun" | "monday" | "mon" => chrono::Weekday::Mon,
+        "martes" | "mar" | "tuesday" | "tue" | "tues" => chrono::Weekday::Tue,
+        "miércoles" | "miercoles" | "mié" | "mie" | "wednesday" | "wed" => {
+            chrono::Weekday::Wed
+        }
+        "jueves" | "jue" | "thursday" | "thu" | "thur" | "thurs" => chrono::Weekday::Thu,
+        "viernes" | "vie" | "friday" | "fri" => chrono::Weekday::Fri,
+        "sábado" | "sabado" | "sáb" | "sab" | "saturday" | "sat" => chrono::Weekday::Sat,
+        _ => return None,
+    })
+}
+
+/// Día de la semana dentro de texto libre: como `weekday_from_name`, pero las
+/// abreviaturas que son palabras corrientes ("mar" = el mar, "sun")
+/// solo cuentan con punto ("mar.").
+fn weekday_in_free_text(tok: &str) -> Option<chrono::Weekday> {
+    let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
+    let t = t.trim_start_matches('.');
+    let bare = t.trim_end_matches('.').to_lowercase();
+    if matches!(bare.as_str(), "mar" | "sun") && !t.ends_with('.') {
+        return None;
+    }
+    weekday_from_name(t)
+}
+
+/// Aplica am/pm o "de la tarde/noche/mañana" a una hora 0-23. `None` si la
+/// hora/minuto está fuera de rango ("25:00", "10:75", "13 pm").
+fn apply_meridiem(h: u32, mm: u32, meridiem: Option<&str>) -> Option<u32> {
+    if mm > 59 {
+        return None;
+    }
+    let h = match meridiem {
+        Some(m) if m.starts_with('p') => {
+            if !(1..=12).contains(&h) {
+                return None;
+            }
+            if h == 12 {
+                12
+            } else {
+                h + 12
+            }
+        }
+        Some(m) if m.starts_with('a') => {
+            if h > 12 {
+                return None;
+            }
+            if h == 12 {
+                0
+            } else {
+                h
+            }
+        }
+        Some("tarde") => {
+            if (1..12).contains(&h) {
+                h + 12
+            } else {
+                h
+            }
+        }
+        Some("noche") => {
+            if h == 12 {
+                0
+            } else if (6..12).contains(&h) {
+                h + 12
+            } else {
+                h
+            }
+        }
+        _ => h,
+    };
+    if h <= 23 {
+        Some(h * 60 + mm)
     } else {
         None
     }
 }
 
+/// Parte del día escrita justo después de la hora: "de la tarde",
+/// "de la noche", "de la mañana" (y variantes con por/en).
+fn part_of_day_after(rest: &str) -> Option<&'static str> {
+    let re = regex::Regex::new(r"^\s*(?:de|por|en) la (tarde|noche|mañana|manana)").ok()?;
+    let caps = re.captures(rest)?;
+    Some(match caps.get(1)?.as_str() {
+        "tarde" => "tarde",
+        "noche" => "noche",
+        _ => "mañana",
+    })
+}
+
+/// am/pm normalizado ("a. m.", "p.m." → "am"/"pm").
+fn norm_meridiem(s: &str) -> &'static str {
+    if s.trim_start().starts_with('p') {
+        "pm"
+    } else {
+        "am"
+    }
+}
+
+const MERIDIEM: &str = r"(a\.?\s?m\.?|p\.?\s?m\.?)(?:[^a-z]|$)";
+
 /// Hora desde texto: "3 pm", "15:00", "a las 10 de la mañana", "at 4", "8 AM".
 /// Los dígitos sueltos SOLO se aceptan con prefijo temporal ("a las", "at",
 /// "de las") o con am/pm o con dos puntos: "el 15" o "2 horas" nunca son hora.
+/// am/pm se toma de la captura junto a la hora (antes se buscaba "am"/"pm" en
+/// TODO el texto: "examen", "llamar" o "Samuel" volvían AM la hora) y los
+/// minutos se leen del grupo correcto ("3:30 pm" daba 15:00).
 pub(crate) fn hour_from_text(s: &str) -> Option<u32> {
     let lower = s.trim().to_lowercase();
-    let m = regex_extract(
-        &lower,
-        r"(\d{1,2})(?:\s*(:|\.)?\s*(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)",
-    )
-    .or_else(|| {
-        regex_extract(
-            &lower,
-            r"(?:a las|a la|at|alrededor de las|de las)\s+(\d{1,2})(?::(\d{2}))?",
-        )
-    })
-    .or_else(|| regex_extract(&lower, r"\b(\d{1,2}):(\d{2})\b"));
-    let (h, mm) = m?;
-    let mut h: u32 = h.parse().ok()?;
-    let mm: u32 = mm.unwrap_or("0").parse().unwrap_or(0);
-    if h < 12 && lower.contains("pm") {
-        h += 12;
-    }
-    if h == 12 && (lower.contains("am") || lower.contains("a. m.")) {
-        h = 0;
-    }
-    Some(h * 60 + mm)
-}
-
-pub(crate) fn regex_extract<'a>(s: &'a str, pat: &str) -> Option<(&'a str, Option<&'a str>)> {
-    let re = regex::Regex::new(pat).ok()?;
-    let caps = re.captures(s)?;
-    let g1 = caps.get(1)?.as_str();
-    let g2 = caps.get(2).map(|m| m.as_str());
-    Some((g1, g2))
-}
-
-/// Hora de un extremo de rango: acepta también dígitos sueltos ("de 3 a 5").
-pub(crate) fn hour_in_range(s: &str) -> Option<u32> {
-    hour_from_text(s).or_else(|| {
-        let re = regex::Regex::new(r"(\d{1,2})(?::(\d{2}))?").ok()?;
-        let caps = re.captures(s.trim())?;
+    // 1) con am/pm pegado a la hora
+    let re_ampm = regex::Regex::new(&format!(r"\b(\d{{1,2}})(?:\s*[:.]\s*(\d{{2}}))?\s*{MERIDIEM}")).ok()?;
+    if let Some(caps) = re_ampm.captures(&lower) {
         let h: u32 = caps.get(1)?.as_str().parse().ok()?;
-        let mm: u32 = caps.get(2).map_or(Ok(0), |x| x.as_str().parse()).ok()?;
-        if h <= 23 && mm <= 59 {
-            Some(h * 60 + mm)
-        } else {
-            None
-        }
-    })
+        let mm: u32 = caps.get(2).map_or(Ok(0), |m| m.as_str().parse()).ok()?;
+        return apply_meridiem(h, mm, Some(norm_meridiem(caps.get(3)?.as_str())));
+    }
+    // 2) con prefijo temporal ("a las 5", "at 4"), opcional "de la tarde"
+    let re_pre = regex::Regex::new(
+        r"(?:\b(?:a|de|para|hasta|desde) las?|\bat)\s+(\d{1,2})(?::(\d{2}))?\b",
+    )
+    .ok()?;
+    let re_colon = regex::Regex::new(r"\b(\d{1,2}):(\d{2})\b").ok()?;
+    let caps = re_pre.captures(&lower).or_else(|| re_colon.captures(&lower))?;
+    let h: u32 = caps.get(1)?.as_str().parse().ok()?;
+    let mm: u32 = caps.get(2).map_or(Ok(0), |m| m.as_str().parse()).ok()?;
+    let rest = &lower[caps.get(0)?.end()..];
+    apply_meridiem(h, mm, part_of_day_after(rest))
 }
 
-/// Parsea "de 3 pm a 6 pm" o "de 3 a 5" y devuelve (hora_inicio_min, hora_fin_min).
-pub(crate) fn time_range(text: &str) -> Option<(u32, u32)> {
-    let re = regex::Regex::new(r"de (\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:a|hasta)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)").ok()?;
-    let caps = re.captures(text)?;
-    let start = hour_in_range(caps.get(1)?.as_str())?;
-    let mut end = hour_in_range(caps.get(2)?.as_str())?;
+/// Extremo de rango → (minutos, meridiano explícito). Acepta dígitos sueltos
+/// ("de 3 a 5") además de am/pm, "HH:MM" y "de la tarde".
+fn range_endpoint(s: &str) -> Option<(u32, Option<&'static str>)> {
+    let t = s.trim().to_lowercase();
+    let re = regex::Regex::new(&format!(r"^(\d{{1,2}})(?:\s*[:.]\s*(\d{{2}}))?\s*(?:{MERIDIEM})?")).ok()?;
+    let caps = re.captures(&t)?;
+    let h: u32 = caps.get(1)?.as_str().parse().ok()?;
+    let mm: u32 = caps.get(2).map_or(Ok(0), |m| m.as_str().parse()).ok()?;
+    let mer: Option<&'static str> = match caps.get(3) {
+        Some(m) => Some(norm_meridiem(m.as_str())),
+        None => part_of_day_after(&t[caps.get(0)?.end()..]),
+    };
+    Some((apply_meridiem(h, mm, mer)?, mer))
+}
+
+/// Resuelve un rango horario a partir de sus dos extremos en texto.
+/// - Si el inicio no lleva am/pm y el fin sí, hereda el del fin cuando el
+///   resultado es coherente (inicio < fin, ≤ 12 h): "de 3 a 5 pm" = 15–17.
+/// - Si el fin queda antes del inicio: sin am/pm y +12 h lo arregla → +12 h
+///   ("de 9 a 1" = 9–13); si no, cruza la medianoche → fin del día siguiente
+///   ("de 10 pm a 1 am" = 22:00–01:00 del día siguiente, minutos > 1440).
+pub(crate) fn resolve_range(a: &str, b: &str) -> Option<(u32, u32)> {
+    let (mut start, s_mer) = range_endpoint(a)?;
+    let (mut end, e_mer) = range_endpoint(b)?;
+    if s_mer.is_none() {
+        if let Some(m) = e_mer {
+            let h = start / 60;
+            if let Some(c) = apply_meridiem(h, start % 60, Some(m)) {
+                if c < end && end - c <= 12 * 60 {
+                    start = c;
+                }
+            }
+        }
+    }
     if end <= start {
-        end += 12 * 60;
+        if e_mer.is_none() && end + 12 * 60 > start && end < 12 * 60 {
+            end += 12 * 60;
+        } else {
+            end += 24 * 60;
+        }
     }
     Some((start, end))
 }
 
+/// Parsea "de 3 pm a 6 pm" o "de 3 a 5" y devuelve (hora_inicio_min, hora_fin_min).
+/// El fin puede superar 1440 (cruce de medianoche → día siguiente).
+pub(crate) fn time_range(text: &str) -> Option<(u32, u32)> {
+    let re = regex::Regex::new(r"de (\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:a|hasta)\s+(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.|(?:de|por|en) la (?:tarde|noche|mañana|manana))?)").ok()?;
+    let caps = re.captures(text)?;
+    resolve_range(caps.get(1)?.as_str(), caps.get(2)?.as_str())
+}
+
 /// Fecha/hora naive LOCAL → ms (la hora del usuario, no UTC: `.and_utc()`
 /// desplazaba las tareas según la zona horaria).
+/// Hueco DST: delega en `engine::local_ms` (avanza a la primera hora válida).
 pub fn local_ms(dt: chrono::NaiveDateTime) -> i64 {
-    chrono::Local
-        .from_local_datetime(&dt)
-        .earliest()
-        .map(|d| d.timestamp_millis())
-        .unwrap_or_else(|| dt.and_utc().timestamp_millis())
+    crate::engine::local_ms(dt)
 }
 
 /// Calcula el día de inicio en ms.
@@ -160,7 +357,9 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
                 .unwrap(),
         ));
     }
-    if lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow") {
+    // "de/por/en la mañana" es parte del día, no la fecha de mañana
+    // ("viernes a las 10 de la mañana" = viernes).
+    if mentions_tomorrow(&lower) {
         return Some(local_ms(
             (today + chrono::Duration::days(1))
                 .and_hms_opt(0, 0, 0)
@@ -190,11 +389,15 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
             {
                 if let Ok(d) = dcaps.get(1)?.as_str().parse::<u32>() {
                     if (1..=31).contains(&d) {
-                        let (y, cur_m, _) = ymd(today);
-                        let year = if m < cur_m { y + 1 } else { y };
-                        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, m, d) {
-                            if date >= today {
-                                return Some(local_ms(date.and_hms_opt(0, 0, 0).unwrap()));
+                        // mes explícito: si la fecha de este año ya pasó (mes
+                        // anterior o mismo mes con el día ya pasado) → año
+                        // siguiente; nunca cae a la regla del "día 15".
+                        let (y, _, _) = ymd(today);
+                        for year in [y, y + 1] {
+                            if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, m, d) {
+                                if date >= today {
+                                    return Some(local_ms(date.and_hms_opt(0, 0, 0).unwrap()));
+                                }
                             }
                         }
                     }
@@ -203,32 +406,31 @@ pub(crate) fn parse_day(text: &str) -> Option<i64> {
         }
     }
 
-    // "el 15" / "el día 15" → próximo día 15 (o mes siguiente si ya pasó)
-    let re_day = regex::Regex::new(r"el (?:día |dia )?(\d{1,2})").ok()?;
+    // "el 15" / "el día 15" → próximo día 15 (o el siguiente mes que lo tenga:
+    // "el 31" en septiembre → 31 de octubre)
+    let re_day = regex::Regex::new(r"el (?:día |dia )?(\d{1,2})\b").ok()?;
     if let Some(caps) = re_day.captures(&lower) {
         if let Ok(d) = caps.get(1)?.as_str().parse::<u32>() {
-            let (y, m, _) = ymd(today);
-            let target = chrono::NaiveDate::from_ymd_opt(y, m, d)?;
-            let candidate = if target >= today {
-                target
-            } else {
-                let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
-                chrono::NaiveDate::from_ymd_opt(ny, nm, d)?
-            };
-            return Some(local_ms(candidate.and_hms_opt(0, 0, 0).unwrap()));
+            if (1..=31).contains(&d) {
+                if let Some(candidate) = next_day_of_month(today, d) {
+                    return Some(local_ms(candidate.and_hms_opt(0, 0, 0).unwrap()));
+                }
+            }
         }
     }
 
-    // día de la semana
+    // día de la semana (palabra completa: "Mario" no es martes)
+    let mut prev = "";
     for t in lower.split_whitespace() {
-        if let Some(wd) = weekday_from_name(t) {
-            let delta = weekday_delta(wd);
+        if let Some(wd) = weekday_in_free_text(t) {
+            let delta = weekday_delta_next_at(wd, start_minute(&lower), is_next_word(prev));
             return Some(local_ms(
                 (today + chrono::Duration::days(delta))
                     .and_hms_opt(0, 0, 0)
                     .unwrap(),
             ));
         }
+        prev = t;
     }
     None
 }
@@ -248,13 +450,14 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
         return None;
     }
 
+    // Fecha absoluta ("el 15", "15 de agosto"): la IA la trae bien y el
+    // "hoy"/"mañana"/día de la semana del texto no debe pisarla.
+    if has_absolute_date(&lower) {
+        return None;
+    }
+
     // "mañana" como fecha, no como parte del día ("de la mañana", "por la mañana").
-    let manana_es_manana = lower.contains("de la mañana")
-        || lower.contains("por la mañana")
-        || lower.contains("en la mañana")
-        || lower.contains("de la manana")
-        || lower.contains("por la manana")
-        || lower.contains("en la manana");
+    let manana_es_fecha = mentions_tomorrow(&lower);
 
     // Rango con verbos de inicio/fin ("inicia hoy y finaliza el lunes…"): hay
     // DOS días distintos; corregir a uno solo destruiría el rango.
@@ -298,10 +501,7 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
         || lower.contains("pasado mañana")
         || lower.contains("pasado manana")
         || lower.contains("day after tomorrow")
-        || (!manana_es_manana
-            && (lower.contains("mañana")
-                || lower.contains("manana")
-                || lower.contains("tomorrow")));
+        || manana_es_fecha;
     if mentions_relative && mentions_weekday {
         return None;
     }
@@ -316,9 +516,7 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
                 .unwrap(),
         ));
     }
-    if !manana_es_manana
-        && (lower.contains("mañana") || lower.contains("manana") || lower.contains("tomorrow"))
-    {
+    if manana_es_fecha {
         return Some(local_ms(
             (today + chrono::Duration::days(1))
                 .and_hms_opt(0, 0, 0)
@@ -332,7 +530,9 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
     // Un único nombre de día de la semana (nombre COMPLETO: "marzo" no es
     // "martes"); si hay dos ("de lunes a viernes") es un rango y no se toca.
     let mut found: Option<chrono::Weekday> = None;
-    for tok in lower.split(|c: char| !c.is_alphabetic()) {
+    let mut next = false;
+    let mut prev = "";
+    for tok in lower.split(|c: char| !c.is_alphabetic()).filter(|t| !t.is_empty()) {
         let wd = match tok {
             "lunes" | "monday" => Some(chrono::Weekday::Mon),
             "martes" | "tuesday" => Some(chrono::Weekday::Tue),
@@ -348,10 +548,12 @@ pub(crate) fn relative_day_ms(text: &str) -> Option<i64> {
                 return None;
             }
             found = Some(wd);
+            next = is_next_word(prev);
         }
+        prev = tok;
     }
     let wd = found?;
-    let delta = weekday_delta(wd);
+    let delta = weekday_delta_next_at(wd, start_minute(&lower), next);
     Some(local_ms(
         (today + chrono::Duration::days(delta))
             .and_hms_opt(0, 0, 0)
@@ -502,7 +704,8 @@ pub fn parse_task_nl(text: &str) -> Option<ParsedTask> {
     let (start_min, end_min, all_day) = match explicit_range {
         Some((s, e)) => (s, e, false),
         None => match (hour_from_text(&lower), dur_min) {
-            (Some(s), Some(d)) => (s, s + d as u32, false),
+            // duración acotada a 24 h: un número enorme no desborda/trunca
+            (Some(s), Some(d)) => (s, s + d.clamp(1, 24 * 60) as u32, false),
             (Some(s), None) => (s, s + 60, false),
             (None, _) => (0, 0, true),
         },
@@ -582,6 +785,7 @@ pub(crate) fn build_title(text: &str) -> String {
         r"(?i)\bel día \d{1,2}\b",
         r"(?i)\bel \d{1,2}\b",
         r"(?i)\bde (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|january|february|march|april|june|july|august|september|october|november|december)\b",
+        r"(?i)\b(?:para|hasta|desde) (las|la) \d{1,2}(?::\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b",
         r"(?i)\ba (las|la) \d{1,2}(?::\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b",
         r"(?i)\bat \d{1,2}(?::\d{2})?\s*(am|pm)?\b",
         r"(?i)\b(am|pm|a\.m\.|p\.m\.)\b",
@@ -639,7 +843,7 @@ mod tests {
 
         // "Exam Friday at 8 AM"
         let t = parse("Exam Friday at 8 AM");
-        let fri = midnight(weekday_delta(chrono::Weekday::Fri) as i64);
+        let fri = midnight(weekday_delta_at(chrono::Weekday::Fri, Some(8 * 60)));
         assert_eq!(t.start_ms, fri + 8 * HOUR);
         assert_eq!(t.end_ms, fri + 9 * HOUR);
         assert_eq!(t.title, "Exam");
@@ -647,7 +851,8 @@ mod tests {
 
         // "Submit project next Monday"
         let t = parse("Submit project next Monday");
-        let mon = midnight(weekday_delta(chrono::Weekday::Mon) as i64);
+        // "next Monday" dicho un lunes = el de la semana siguiente
+        let mon = midnight(weekday_delta_next_at(chrono::Weekday::Mon, None, true));
         assert_eq!(t.start_ms, mon);
         assert!(t.all_day);
         assert_eq!(t.title, "Submit project");
@@ -703,21 +908,202 @@ mod tests {
     fn absolute_date_with_month() {
         let t = parse("el 15 de agosto a las 9 presentar informe");
         let today = chrono::Local::now().date_naive();
-        let (y, m, _) = ymd(today);
-        // misma regla del parser: año actual o siguiente si el mes ya pasó…
-        let year = if 8 < m { y + 1 } else { y };
-        let date = chrono::NaiveDate::from_ymd_opt(year, 8, 15).unwrap();
-        // …y si el día ya pasó este mes, cae al "próximo día 15"
+        let (y, _, _) = ymd(today);
+        // mes explícito: este año si aún no pasó, si no el año siguiente
+        // (antes caía al "próximo día 15" del mes siguiente: test corregido)
+        let date = chrono::NaiveDate::from_ymd_opt(y, 8, 15).unwrap();
         let expected = if date >= today {
             date
         } else {
-            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
-            chrono::NaiveDate::from_ymd_opt(ny, nm, 15).unwrap()
+            chrono::NaiveDate::from_ymd_opt(y + 1, 8, 15).unwrap()
         };
         let day_ms = local_ms(expected.and_hms_opt(0, 0, 0).unwrap());
         assert_eq!(t.start_ms, day_ms + 9 * HOUR);
         assert_eq!(t.end_ms, day_ms + 10 * HOUR);
         assert_eq!(t.title, "Presentar informe");
+    }
+
+    #[test]
+    fn weekday_only_full_words() {
+        // palabras que empiezan como un día NO son ese día (default = mañana)
+        for s in [
+            "reunión con Mario",
+            "pagar el monto",
+            "comprar juego",
+            "domicilio",
+            "saber",
+            "viene Ana",
+        ] {
+            assert_eq!(parse_day(&s.to_lowercase()), None, "{s}");
+        }
+        assert_eq!(weekday_from_name("martes"), Some(chrono::Weekday::Tue));
+        assert_eq!(weekday_from_name("mié."), Some(chrono::Weekday::Wed));
+        assert_eq!(weekday_from_name("vie"), Some(chrono::Weekday::Fri));
+        assert_eq!(weekday_from_name("Mario"), None);
+        assert_eq!(
+            parse_day("examen el vie."),
+            Some(midnight(weekday_delta(chrono::Weekday::Fri)))
+        );
+    }
+
+    #[test]
+    fn hours_minutes_and_meridiem() {
+        assert_eq!(hour_from_text("a las 3:30 pm"), Some(15 * 60 + 30));
+        assert_eq!(hour_from_text("3.45pm"), Some(15 * 60 + 45));
+        assert_eq!(hour_from_text("a las 10:15"), Some(10 * 60 + 15));
+        // am/pm de TODO el texto ya no cuenta: "examen", "llamar", "Samuel"
+        assert_eq!(hour_from_text("examen a las 5"), Some(5 * 60));
+        assert_eq!(hour_from_text("llamar a Samuel a las 12"), Some(12 * 60));
+        assert_eq!(hour_from_text("examen a las 5 pm"), Some(17 * 60));
+        assert_eq!(hour_from_text("a las 5 de la tarde"), Some(17 * 60));
+        assert_eq!(hour_from_text("a las 9 de la noche"), Some(21 * 60));
+        assert_eq!(hour_from_text("a las 10 de la mañana"), Some(10 * 60));
+        assert_eq!(hour_from_text("12 am"), Some(0));
+        assert_eq!(hour_from_text("12 pm"), Some(12 * 60));
+        assert_eq!(hour_from_text("8 a.m."), Some(8 * 60));
+        // fuera de rango → sin hora
+        assert_eq!(hour_from_text("a las 25"), None);
+        assert_eq!(hour_from_text("10:75"), None);
+        assert_eq!(hour_from_text("13 pm"), None);
+    }
+
+    #[test]
+    fn ranges_inherit_meridiem_and_cross_midnight() {
+        assert_eq!(time_range("de 3 a 5 pm"), Some((15 * 60, 17 * 60)));
+        assert_eq!(time_range("de 3pm a 5pm"), Some((15 * 60, 17 * 60)));
+        assert_eq!(time_range("de 10 a 2 pm"), Some((10 * 60, 14 * 60)));
+        assert_eq!(time_range("de 9 a 1"), Some((9 * 60, 13 * 60)));
+        assert_eq!(time_range("de 3:30 a 5"), Some((3 * 60 + 30, 5 * 60)));
+        // cruce de medianoche → fin al día siguiente
+        assert_eq!(time_range("de 22:00 a 01:00"), Some((22 * 60, 25 * 60)));
+        assert_eq!(time_range("de 10 pm a 1 am"), Some((22 * 60, 25 * 60)));
+        let t = parse("fiesta mañana de 22:00 a 01:00");
+        assert_eq!(t.start_ms, midnight(1) + 22 * HOUR);
+        assert_eq!(t.end_ms, midnight(1) + 25 * HOUR);
+        assert!(t.end_ms > t.start_ms);
+    }
+
+    #[test]
+    fn de_la_manana_is_not_tomorrow() {
+        let fri = midnight(weekday_delta_at(chrono::Weekday::Fri, Some(10 * 60)));
+        let t = parse("clase el viernes a las 10 de la mañana");
+        assert_eq!(t.start_ms, fri + 10 * HOUR);
+        // "mañana por la mañana" sí es mañana
+        let t = parse("correr mañana por la mañana a las 7");
+        assert_eq!(t.start_ms, midnight(1) + 7 * HOUR);
+    }
+
+    #[test]
+    fn day_of_month_missing_in_current_month() {
+        let today = chrono::Local::now().date_naive();
+        let got = parse_day("pagar el 31").expect("día 31");
+        let d = chrono::DateTime::from_timestamp_millis(got)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .date_naive();
+        assert_eq!(d.day(), 31);
+        assert!(d >= today);
+        assert!(d <= today + chrono::Duration::days(62));
+    }
+
+    #[test]
+    fn month_day_already_passed_goes_next_year() {
+        let today = chrono::Local::now().date_naive();
+        let y = today.year();
+        let yesterday = today - chrono::Duration::days(1);
+        let (_, m, d) = ymd(yesterday);
+        let meses = [
+            "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+            "septiembre", "octubre", "noviembre", "diciembre",
+        ];
+        let txt = format!("el {d} de {}", meses[m as usize - 1]);
+        let got = parse_day(&txt).unwrap();
+        let exp_year = if yesterday.year() < y { y } else { y + 1 };
+        let exp = chrono::NaiveDate::from_ymd_opt(exp_year, m, d)
+            .or_else(|| chrono::NaiveDate::from_ymd_opt(exp_year, m, d.min(28)))
+            .unwrap();
+        if chrono::NaiveDate::from_ymd_opt(exp_year, m, d).is_some() {
+            assert_eq!(got, local_ms(exp.and_hms_opt(0, 0, 0).unwrap()), "{txt}");
+        }
+    }
+
+    #[test]
+    fn weekday_today_criterion() {
+        use chrono::Timelike;
+        let now = chrono::Local::now();
+        let wd = now.date_naive().weekday();
+        // sin hora → hoy
+        assert_eq!(weekday_delta(wd), 0);
+        // hora ya pasada → la semana siguiente; hora futura → hoy
+        let now_min = now.hour() * 60 + now.minute();
+        if now_min > 0 {
+            assert_eq!(weekday_delta_at(wd, Some(0)), 7);
+        }
+        if now_min < 23 * 60 + 59 {
+            assert_eq!(weekday_delta_at(wd, Some(23 * 60 + 59)), 0);
+        }
+        assert!((1..=6).contains(&weekday_delta(wd.succ())));
+    }
+
+    #[test]
+    fn hour_after_para_hasta_desde() {
+        // regresión: el \b de "a las"/"de las" no casaba dentro de
+        // "para las"/"hasta las"/"desde las" → sin hora
+        assert_eq!(hour_from_text("cita para las 10"), Some(10 * 60));
+        assert_eq!(hour_from_text("desde las 9"), Some(9 * 60));
+        // sin am/pm ni "de la tarde" la hora se toma tal cual (vigente)
+        assert_eq!(hour_from_text("trabajo hasta las 5"), Some(5 * 60));
+        assert_eq!(hour_from_text("trabajo hasta las 5 de la tarde"), Some(17 * 60));
+        let t = parse("cita para las 10 mañana");
+        assert_eq!(t.start_ms, midnight(1) + 10 * HOUR);
+        assert_eq!(t.title, "Cita");
+    }
+
+    #[test]
+    fn next_weekday_never_today() {
+        use chrono::Weekday::*;
+        // dicho un martes a las 11:00
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Tue, None, false), 0);
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Tue, None, true), 7);
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Tue, Some(18 * 60), true), 7);
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Tue, Some(18 * 60), false), 0);
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Tue, Some(8 * 60), false), 7);
+        // otro día: "próximo" no añade semana
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Wed, None, true), 1);
+        assert_eq!(weekday_delta_from(Tue, 11 * 60, Mon, None, false), 6);
+        assert!(is_next_word("próximo") && is_next_word("proxima") && is_next_word("next"));
+        assert!(!is_next_word("el"));
+        assert!(preceded_by_next("next monday to friday", 5));
+        // extremo a extremo con el día de HOY
+        let wd = chrono::Local::now().date_naive().weekday();
+        let name = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+            [wd.num_days_from_monday() as usize];
+        assert_eq!(parse_day(&format!("cita el próximo {name}")), Some(midnight(7)));
+        assert_eq!(relative_day_ms(&format!("cita el proximo {name}")), Some(midnight(7)));
+        assert_eq!(parse_day(&format!("cita el {name}")), Some(midnight(0)));
+    }
+
+    #[test]
+    fn weekday_with_range_uses_range_start() {
+        // "el lunes de 8 a 10": la hora de inicio del rango cuenta para
+        // decidir si hoy ya pasó (antes hour_from_text no la veía → hoy).
+        use chrono::Timelike;
+        let now = chrono::Local::now();
+        let wd = now.date_naive().weekday();
+        let name = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+            [wd.num_days_from_monday() as usize];
+        assert_eq!(start_minute("clase de 8 a 10"), Some(8 * 60));
+        let now_min = now.hour() * 60 + now.minute();
+        let exp = if 8 * 60 <= now_min { 7 } else { 0 };
+        assert_eq!(parse_day(&format!("clase el {name} de 8 a 10")), Some(midnight(exp)));
+        assert_eq!(relative_day_ms(&format!("clase el {name} de 8 a 10")), Some(midnight(exp)));
+    }
+
+    #[test]
+    fn huge_duration_is_capped() {
+        let t = parse("maratón mañana a las 8 durante 500 horas");
+        assert_eq!(t.start_ms, midnight(1) + 8 * HOUR);
+        assert_eq!(t.end_ms, midnight(1) + 32 * HOUR);
     }
 
     #[test]
@@ -729,7 +1115,7 @@ mod tests {
         assert_eq!(t.category_id, "uni");
 
         let t = parse("cita médico el próximo lunes");
-        let mon = midnight(weekday_delta(chrono::Weekday::Mon) as i64);
+        let mon = midnight(weekday_delta_next_at(chrono::Weekday::Mon, None, true));
         assert_eq!(t.start_ms, mon);
         assert!(t.all_day);
         assert_eq!(t.category_id, "sal");
@@ -744,7 +1130,7 @@ mod tests {
         );
         assert_eq!(
             relative_day_ms("quiz el martes a las 6pm"),
-            Some(midnight(weekday_delta(chrono::Weekday::Tue) as i64))
+            Some(midnight(weekday_delta_at(chrono::Weekday::Tue, Some(18 * 60))))
         );
         assert_eq!(relative_day_ms("pagar internet mañana"), Some(midnight(1)));
         assert_eq!(relative_day_ms("cita pasado mañana"), Some(midnight(2)));
@@ -752,8 +1138,12 @@ mod tests {
         // "de la mañana" no es la fecha "mañana"
         assert_eq!(
             relative_day_ms("clase el viernes a las 10 de la mañana"),
-            Some(fri)
+            Some(midnight(weekday_delta_at(chrono::Weekday::Fri, Some(10 * 60))))
         );
+        // fecha absoluta: la IA manda aunque haya "hoy"/"mañana"/día (bug 9)
+        assert_eq!(relative_day_ms("mañana entrego lo del 15 de octubre"), None);
+        assert_eq!(relative_day_ms("hoy confirmo la cita para el 20"), None);
+        assert_eq!(relative_day_ms("el viernes 3 de octubre examen"), None);
         // rangos y fechas absolutas: sin corrección
         assert_eq!(relative_day_ms("disponible del 5 al 23 de agosto"), None);
         assert_eq!(relative_day_ms("de lunes a viernes estudiar"), None);
@@ -771,7 +1161,7 @@ mod tests {
         // verbo de fin sin verbo de inicio: un solo día, se corrige igual
         assert_eq!(
             relative_day_ms("la clase termina a las 6pm el viernes"),
-            Some(fri)
+            Some(midnight(weekday_delta_at(chrono::Weekday::Fri, Some(18 * 60))))
         );
     }
 

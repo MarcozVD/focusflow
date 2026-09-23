@@ -1,15 +1,28 @@
 <script lang="ts">
   import { toggleTheme, categories, tasks as tasksStore, DAYS_ES, suggestionsPending, bumpClassAdd, studySessions, bumpStudyAdd } from "./data.svelte";
 
+  type View = "semana" | "dia" | "mes" | "horario" | "sesiones" | "sugerencias" | "ajustes" | "asistente";
+
   let {
     view,
     setView,
     navigate,
   }: {
     view: string;
-    setView: (v: string) => void;
+    setView: (v: View) => void;
     navigate: (dir: -1 | 1) => void;
   } = $props();
+
+  const NAV: { id: View; label: string; icon: string }[] = [
+    { id: "semana", label: "Semana", icon: "calendar" },
+    { id: "mes", label: "Mes", icon: "grid" },
+    { id: "dia", label: "Día", icon: "sun" },
+    { id: "horario", label: "Horario", icon: "clock" },
+    { id: "sesiones", label: "Sesiones de estudio", icon: "book" },
+    { id: "asistente", label: "Asistente", icon: "sparkle" },
+    { id: "sugerencias", label: "Sugerencias", icon: "inbox" },
+    { id: "ajustes", label: "Ajustes", icon: "gear" },
+  ];
 
   const today = $derived(new Date());
   const tasks = $derived(tasksStore());
@@ -24,16 +37,7 @@
   </div>
 
   <nav>
-    {#each [
-      { id: "semana", label: "Semana", icon: "calendar" },
-      { id: "mes", label: "Mes", icon: "grid" },
-      { id: "dia", label: "Día", icon: "sun" },
-      { id: "horario", label: "Horario", icon: "clock" },
-      { id: "sesiones", label: "Sesiones de estudio", icon: "book" },
-      { id: "asistente", label: "Asistente", icon: "sparkle" },
-      { id: "sugerencias", label: "Sugerencias", icon: "inbox" },
-      { id: "ajustes", label: "Ajustes", icon: "gear" },
-    ] as item}
+    {#each NAV as item}
       <button
         class="nav-item {view === item.id ? 'active' : ''}"
         onclick={() => setView(item.id)}

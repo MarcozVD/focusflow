@@ -79,6 +79,21 @@ pub fn class_instances_in_range(
             .map(|dt| dt.timestamp_millis())
             .unwrap_or(0)
     }
+    // Hora de PARED `min` minutos tras la medianoche de `d` (DST): sumar
+    // min*60_000 a la medianoche desplazaba 1 h las clases del día del
+    // cambio de horario. 1440 = medianoche del día siguiente.
+    fn wall_ms(d: NaiveDate, min: i64) -> i64 {
+        let (d, min) = if min >= 1440 {
+            (d.succ_opt().unwrap_or(d), min - 1440)
+        } else {
+            (d, min)
+        };
+        d.and_hms_opt((min / 60) as u32, (min % 60) as u32, 0)
+            .and_then(|naive| Local.from_local_datetime(&naive).earliest())
+            .map(|dt| dt.timestamp_millis())
+            // hora inexistente (salto de primavera): medianoche + min
+            .unwrap_or_else(|| ms_of(d) + min * 60_000)
+    }
     let midnight = crate::engine::local_midnight;
     let date_of = |ms: i64| {
         Local
@@ -112,8 +127,8 @@ pub fn class_instances_in_range(
                 title: c.title.clone(),
                 day_of_week: c.day_of_week,
                 date_ms: day,
-                start_at: day + c.start_min * 60_000,
-                end_at: day + c.end_min * 60_000,
+                start_at: wall_ms(date, c.start_min),
+                end_at: wall_ms(date, c.end_min),
             });
         }
         match date.succ_opt() {
@@ -247,6 +262,32 @@ mod tests {
             .map(|dt| dt.format("%u").to_string().parse::<i64>().unwrap_or(1) - 1)
             .unwrap_or(0);
         t + (7 - dow_now) % 7 * DAY
+    }
+
+    #[test]
+    fn class_instance_uses_wall_clock_time() {
+        // Lote B #15: la instancia se construye con la hora de pared local
+        // (misma salida que medianoche + min en un día normal)
+        let d = Db::open_memory_clean_pub().unwrap();
+        let t = today();
+        let mon = next_monday(t);
+        d.class_create("Física", 0, 540, 1440, mon - DAY, mon + 7 * DAY)
+            .unwrap();
+        let inst = class_instances_in_range(&d.class_list().unwrap(), mon, mon + DAY - 1);
+        assert_eq!(inst.len(), 1);
+        let expected = chrono::Local
+            .timestamp_millis_opt(mon)
+            .unwrap()
+            .date_naive()
+            .and_hms_opt(9, 0, 0)
+            .unwrap();
+        let expected = chrono::Local
+            .from_local_datetime(&expected)
+            .earliest()
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(inst[0].start_at, expected, "09:00 de pared");
+        assert_eq!(inst[0].end_at, local_midnight(mon + DAY + 3_600_000), "fin 24:00 = medianoche siguiente");
     }
 
     #[test]

@@ -67,13 +67,22 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
+/// Tamaño máximo del log antes de rotarlo (renombrar a `spike.log.1`).
+const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Rotación simple: si el log supera `max` bytes se renombra a `.1`
+/// (sobrescribiendo el anterior). Sin esto crecía sin límite en %TEMP%.
+fn rotate_log_if_big(path: &std::path::Path, max: u64) {
+    if fs::metadata(path).map(|m| m.len() > max).unwrap_or(false) {
+        let _ = fs::rename(path, path.with_extension("log.1"));
+    }
+}
+
 pub(crate) fn append_log(_app: &AppHandle, line: &str) {
     let Some(dir) = log_dir() else { return };
-    if let Ok(mut f) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("spike.log"))
-    {
+    let path = dir.join("spike.log");
+    rotate_log_if_big(&path, LOG_MAX_BYTES);
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "[{}] {}", now_ms(), sanitize_log_line(line));
     }
 }
@@ -444,7 +453,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let handle = app.handle().clone();
 
             let data_dir = app.path().app_data_dir()?;
-            let db = Db::open(&data_dir).map_err(|e| format!("db_open_error: {e}"))?;
+            let db = match Db::open(&data_dir) {
+                Ok(db) => db,
+                Err(e) => {
+                    append_log(&handle, &format!("db_open_error: {e}"));
+                    // release = subsistema windows (sin consola): sin diálogo
+                    // la app se cerraba sin explicación
+                    fatal_dialog(&format!(
+                        "FocusFlow no pudo abrir su base de datos y se cerrará.\n\n{e}\n\nCarpeta: {}",
+                        data_dir.display()
+                    ));
+                    return Err(format!("db_open_error: {e}").into());
+                }
+            };
             let count = db.count().unwrap_or(-1);
             append_log(&handle, &format!("db_ready at {} tasks={count}", data_dir.display()));
             db.settings_default("email.enabled", "0").ok();
@@ -598,8 +619,45 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .map_err(|e| {
+            // error de arranque (setup, webview…): diálogo en vez de panic mudo
+            fatal_dialog(&format!("FocusFlow no pudo iniciarse:\n\n{e}"));
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
     Ok(())
+}
+
+/// Diálogo nativo de error fatal (MessageBoxW de user32, ya enlazada por
+/// Tauri/WebView2: sin dependencias nuevas). No-op fuera de Windows.
+fn fatal_dialog(msg: &str) {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(
+                hwnd: *mut std::ffi::c_void,
+                text: *const u16,
+                caption: *const u16,
+                utype: u32,
+            ) -> i32;
+        }
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let text = wide(msg);
+        let caption = wide("FocusFlow");
+        const MB_OK_ICONERROR: u32 = 0x0000_0010;
+        // SAFETY: cadenas UTF-16 terminadas en NUL que viven durante la
+        // llamada; hwnd nulo = sin ventana propietaria.
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                text.as_ptr(),
+                caption.as_ptr(),
+                MB_OK_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = msg;
 }
 
 #[cfg(test)]
@@ -620,6 +678,20 @@ mod tests {
             sanitize_log_line(&long).chars().count() <= 2000,
             "tope de longitud"
         );
+    }
+
+    #[test]
+    fn log_rotates_when_over_limit() {
+        let dir = std::env::temp_dir().join(format!("ff-logrot-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("spike.log");
+        fs::write(&p, vec![b'x'; 100]).unwrap();
+        rotate_log_if_big(&p, 1000);
+        assert!(p.exists(), "bajo el límite no rota");
+        rotate_log_if_big(&p, 50);
+        assert!(!p.exists(), "sobre el límite se renombra");
+        assert!(dir.join("spike.log.1").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

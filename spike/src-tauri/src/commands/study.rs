@@ -141,6 +141,23 @@ pub struct StudyTaskHit {
     pub end_at: i64,
 }
 
+/// Tareas que se solapan con [start_at, end_at). Mismo criterio que
+/// `find_overlap`: los all-day y spans multi-día (>= 24 h) son marcadores
+/// que no ocupan horas (antes toda sesión de un día "chocaba" con ellos).
+fn task_hits(rows: Vec<crate::store::TaskRow>, start_at: i64, end_at: i64) -> Vec<StudyTaskHit> {
+    rows.into_iter()
+        .filter(|t| t.status != "completada")
+        .filter(|t| !t.all_day && t.end_at - t.start_at < crate::engine::DAY_MS)
+        .filter(|t| t.start_at < end_at && t.end_at > start_at)
+        .map(|t| StudyTaskHit {
+            id: t.id,
+            title: t.title,
+            start_at: t.start_at,
+            end_at: t.end_at,
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub fn study_conflicts(
     state: State<'_, Mutex<Db>>,
@@ -154,22 +171,13 @@ pub fn study_conflicts(
         .into_iter()
         .filter(|i| i.start_at < end_at && i.end_at > start_at)
         .collect();
-    let mut tasks = Vec::new();
-    if let Ok(rows) = db.list() {
-        for t in rows {
-            if t.status == "completada" {
-                continue;
-            }
-            if t.start_at < end_at && t.end_at > start_at {
-                tasks.push(StudyTaskHit {
-                    id: t.id,
-                    title: t.title,
-                    start_at: t.start_at,
-                    end_at: t.end_at,
-                });
-            }
-        }
-    }
+    let tasks = db
+        .list()
+        .map(|rows| task_hits(rows, start_at, end_at))
+        .unwrap_or_default();
+    // `exclude_id` es el id de la SESIÓN editada: aquí solo se comparan
+    // clases y tareas (no otras sesiones), así que nunca puede chocar
+    // consigo misma
     let _ = exclude_id; // reservado: hoy una sesión nunca choca consigo misma
     Ok(StudyConflicts { classes, tasks })
 }
@@ -328,13 +336,12 @@ mod tests {
         .filter(|i| i.start_at < s_end && i.end_at > s_start)
         .count();
         assert_eq!(classes, 1, "detecta el solape con la clase activa");
-        let task_hits = d
-            .list()
-            .unwrap()
-            .into_iter()
-            .filter(|x| x.start_at < s_end && x.end_at > s_start)
-            .count();
-        assert_eq!(task_hits, 1, "detecta el solape con la tarea");
+        // un marcador all-day del mismo día NO cuenta como conflicto
+        d.create("Entrega (todo el día)", "uni", "media", t, t + DAY, true)
+            .unwrap();
+        let hits = task_hits(d.list().unwrap(), s_start, s_end);
+        assert_eq!(hits.len(), 1, "detecta el solape con la tarea");
+        assert_eq!(hits[0].title, "Informe de redes");
 
         // aun con conflicto, la sesión se crea y convive (el sistema no mueve nada)
         let s = d.study_create("Sesión", s_start, s_end, None, "").unwrap();

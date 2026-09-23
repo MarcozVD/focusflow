@@ -483,7 +483,12 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
                 if e > s {
                     let s_day = local_midnight(s);
                     let e_day = local_midnight(e);
-                    if e_day > s_day {
+                    // Evento con hora que cruza la medianoche ("fiesta de 22:00
+                    // a 01:00"): ≤ 24 h es UN bloque, no inicio + "(entrega)".
+                    let overnight = !i.window.all_day
+                        && e - s <= DAY_MS
+                        && !(s == s_day && e == e_day);
+                    if e_day > s_day && !overnight {
                         // inicio
                         i.window = if s > s_day {
                             TimeWindow {
@@ -554,7 +559,10 @@ pub fn split_range_blocks(title: &str, start: i64, end: i64) -> Vec<(String, i64
     const HOUR: i64 = 3_600_000;
     let s_day = local_midnight(start);
     let e_day = local_midnight(end);
-    if end <= start || e_day <= s_day {
+    // Span con hora que cruza la medianoche (22:00–01:00) y dura ≤ 24 h:
+    // UN bloque. Solo medianoche→medianoche (sin hora) cuenta como rango de días.
+    let overnight = end - start <= DAY_MS && !(start == s_day && end == e_day);
+    if end <= start || e_day <= s_day || overnight {
         return vec![(title.to_string(), start, end.max(start), false)];
     }
     let now = chrono::Local::now().timestamp_millis();
@@ -575,6 +583,31 @@ pub fn split_range_blocks(title: &str, start: i64, end: i64) -> Vec<(String, i64
         (close_title, e_day, e_day + DAY_MS, true)
     };
     vec![start_block, end_block]
+}
+
+/// Bloques a crear para una tarea interpretada de texto libre (QuickAdd /
+/// CLI). Igual que `split_range_blocks`, pero respeta el `all_day` del
+/// parser en el caso de UN solo bloque: un texto sin hora llega con
+/// start == end a medianoche y `split_range_blocks` lo devolvía como tarea
+/// con hora de duración cero (00:00–00:00): invisible en la agenda y
+/// reprogramada por `flexible_backlog` como tarea flexible.
+pub fn text_task_blocks(
+    title: &str,
+    start: i64,
+    end: i64,
+    all_day: bool,
+) -> Vec<(String, i64, i64, bool)> {
+    let mut blocks = split_range_blocks(title, start, end);
+    if blocks.len() == 1 && all_day {
+        let b = &mut blocks[0];
+        b.3 = true;
+        // marcador de día completo anclado a la medianoche local, 24 h
+        let s = local_midnight(b.1);
+        let (s, e) = crate::store::normalize_task_span(s, b.2.max(s), true);
+        b.1 = s;
+        b.2 = e;
+    }
+    blocks
 }
 
 fn apply_intents(base: &mut ConstraintEngine, intents: &[Intent]) {
@@ -794,7 +827,26 @@ fn effective_sessions(
 /// tareas reales (una por sesión + eventos del texto) y marca `accepted`.
 /// Si algo falla a mitad de camino, las tareas ya creadas se eliminan para
 /// no dejar el calendario parcialmente mutado.
+///
+/// Todo va en UNA transacción: antes un `?` a mitad de la creación de
+/// eventos (o en `set_plan_proposal_status`) dejaba eventos huérfanos y la
+/// propuesta `pending` (re-aceptarla los duplicaba). Los llamadores no
+/// abren transacción propia (BEGIN IMMEDIATE no es anidable).
 pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, String> {
+    db.tx_begin().map_err(|e| e.to_string())?;
+    match accept_plan_inner(db, id, edit) {
+        Ok(tasks) => {
+            db.tx_commit().map_err(|e| e.to_string())?;
+            Ok(tasks)
+        }
+        Err(e) => {
+            let _ = db.tx_rollback();
+            Err(e)
+        }
+    }
+}
+
+fn accept_plan_inner(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, String> {
     let Some(plan) = get_plan(db, id)? else {
         return Err("propuesta no encontrada".into());
     };
@@ -857,10 +909,12 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         //   aceptar no registra nada (propuestas viejas u otras rutas pueden
         //   llegar sin `window_end`).
         if let Some(s) = u.window_start {
+            // un all-day con window_end == window_start (sin duración) se
+            // descartaba por `e > s`: se trata igual que sin fin
             let e = match u.window_end {
-                Some(e) => e,
-                None if u.all_day => crate::engine::local_midnight(s) + crate::engine::DAY_MS,
-                None => s + crate::engine::HOUR_MS,
+                Some(e) if e > s || !u.all_day => e,
+                _ if u.all_day => crate::engine::local_midnight(s) + crate::engine::DAY_MS,
+                _ => s + crate::engine::HOUR_MS,
             };
             if e > s {
                 event_spans.push((s, e, u.title.clone(), u.all_day));
@@ -983,13 +1037,10 @@ pub fn accept_plan(db: &Db, id: i64, edit: &EditedPlan) -> Result<Vec<TaskRow>, 
         Ok(())
     })();
 
-    if let Err(e) = result {
-        // rollback compensatorio: no dejar el calendario a medias
-        for t in &created {
-            let _ = db.delete(t.id);
-        }
-        return Err(e);
-    }
+    // un fallo aquí revierte también los eventos ya creados: la transacción
+    // de `accept_plan` hace ROLLBACK (antes: borrado compensatorio que
+    // ignoraba sus propios errores)
+    result?;
 
     db.set_plan_proposal_status(id, "accepted")
         .map_err(|e| e.to_string())?;
@@ -1828,6 +1879,38 @@ mod tests {
         assert_eq!(b.len(), 1, "un solo día no se divide");
         assert_eq!(b[0].0, "Tarea");
         assert_eq!((b[0].1, b[0].2), (s, e));
+    }
+
+    #[test]
+    fn overnight_span_is_one_block() {
+        // "fiesta de 22:00 a 01:00": cruza la medianoche pero es UN bloque
+        // (antes: "Fiesta" 22:00–00:00 + "Fiesta (entrega)").
+        let h = 3_600_000;
+        let s = local_midnight(chrono::Local::now().timestamp_millis()) + DAY_MS + 22 * h;
+        let e = s + 3 * h;
+        let b = text_task_blocks("x", s, e, false);
+        assert_eq!(b.len(), 1, "{b:?}");
+        assert_eq!((b[0].1, b[0].2, b[0].3), (s, e, false));
+        assert_eq!(split_range_blocks("x", s, e).len(), 1);
+        // multi-día real (> 24 h) sigue en inicio + entrega
+        let b = split_range_blocks("x", s, s + DAY_MS + h);
+        assert_eq!(b.len(), 2, "{b:?}");
+        assert_eq!(b[1].0, "x (entrega)");
+    }
+
+    #[test]
+    fn overnight_event_intent_not_split() {
+        let h = 3_600_000;
+        let s = local_midnight(chrono::Local::now().timestamp_millis()) + DAY_MS + 22 * h;
+        let mut i = intent("Fiesta", IntentType::Event, 0);
+        i.window = TimeWindow {
+            start: Some(s),
+            end: Some(s + 3 * h),
+            all_day: false,
+        };
+        let out = normalize_event_windows(&[i]);
+        assert_eq!(out.len(), 1, "sin bloque (entrega)");
+        assert_eq!((out[0].window.start, out[0].window.end), (Some(s), Some(s + 3 * h)));
     }
 
     #[test]

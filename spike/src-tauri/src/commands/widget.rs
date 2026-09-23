@@ -86,6 +86,20 @@ pub fn open_app(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Nuevo span de "posponer" del widget: con hora → +1 h; all-day → al día
+/// siguiente (medianoche local, span >= 24 h). Sumar 1 h a un marcador
+/// all-day lo sacaba de la medianoche y lo hacía abarcar dos días.
+fn postpone_span(start: i64, end: i64, all_day: bool) -> (i64, i64) {
+    const HOUR: i64 = 3_600_000;
+    if all_day {
+        // +36 h y floor a medianoche: robusto a días de 23/25 h (DST)
+        let s = crate::engine::local_midnight(start + crate::engine::DAY_MS + 12 * HOUR);
+        (s, s + (end - start).max(crate::engine::DAY_MS))
+    } else {
+        (start + HOUR, end + HOUR)
+    }
+}
+
 /// Acción rápida del widget, aplicada vía los servicios existentes del store:
 /// - complete  → set_completed
 /// - postpone  → move_to (+1 h)
@@ -98,7 +112,6 @@ pub fn widget_action(
     action: String,
 ) -> Result<String, String> {
     use tauri::Emitter;
-    let delta = 3_600_000;
     crate::commands::with_db(&state, |db| {
         let t = db
             .get_task(id)
@@ -109,7 +122,19 @@ pub fn widget_action(
                 db.set_completed(id, true).map_err(|e| e.to_string())?;
             }
             "postpone" => {
-                db.move_to(id, t.start_at + delta, t.end_at + delta, Some(t.all_day))
+                // all-day → al día siguiente (sumar 1 h desalineaba el
+                // marcador de la medianoche); con hora → +1 h con la misma
+                // política de conflictos que task_move (estricto bloquea)
+                let (s, e) = postpone_span(t.start_at, t.end_at, t.all_day);
+                if let Some(other) =
+                    crate::commands::tasks::check_conflict(db, id, s, e, t.all_day)?
+                {
+                    append_log(
+                        &app,
+                        &format!("widget_postpone_overlap id={id} con={other}"),
+                    );
+                }
+                db.move_to(id, s, e, Some(t.all_day))
                     .map_err(|e| e.to_string())?;
             }
             "start" => {
@@ -139,5 +164,24 @@ pub fn auto_start_behavior(app: &AppHandle, db: &Db) {
             let _ = w.show();
         }
         append_log(app, "start_minimized_widget_shown");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::postpone_span;
+    use crate::engine::{local_midnight, DAY_MS};
+
+    #[test]
+    fn postpone_all_day_moves_to_next_day_and_timed_one_hour() {
+        let day = local_midnight(crate::store::now_ms());
+        // all-day: al día siguiente completo, no 01:00 → 01:00 del otro día
+        let (s, e) = postpone_span(day, day + DAY_MS, true);
+        assert_eq!(s, local_midnight(day + DAY_MS + 3_600_000));
+        assert_eq!(s, local_midnight(s));
+        assert!(e - s >= DAY_MS - 3_600_000);
+        // con hora: +1 h
+        let (s, e) = postpone_span(day + 9 * 3_600_000, day + 10 * 3_600_000, false);
+        assert_eq!((s, e), (day + 10 * 3_600_000, day + 11 * 3_600_000));
     }
 }

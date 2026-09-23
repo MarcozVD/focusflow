@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { signInWithGoogle, loadAuthStatus } from "./data.svelte.ts";
+  import { signInWithGoogle, loadAuthStatus } from "./data.svelte";
 
   let busy = $state(false);
   let err = $state("");

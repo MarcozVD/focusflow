@@ -258,7 +258,8 @@ impl AiProvider for OpenAiCompatProvider {
                 .bearer_auth(&self.api_key)
                 .json(&body)
                 .send()
-                .map_err(|e| AiError::Http(e.to_string()))?;
+                // sin URL en el mensaje: el Display de reqwest::Error la incluye
+                .map_err(|e| AiError::Http(e.without_url().to_string()))?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let headers = resp.headers().clone();
@@ -343,10 +344,12 @@ impl AiProvider for GeminiProvider {
             let resp = self
                 .http
                 .post(&url)
-                .query(&[("key", &self.api_key)])
+                // clave en cabecera, NUNCA en la query: el Display de
+                // reqwest::Error incluye la URL y acababa en la UI/log.
+                .header("x-goog-api-key", &self.api_key)
                 .json(&body)
                 .send()
-                .map_err(|e| AiError::Http(e.to_string()))?;
+                .map_err(|e| AiError::Http(e.without_url().to_string()))?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let headers = resp.headers().clone();

@@ -332,3 +332,65 @@ fn email_without_ai_reports_not_configured() {
         other => panic!("esperado NotConfigured, got {other:?}"),
     }
 }
+
+/// Auditoría B1: QuickAdd sin hora ("mañana entregar informe") creaba una
+/// tarea 00:00–00:00 con all_day=false (invisible y tratada como flexible).
+/// Debe quedar como marcador de todo el día: medianoche local + 24 h.
+#[test]
+fn quickadd_without_time_becomes_all_day_marker() {
+    use focusflow_spike_lib::ai::nl::parse_task_nl;
+    use focusflow_spike_lib::engine::{local_midnight, DAY_MS};
+    use focusflow_spike_lib::planning::text_task_blocks;
+
+    let p = parse_task_nl("mañana entregar informe").expect("parse");
+    let blocks = text_task_blocks(&p.title, p.start_ms, p.end_ms, p.all_day);
+    assert_eq!(blocks.len(), 1);
+    let (_, s, e, all_day) = &blocks[0];
+    assert!(*all_day, "sin hora = todo el día");
+    assert_eq!(*s, local_midnight(*s), "anclado a medianoche local");
+    assert_eq!(*e - *s, DAY_MS, "span de 24 h (visible en la agenda)");
+
+    let d = db();
+    let t = d.create(&blocks[0].0, "otr", "media", *s, *e, true).unwrap();
+    assert!(t.end_at > t.start_at);
+}
+
+/// Revisión de regresiones: editar SOLO el título de una sugerencia ya
+/// aceptada no debe mover su tarea (split_range_blocks ancla a "ahora" los
+/// rangos ya empezados) ni resucitar bloques borrados.
+#[test]
+fn edit_accepted_suggestion_title_keeps_task_times() {
+    use focusflow_spike_lib::commands::suggestions::{edit_suggestion, SuggestionEdit};
+    let d = db();
+    let (s, e) = (1_800_000_000_000, 1_800_000_003_600_000);
+    let sid = d
+        .insert_suggestion(
+            "email", Some("msg-edit"), Some("x@y.com"), "Reunión", "event",
+            "Reunión de equipo", "", "trab", "media", Some(s), Some(e), None, 0,
+            "", "[]", 0.9, "test", None, "", "pending",
+        )
+        .unwrap();
+    let tasks = accept_suggestion(&d, sid).unwrap();
+    let t0 = tasks.first().unwrap().clone();
+    // el usuario mueve la tarea a otra hora en el calendario
+    d.move_to(t0.id, s + 7_200_000, e + 7_200_000, None).unwrap();
+    edit_suggestion(
+        &d,
+        sid,
+        &SuggestionEdit {
+            title: "Reunión (nuevo título)",
+            category_id: "trab",
+            priority: "alta",
+            start_at: s,
+            end_at: e,
+            description: "",
+            all_day: false,
+        },
+    )
+    .unwrap();
+    let t = d.get_task(t0.id).unwrap().unwrap();
+    assert_eq!(t.title, "Reunión (nuevo título)");
+    assert_eq!(t.priority, "alta");
+    assert_eq!(t.start_at, s + 7_200_000, "conserva la hora movida por el usuario");
+    assert_eq!(t.end_at, e + 7_200_000);
+}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { contextualNotif, closeContextualNotif, notifRespond } from "./data.svelte.ts";
+  import { contextualNotif, closeContextualNotif, notifRespond } from "./data.svelte";
 
   let { onplan }: { onplan: (n: NonNullable<ReturnType<typeof contextualNotif>>) => void } = $props();
 

@@ -95,7 +95,7 @@
     return h === 0 ? `${d} d restantes` : `${d} d ${h} h restantes`;
   }
 
-  function timeLabel(t: { allDay: boolean; start: Date }): string {
+  function timeLabel(t: { allDay?: boolean; start: Date }): string {
     if (t.allDay) return "todo el día";
     return t.start.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fade, slide } from "svelte/transition";
+  import { localIsoDate } from "./dateUtils";
   import {
     taskDetail,
     closeTaskDetail,
@@ -32,16 +33,28 @@
   let feedback = $state("");
   let confirmOpen = $state(false);
 
-  function iso(d: Date): string {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
+  const iso = (d: Date) => localIsoDate(d);
   function hm(d: Date): string {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
+  // El formulario se re-sincroniza solo si cambia la tarea abierta o SUS
+  // datos. `tasks:changed` (sync, widget, CLI, el propio guardado) entrega
+  // siempre un objeto nuevo: resetear en cada uno borraba lo que el usuario
+  // estaba escribiendo y el "Guardado ✓" desaparecía al instante.
+  let lastId: number | null = null;
+  let lastSig = "";
   $effect(() => {
     const t = detail;
     if (!t) return;
+    const sig = JSON.stringify([
+      t.title, t.description, t.categoryId, t.priority, t.tags, +t.start, +t.end,
+      t.reminderMinutes, t.notes, t.links, t.allDay,
+    ]);
+    const sameTask = t.id === lastId;
+    if (sameTask && sig === lastSig) return;
+    lastId = t.id;
+    lastSig = sig;
     eTitle = t.title;
     eDesc = t.description ?? "";
     eCat = t.categoryId;
@@ -55,7 +68,7 @@
     eNotes = t.notes ?? "";
     eLinks = (t.links ?? []).join(", ");
     eAllDay = t.allDay ?? false;
-    feedback = "";
+    if (!sameTask) feedback = "";
   });
 
   function at(dateStr: string, timeStr: string): number {

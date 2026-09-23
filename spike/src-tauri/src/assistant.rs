@@ -883,7 +883,14 @@ pub fn apply_action(db: &Db, action: &AssistantAction) -> Result<String, String>
             // end ausente o anterior al inicio → duración de 1 h por defecto
             // (un evento invertido o de cero minutos era invisible/inútil,
             // bug M6); all-day sin fin cubre el día completo
-            let start = action.start_ms.unwrap_or_else(crate::email::now_ms);
+            // all-day sin fecha: anclado a la medianoche local de hoy (antes
+            // start=now y fin=medianoche → marcador de <24 h no anclado)
+            let start = match action.start_ms {
+                Some(s) if action.all_day => crate::engine::local_midnight(s),
+                Some(s) => s,
+                None if action.all_day => crate::engine::local_midnight(crate::email::now_ms()),
+                None => crate::email::now_ms(),
+            };
             let end = match action.end_ms {
                 Some(e) if e > start => e,
                 _ if action.all_day => crate::engine::local_midnight(start) + crate::engine::DAY_MS,
