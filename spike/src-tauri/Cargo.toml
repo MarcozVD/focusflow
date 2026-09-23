@@ -1,6 +1,6 @@
 [package]
 name = "focusflow-spike"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 # Dos binarios (app + CLI `ff`): tauri build necesita saber cuál es el principal.
 default-run = "focusflow-spike"
