@@ -513,18 +513,11 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
                         // cierre
                         let mut c = out.last().unwrap().clone();
                         c.title = format!("{} (entrega)", c.title);
-                        c.window = if e > e_day {
-                            TimeWindow {
-                                start: Some(e),
-                                end: Some(e + 2 * HOUR),
-                                all_day: false,
-                            }
-                        } else {
-                            TimeWindow {
-                                start: Some(e_day),
-                                end: Some(e_day + DAY_MS),
-                                all_day: true,
-                            }
+                        let (cs, ce, cad) = close_block(e);
+                        c.window = TimeWindow {
+                            start: Some(cs),
+                            end: Some(ce),
+                            all_day: cad,
                         };
                         out.push(c);
                         continue;
@@ -552,6 +545,9 @@ fn normalize_event_windows(intents: &[Intent]) -> Vec<Intent> {
 ///    hora, marcador de todo el día solo ese día.
 /// 2. **Cierre** "<título> (entrega)": si el fin trae hora, bloque de 2 h que
 ///    empieza a esa hora; si no, marcador de todo el día del último día.
+///    El cierre NUNCA cruza al día siguiente: "hasta el 27 a las 11:59 p.m."
+///    es el día 27 (23:59 = fin de día → marcador de todo el día; otra hora
+///    tardía → bloque de 2 h que TERMINA a esa hora).
 /// Los días intermedios quedan libres.
 ///
 /// Devuelve un único bloque si el rango cabe en un solo día.
@@ -577,12 +573,26 @@ pub fn split_range_blocks(title: &str, start: i64, end: i64) -> Vec<(String, i64
     };
     // cierre
     let close_title = format!("{title} (entrega)");
-    let end_block = if end > e_day {
-        (close_title, end, end + 2 * HOUR, false)
-    } else {
-        (close_title, e_day, e_day + DAY_MS, true)
-    };
+    let (cs, ce, cad) = close_block(end);
+    let end_block = (close_title, cs, ce, cad);
     vec![start_block, end_block]
+}
+
+/// Bloque de cierre "(entrega)" de un rango que termina en `end`
+/// → (inicio, fin, all_day). Nunca cruza al día siguiente.
+fn close_block(end: i64) -> (i64, i64, bool) {
+    const HOUR: i64 = 3_600_000;
+    let e_day = local_midnight(end);
+    let next_day = e_day + DAY_MS;
+    if end == e_day || end >= next_day - 60_000 {
+        // sin hora, o 23:59 ("hasta el final del día"): marcador del día
+        (e_day, next_day, true)
+    } else if end + 2 * HOUR > next_day {
+        // hora tardía: el bloque TERMINA a la hora de cierre, mismo día
+        ((end - 2 * HOUR).max(e_day), end, false)
+    } else {
+        (end, end + 2 * HOUR, false)
+    }
 }
 
 /// Bloques a crear para una tarea interpretada de texto libre (QuickAdd /
@@ -1911,6 +1921,24 @@ mod tests {
         let out = normalize_event_windows(&[i]);
         assert_eq!(out.len(), 1, "sin bloque (entrega)");
         assert_eq!((out[0].window.start, out[0].window.end), (Some(s), Some(s + 3 * h)));
+    }
+
+    #[test]
+    fn split_range_close_never_spills_to_next_day() {
+        // "disponible del 21 al 27 hasta las 11:59 p.m." → la entrega es el
+        // 27 (todo el día), no 27 23:59 → 28 01:59 (se veía el 28).
+        let h = 3_600_000;
+        let today = local_midnight(chrono::Local::now().timestamp_millis());
+        let (s, e_day) = (today + 2 * DAY_MS, today + 6 * DAY_MS);
+        let b = split_range_blocks("Module B Test", s, e_day + DAY_MS - 60_000);
+        assert_eq!(b.len(), 2, "{b:?}");
+        assert_eq!((b[1].1, b[1].2, b[1].3), (e_day, e_day + DAY_MS, true));
+        // cierre tardío con hora (23:00) → bloque que TERMINA a las 23:00
+        let b = split_range_blocks("x", s, e_day + 23 * h);
+        assert_eq!((b[1].1, b[1].2, b[1].3), (e_day + 21 * h, e_day + 23 * h, false));
+        // cierre normal (16:00) sin cambios
+        let b = split_range_blocks("x", s, e_day + 16 * h);
+        assert_eq!((b[1].1, b[1].2), (e_day + 16 * h, e_day + 18 * h));
     }
 
     #[test]

@@ -35,7 +35,7 @@ REGLAS:
 7. confidence: 0.0 (ambiguo) a 1.0 (explícito). Si la fecha o la hora están implícitas o hay ambigüedad, baja la confianza (≤ 0.5) y explica en reason.
 8. PRIVACIDAD: jamás incluyas información personal sensible (saludos, direcciones, teléfonos) en títulos ni descripciones. Solo el compromiso.
 9. Títulos en español, específicos, sin artículos ni prefijos. PRIORIDAD MATERIA + ACCIÓN: si se menciona una materia/asignatura, el título empieza por ella seguida de lo que hay que hacer ("Cálculo: quiz de derivadas", "Arquitectura: entrega de maqueta"). Nunca un título genérico ("Tarea", "Entrega") habiendo materia.
-10. Un correo puede producir VARIOS intents (varias fechas/compromisos).
+10. Un correo puede producir VARIOS intents (varias fechas/compromisos), pero UN intent por compromiso: una ventana con fecha de cierre ("disponible del 21 al 27 hasta las 23:59") es UNA sola availability con end_date/end_time; NO añadas además un deadline para el mismo cierre.
 11. Si el correo NO contiene compromisos accionables, devuelve {"intents": []}.
 12. reason: breve justificación en español, o null.
 13. HILOS: si el correo es una RESPUESTA dentro de una conversación y corrige/actualiza un compromiso mencionado antes ("corrección: la entrega es el lunes", "se pospone al viernes"), usa la fecha NUEVA en el intent. NO generes dos intents por el mismo compromiso: el correo nuevo es la versión vigente.
@@ -106,7 +106,76 @@ pub fn parse_email_intent(
         minimize_email(raw)
     );
     let v = provider.chat_json(EMAIL_SYSTEM_PROMPT, &user, INTENT_SCHEMA)?;
-    parse_batch_json(&v)
+    let mut batch = parse_batch_json(&v)?;
+    batch.intents = dedupe_same_email(std::mem::take(&mut batch.intents));
+    Ok(batch)
+}
+
+/// Un mismo compromiso descrito dos veces en UN correo produce un único
+/// intent. La IA suele devolver, para "disponible del 21 al 27 hasta las
+/// 11:59 p.m.", una `availability` 21→27 Y un `deadline` 27 23:59: dos
+/// sugerencias (y tareas) para lo mismo. Reglas:
+/// - `deadline` cuyo día coincide con el FIN de una `availability` de título
+///   similar → sobra (la ventana ya marca la entrega); si la ventana no traía
+///   hora de cierre, hereda la del deadline.
+/// - dos intents del mismo tipo, título similar y mismo día → sobra el 2.º.
+///
+/// Compromisos distintos (títulos o días distintos) se conservan todos.
+pub fn dedupe_same_email(intents: Vec<super::intent::Intent>) -> Vec<super::intent::Intent> {
+    use crate::engine::local_midnight;
+    let day = |ms: Option<i64>| ms.map(local_midnight);
+    let anchor = |i: &super::intent::Intent| match i.intent_type {
+        IntentType::Deadline => i.deadline.or(i.window.start),
+        _ => i.window.start.or(i.deadline),
+    };
+    let mut out: Vec<super::intent::Intent> = Vec::with_capacity(intents.len());
+    for it in intents {
+        if it.intent_type == IntentType::Deadline {
+            if let Some(a) = out.iter_mut().find(|a| {
+                a.intent_type == IntentType::Availability
+                    && crate::store::title_similar(&a.title, &it.title)
+                    && a.window.end.is_some()
+                    && day(a.window.end) == day(it.deadline)
+            }) {
+                inherit_close_time(a, it.deadline);
+                continue;
+            }
+        }
+        if it.intent_type == IntentType::Availability {
+            // deadline ya visto antes que su ventana: la ventana lo reemplaza
+            if let Some(pos) = out.iter().position(|d| {
+                d.intent_type == IntentType::Deadline
+                    && crate::store::title_similar(&d.title, &it.title)
+                    && it.window.end.is_some()
+                    && day(it.window.end) == day(d.deadline)
+            }) {
+                let d = out.remove(pos);
+                let mut it = it;
+                inherit_close_time(&mut it, d.deadline);
+                out.push(it);
+                continue;
+            }
+        }
+        let dup = out.iter().any(|o| {
+            o.intent_type == it.intent_type
+                && crate::store::title_similar(&o.title, &it.title)
+                && day(anchor(o)) == day(anchor(&it))
+        });
+        if !dup {
+            out.push(it);
+        }
+    }
+    out
+}
+
+/// Si la ventana cierra a medianoche (sin hora) y el deadline trae hora
+/// concreta, el cierre de la ventana toma esa hora.
+fn inherit_close_time(a: &mut super::intent::Intent, deadline: Option<i64>) {
+    if let (Some(end), Some(d)) = (a.window.end, deadline) {
+        if end == crate::engine::local_midnight(end) && d > end {
+            a.window.end = Some(d);
+        }
+    }
 }
 
 /// Mapea el intent de un correo a la fila de sugerencia: el `kind` que se
@@ -298,6 +367,30 @@ mod tests {
             "clasificación del contenido"
         );
         assert!(user.contains("viernes"), "el cuerpo llega como dato");
+    }
+
+    #[test]
+    fn same_email_availability_plus_deadline_is_one_intent() {
+        // "Module B Test available until Sunday 27 at 11:59 p.m.": la IA
+        // devolvía availability 21→27 + deadline 27 23:59 → 2 sugerencias.
+        let s = future_date(1);
+        let e = future_date(5);
+        let fixture = json!({"intents": [
+            {"intent_type":"availability","title":"Module B Test – Integrated Skills","category":"Uni",
+             "start_date":s,"end_date":e,"confidence":0.95,"reason":"ventana"},
+            {"intent_type":"deadline","title":"Module B Test – Integrated Skills","category":"Uni",
+             "deadline_date":e,"deadline_time":"23:59","confidence":0.95,"reason":"cierre"},
+            {"intent_type":"event","title":"Tutoría de inglés","category":"Uni",
+             "start_date":e,"start_time":"10:00","duration_minutes":60,"confidence":0.9,"reason":"otra cosa"}
+        ]});
+        let batch = parse_email_intent(&raw("x"), &DummyProvider(fixture), true).expect("ai");
+        assert_eq!(batch.intents.len(), 2, "{:?}", batch.intents);
+        let a = &batch.intents[0];
+        assert_eq!(a.intent_type, IntentType::Availability);
+        // la ventana hereda la hora de cierre (23:59) del deadline absorbido
+        let end = a.window.end.unwrap();
+        assert!(end > crate::engine::local_midnight(end), "hereda 23:59");
+        assert_eq!(batch.intents[1].intent_type, IntentType::Event, "otro compromiso se conserva");
     }
 
     #[test]

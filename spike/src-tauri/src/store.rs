@@ -103,7 +103,12 @@ fn sanitize_priority(p: &str) -> &str {
 /// end_at <= start_at). NO se toca ese caso aquí ni en `create`.
 pub(crate) fn normalize_task_span(start: i64, end: i64, all_day: bool) -> (i64, i64) {
     if all_day && end <= start {
-        (start, start + crate::engine::DAY_MS)
+        // marcador de UN día: anclado a la medianoche local. Sin anclar,
+        // fusionar un deadline "27 23:59" en una tarea all-day la guardaba
+        // 27 23:59 → 28 23:59 y la agenda la pintaba el 27 Y el 28. (Los
+        // rangos all-day multi-día con hora de cierre son válidos: intactos.)
+        let s = crate::engine::local_midnight(start);
+        (s, s + crate::engine::DAY_MS)
     } else {
         (start, end)
     }
@@ -2808,7 +2813,7 @@ pub struct SyncHistoryRow {
     pub note: String,
 }
 
-fn title_similar(a: &str, b: &str) -> bool {
+pub(crate) fn title_similar(a: &str, b: &str) -> bool {
     let norm = |s: &str| -> Vec<String> {
         s.to_lowercase()
             .chars()
@@ -2832,6 +2837,20 @@ fn title_similar(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_day_span_is_anchored_to_whole_days() {
+        // fusionar deadline "27 23:59" en tarea all-day guardaba 27 23:59 →
+        // 28 23:59 (se pintaba también el 28)
+        let d = crate::engine::local_midnight(now_ms()) + 3 * crate::engine::DAY_MS;
+        let late = d + crate::engine::DAY_MS - 60_000;
+        assert_eq!(normalize_task_span(late, late, true), (d, d + crate::engine::DAY_MS));
+        // rango all-day de 3 días intacto
+        let e = d + 3 * crate::engine::DAY_MS;
+        assert_eq!(normalize_task_span(d, e, true), (d, e));
+        // con hora no se toca
+        assert_eq!(normalize_task_span(late, late, false), (late, late));
+    }
 
     fn db() -> Db {
         Db::open_memory().unwrap()
