@@ -191,7 +191,7 @@ pub fn email_config_set(
 #[tauri::command]
 pub fn email_sync_now(app: AppHandle) -> Result<(), String> {
     let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || match sync::run_sync(&handle) {
+    tauri::async_runtime::spawn_blocking(move || match sync::run_sync_manual(&handle) {
         Ok(s) => append_log(
             &handle,
             &format!(
@@ -216,7 +216,7 @@ pub fn email_rescan(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), S
     })?;
     append_log(&app, "email_rescan_requested");
     let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || match sync::run_sync(&handle) {
+    tauri::async_runtime::spawn_blocking(move || match sync::run_sync_manual(&handle) {
         Ok(s) => append_log(
             &handle,
             &format!(

@@ -284,9 +284,10 @@
     saved = "";
     try {
       const config = {
-        host: emailConfig()?.config.host ?? "gmail.googleapis.com",
-        port: emailConfig()?.config.port ?? 443,
-        user: emailConfig()?.config.user ?? (authUser()?.email ?? ""),
+        // `||` (no `??`): la config por defecto trae "" y `??` lo conservaba
+        host: emailConfig()?.config.host || "gmail.googleapis.com",
+        port: emailConfig()?.config.port || 443,
+        user: emailConfig()?.config.user || (authUser()?.email ?? ""),
         auth: "oauth2",
         ssl: emailSsl,
         mailboxes: mailboxes.split("\n").map((s) => s.trim()).filter(Boolean),

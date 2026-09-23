@@ -669,6 +669,34 @@ fn is_precondition_error(e: &str) -> bool {
         || e.contains("no hay sesión de Google")
 }
 
+/// Sync lanzado por el usuario ("Comprobar ahora" / "Reescanear"). La UI ya
+/// entró en "Comprobando…" al pulsar, y el `invoke` retorna antes de que el
+/// sync corra (spawn_blocking) → las precondiciones que `run_sync` silencia
+/// para el sync automático SÍ deben emitirse aquí, o la UI queda colgada en
+/// "Conectando y revisando correos nuevos…" para siempre.
+pub fn run_sync_manual(app: &AppHandle) -> Result<SyncSummary, String> {
+    let res = run_sync(app);
+    if let Err(e) = &res {
+        if is_precondition_error(e) {
+            let _ = app.emit("email:sync-error", e);
+        }
+    }
+    res
+}
+
+/// Completa host/usuario vacíos: con Gmail REST el host es fijo y el usuario
+/// es la cuenta de la sesión de Google.
+fn fill_config_from_session(config: &mut EmailConfig, session_email: Option<String>) {
+    if config.host.trim().is_empty() {
+        config.host = "gmail.googleapis.com".into();
+    }
+    if config.user.trim().is_empty() {
+        if let Some(e) = session_email.filter(|e| !e.trim().is_empty()) {
+            config.user = e;
+        }
+    }
+}
+
 fn run_sync_locked(app: &AppHandle) -> Result<SyncSummary, String> {
     let started = email::now_ms();
     let mut summary = SyncSummary {
@@ -687,7 +715,14 @@ fn run_sync_locked(app: &AppHandle) -> Result<SyncSummary, String> {
         return Err("email deshabilitado en Ajustes".into());
     }
 
-    let config = with_db(app, load_email_config);
+    let mut config = with_db(app, load_email_config);
+    // Gmail REST no usa host ni usuario de la config (usa el token OAuth):
+    // si nunca se guardaron Ajustes de correo, se completan desde la sesión
+    // de Google en vez de fallar con "email no configurado".
+    fill_config_from_session(
+        &mut config,
+        with_db(app, |db| crate::auth::status(db).map(|s| s.email)),
+    );
     if config.host.is_empty() || config.user.is_empty() {
         return Err("email no configurado: host y usuario requeridos".into());
     }
@@ -1121,6 +1156,27 @@ pub fn retry_delay_hint(err: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::sync::retry_delay_hint;
+
+    #[test]
+    fn fill_config_from_session_completa_host_y_usuario_vacios() {
+        // regresión: config nunca guardada → "email no configurado" y la UI
+        // quedaba colgada en "Conectando y revisando correos nuevos…"
+        let mut c = EmailConfig::default();
+        fill_config_from_session(&mut c, Some("yo@gmail.com".into()));
+        assert_eq!(c.host, "gmail.googleapis.com");
+        assert_eq!(c.user, "yo@gmail.com");
+
+        // no pisa valores ya configurados
+        let mut c2 = EmailConfig { host: "h".into(), user: "u@x.com".into(), ..Default::default() };
+        fill_config_from_session(&mut c2, Some("otro@gmail.com".into()));
+        assert_eq!((c2.host.as_str(), c2.user.as_str()), ("h", "u@x.com"));
+
+        // sin sesión el usuario sigue vacío → precondición "no configurado"
+        let mut c3 = EmailConfig::default();
+        fill_config_from_session(&mut c3, None);
+        assert!(c3.user.is_empty());
+        assert!(is_precondition_error("email no configurado: host y usuario requeridos"));
+    }
 
     #[test]
     fn retry_hint_429_con_segundos() {
