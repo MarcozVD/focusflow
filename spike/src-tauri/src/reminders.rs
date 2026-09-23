@@ -8,7 +8,6 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::Timelike;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 
@@ -31,20 +30,13 @@ fn now_ms() -> i64 {
 }
 
 fn tick(app: &AppHandle) {
-    // respeta preferencias de notificación (kill-switch y horario de silencio)
-    let quiet = crate::sync::with_db(app, |db| {
-        let p = crate::notify::prefs(db);
-        if !p.enabled {
-            return true;
-        }
-        let now = chrono::Local::now();
-        crate::notify::in_quiet_hours(now.hour() * 60 + now.minute(), &p)
-    });
-    if quiet {
-        return;
-    }
+    // Kill-switch y horario de silencio aplican SOLO a las notificaciones
+    // contextuales (notify::tick los comprueba él mismo). Los recordatorios
+    // son EXPLÍCITOS del usuario: una clase a las 7:00 con aviso de 30 min
+    // debe sonar a las 6:30 aunque el silencio acabe a las 8:00.
     crate::notify::tick(app);
-    let due = crate::sync::with_db(app, |db| db.due_reminders(now_ms()));
+    let now = now_ms();
+    let due = crate::sync::with_db(app, |db| db.due_reminders(now));
     let due = match due {
         Ok(v) => v,
         Err(e) => {
@@ -57,6 +49,13 @@ fn tick(app: &AppHandle) {
     }
     let mut fired = 0usize;
     for r in due {
+        if is_stale(&r, now) {
+            // el evento ya terminó (app cerrada durante la ventana): avisar
+            // ahora solo confunde; se marca disparado sin mostrarlo
+            let _ = crate::sync::with_db(app, |db| db.mark_reminder_fired(r.task_id));
+            crate::append_log(app, &format!("reminder_stale_skipped id={}", r.task_id));
+            continue;
+        }
         match app
             .notification()
             .builder()
@@ -67,10 +66,7 @@ fn tick(app: &AppHandle) {
             Ok(_) => {
                 let _ = crate::sync::with_db(app, |db| db.mark_reminder_fired(r.task_id));
                 fired += 1;
-                crate::append_log(
-                    app,
-                    &format!("reminder_fired id={} title={}", r.task_id, r.title),
-                );
+                crate::append_log(app, &format!("reminder_fired id={}", r.task_id));
             }
             Err(e) => crate::append_log(app, &format!("reminder_show_error id={} {e}", r.task_id)),
         }
@@ -79,6 +75,11 @@ fn tick(app: &AppHandle) {
         crate::append_log(app, &format!("reminders_fired count={fired}"));
     }
     let _ = app.emit("reminders:fired", fired);
+}
+
+/// ¿El recordatorio llega tarde a un evento que ya terminó?
+fn is_stale(r: &DueReminder, now: i64) -> bool {
+    r.end_at.max(r.start_at) < now
 }
 
 fn reminder_body(r: &DueReminder) -> String {
@@ -137,7 +138,7 @@ pub fn parse_reminder_minutes(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::parse_reminder_minutes;
-    use super::reminder_body;
+    use super::{is_stale, reminder_body};
     use crate::store::DueReminder;
 
     fn due(start_at: i64, all_day: bool) -> DueReminder {
@@ -149,6 +150,17 @@ mod tests {
             all_day,
             reminder_minutes: 60,
         }
+    }
+
+    #[test]
+    fn stale_only_when_event_already_ended() {
+        let now = chrono::Local::now().timestamp_millis();
+        // en curso (empezó hace 30 min, dura 1 h) → aún se avisa
+        assert!(!is_stale(&due(now - 1_800_000, false), now));
+        // futuro → se avisa
+        assert!(!is_stale(&due(now + 1_800_000, false), now));
+        // terminó hace 1 h → descartado
+        assert!(is_stale(&due(now - 2 * 3_600_000, false), now));
     }
 
     #[test]

@@ -16,7 +16,7 @@
   import Settings from "./lib/Settings.svelte";
   import Onboarding from "./lib/Onboarding.svelte";
   import Login from "./lib/Login.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies } from "./lib/data.svelte.ts";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies } from "./lib/data.svelte";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
   import ContextualToast from "./lib/ContextualToast.svelte";
 
@@ -199,7 +199,7 @@
           <div class="cal-wrap">
             {#key "sesiones-" + hmode + date.toDateString()}
               <div transition:fade={{ duration: 160 }}>
-                <StudySessions {date} smode={hmode} {setDate} {setHmode} />
+                <StudySessions {date} smode={hmode} {setDate} setSmode={setHmode} />
               </div>
             {/key}
           </div>

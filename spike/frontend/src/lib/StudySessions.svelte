@@ -49,6 +49,10 @@
   let formOpen = $state(false);
   let editing = $state<StudySession | null>(null);
   let prefill = $state<{ start: Date; end: Date } | null>(null);
+  // Cada apertura incrementa la clave: StudyForm captura initial/prefill solo
+  // al montar; reabrirlo ya abierto con otra sesión guardaba sobre el id
+  // equivocado. {#key formKey} lo remonta.
+  let formKey = $state(0);
   let formError = $state("");
   let busy = $state(false);
 
@@ -164,6 +168,7 @@
           end: new Date(day.getTime() + (hour ?? 8) * 3_600_000 + 2 * 3_600_000),
         }
       : null;
+    formKey++;
     formOpen = true;
   }
 
@@ -184,6 +189,7 @@
         editing = s;
         prefill = null;
         formError = "";
+        formKey++;
         formOpen = true;
       }
       closeStudyDetail();
@@ -255,7 +261,7 @@
   ): Promise<boolean> {
     return new Promise((resolve) => {
       pendingResolve = resolve;
-      conflictInfo = { title, window: `${fmtHM(start)} – ${fmtHM(end)}`, classes, tasks: tasksC };
+      conflictInfo = { title, window: `${fmtHM(start.getTime())} – ${fmtHM(end.getTime())}`, classes, tasks: tasksC };
     });
   }
   function resolveConflict(go: boolean) {
@@ -364,6 +370,7 @@
 </div>
 
 {#if formOpen}
+  {#key formKey}
   <StudyForm
     initial={editing}
     prefill={prefill}
@@ -372,6 +379,7 @@
     {onSubmit}
     ondelete={removeCurrent}
   />
+  {/key}
 {/if}
 
 {#if conflictInfo}

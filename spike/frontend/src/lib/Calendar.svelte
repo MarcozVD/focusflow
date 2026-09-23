@@ -150,8 +150,6 @@
     timeAreaH = el.clientHeight;
     return () => ro.disconnect();
   });
-  const pxH = $derived(grid.hi > grid.lo && timeAreaH > 0 ? timeAreaH / (grid.hi - grid.lo) : 56);
-  const minTimeAreaH = $derived(hours.length * 28);
 
   /**
    * Franja horaria visible: por defecto 6:00–22:00.
@@ -180,6 +178,9 @@
   });
 
   const hours = $derived(Array.from({ length: grid.hi - grid.lo + 1 }, (_, i) => grid.lo + i));
+  // declarados tras grid/hours (antes se usaban antes de su declaración: TDZ)
+  const pxH = $derived(grid.hi > grid.lo && timeAreaH > 0 ? timeAreaH / (grid.hi - grid.lo) : 56);
+  const minTimeAreaH = $derived(hours.length * 28);
 
   const nowInRange = $derived.by(() => {
     const n = new Date();
@@ -661,7 +662,7 @@
             </button>
           {/each}
         </div>
-        <button class="pop-go" onclick={() => { onSelectDate(popupDay); popupDay = null; }}>
+        <button class="pop-go" onclick={() => { if (popupDay) onSelectDate(popupDay); popupDay = null; }}>
           Ver día completo →
         </button>
       </div>
@@ -744,13 +745,13 @@
                 task={sp.s.taskId != null
                   ? (tasks.find((t) => t.id === sp.s.taskId) ?? {
                       id: sp.s.taskId, title: "", start: sp.s.start, end: sp.s.end,
-                      allDay: false, status: "pendiente", priority: "normal",
-                      categoryId: 0, description: "", reminders: [],
+                      allDay: false, status: "pendiente", priority: "media",
+                      categoryId: "otr", description: "",
                     })
                   : {
                       id: -1, title: "", start: sp.s.start, end: sp.s.end,
-                      allDay: false, status: "pendiente", priority: "normal",
-                      categoryId: 0, description: "", reminders: [],
+                      allDay: false, status: "pendiente", priority: "media",
+                      categoryId: "otr", description: "",
                     }}
                 seg={sp.seg}
                 top={sp.top}

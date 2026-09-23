@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fade } from "svelte/transition";
+  import { localIsoDate } from "./dateUtils";
   import {
     planProposal,
     planBusy,
@@ -53,10 +54,9 @@
     return p.understanding.some((u) => u.intent_type === "Event" && u.window_start != null);
   }
 
-  function iso(ms: number): string {
-    const d = new Date(ms);
-    return d.toISOString().slice(0, 10);
-  }
+  // fecha LOCAL: toISOString() daba el día UTC y fromParts la recompone como
+  // local → desde las 19:00 en UTC-5 mostraba mañana y guardar movía +1 día
+  const iso = (ms: number) => localIsoDate(ms);
   function hm(ms: number): string {
     const d = new Date(ms);
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

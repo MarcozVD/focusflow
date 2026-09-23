@@ -48,10 +48,15 @@ fn ms_to_date(ms: i64) -> chrono::NaiveDate {
         .unwrap_or_else(now)
 }
 
-fn next_weekday(by_day: &[u8]) -> chrono::NaiveDate {
+/// Próxima fecha cuyo día está en `by_day`. Mismo criterio que
+/// `nl::weekday_delta_at`: hoy cuenta si no hay hora o si la hora de inicio
+/// (`start_min`) aún no pasó; si no, la próxima ocurrencia.
+fn next_weekday(by_day: &[u8], start_min: Option<u32>) -> chrono::NaiveDate {
     let today = now();
     let today_wd = nl::weekday_num(today);
-    if by_day.contains(&today_wd) && chrono::Local::now().time().hour() < 21 {
+    let t = chrono::Local::now().time();
+    let now_min = t.hour() * 60 + t.minute();
+    if by_day.contains(&today_wd) && start_min.is_none_or(|m| m > now_min) {
         return today;
     }
     for d in 1..=7 {
@@ -169,15 +174,17 @@ fn detect_time_only(lower: &str) -> Option<(u32, u32)> {
     )
     .ok()?;
     if let Some(caps) = re.captures(lower) {
-        let s = parse_clock(caps.get(1)?.as_str())?;
-        let mut e = parse_clock(caps.get(2)?.as_str())?;
-        if e <= s {
-            e += 12 * 60;
+        let (a, b) = (caps.get(1)?.as_str(), caps.get(2)?.as_str());
+        // al menos un extremo debe ser hora inequívoca (am/pm o ":"); el
+        // otro hereda el am/pm y el cruce de medianoche pasa al día siguiente
+        // (misma resolución que `nl::time_range`).
+        if parse_clock(a).is_some() || parse_clock(b).is_some() {
+            return nl::resolve_range(a, b);
         }
-        return Some((s, e));
+        return None;
     }
     let s = nl::hour_from_text(lower)?;
-    let dur = nl::duration_from_text(lower).unwrap_or(60);
+    let dur = nl::duration_from_text(lower).unwrap_or(60).clamp(1, 24 * 60);
     Some((s, (s as i64 + dur) as u32))
 }
 
@@ -205,6 +212,13 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
         let date = chrono::NaiveDate::from_ymd_opt(y, m, day)?;
         Some(nl::local_ms(date.and_hms_opt(0, 0, 0).unwrap()))
     };
+    // fin en el año siguiente al del inicio `s_ms`
+    let mk_next_year = |month: &str, day: u32, s_ms: i64| -> Option<i64> {
+        let m = nl::month_number(month)?;
+        let (sy, _, _) = nl::ymd(ms_to_date(s_ms));
+        let date = chrono::NaiveDate::from_ymd_opt(sy + 1, m, day)?;
+        Some(nl::local_ms(date.and_hms_opt(0, 0, 0).unwrap()))
+    };
     // la ventana puede estar en curso (inicio en el pasado): solo se exige
     // que el FINAL sea futuro.
     let in_future = |ms: i64| ms >= nl::local_ms(now().and_hms_opt(0, 0, 0).unwrap());
@@ -226,8 +240,11 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
         let m2 = caps.get(4)?.as_str();
         let s = mk(m1, d1, y0)?;
         let mut e = mk(m2, d2, y0)?;
-        if nl::month_number(m2)? < nl::month_number(m1)? {
-            e += 365 * 24 * HOUR_MS; // cruce de año ("del 25 de diciembre al 2 de enero")
+        if e < s {
+            // cruce de año ("del 25 de diciembre al 2 de enero"): `mk` ya pudo
+            // subir el año; se reconstruye el fin con el año del inicio + 1
+            // (sumar 365 días fallaba en bisiesto y duplicaba el salto).
+            e = mk_next_year(m2, d2, s)?;
         }
         if s < e && in_future(e) {
             return Some((s, e));
@@ -238,8 +255,8 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
         let d2: u32 = caps.get(4)?.as_str().parse().ok()?;
         let s = mk(caps.get(1)?.as_str(), d1, y0)?;
         let mut e = mk(caps.get(3)?.as_str(), d2, y0)?;
-        if nl::month_number(caps.get(3)?.as_str())? < nl::month_number(caps.get(1)?.as_str())? {
-            e += 365 * 24 * HOUR_MS;
+        if e < s {
+            e = mk_next_year(caps.get(3)?.as_str(), d2, s)?;
         }
         if s < e && in_future(e) {
             return Some((s, e));
@@ -261,7 +278,9 @@ fn detect_date_range(lower: &str) -> Option<(i64, i64)> {
         let w1 = nl::weekday_from_name(caps.get(1)?.as_str())?;
         let w2 = nl::weekday_from_name(caps.get(2)?.as_str())?;
         let today = chrono::Local::now().date_naive();
-        let start = today + chrono::Duration::days(nl::weekday_delta(w1));
+        // "del próximo lunes al viernes" dicho un lunes → la semana siguiente
+        let next = nl::preceded_by_next(lower, caps.get(1)?.start());
+        let start = today + chrono::Duration::days(nl::weekday_delta_next_at(w1, None, next));
         let mut delta = (w2.number_from_monday() as i64 - w1.number_from_monday() as i64 + 7) % 7;
         if delta == 0 {
             delta = 7; // "del lunes al lunes" = semana completa
@@ -456,7 +475,7 @@ fn analyze_clause(clause: &str) -> RuleIntent {
     if is_availability && recurrence.is_some() && time_only.is_some() {
         let (freq, by_day) = recurrence.clone().unwrap();
         let (s_min, e_min) = time_only.unwrap();
-        let day = next_weekday(&by_day);
+        let day = next_weekday(&by_day, Some(s_min));
         let day_ms = nl::local_ms(day.and_hms_opt(0, 0, 0).unwrap());
         return RuleIntent {
             intent_type: "availability",
@@ -520,7 +539,8 @@ fn analyze_clause(clause: &str) -> RuleIntent {
     } else {
         match time_only {
             Some((s, _)) if s < 12 * 60 => {
-                let has_suffix = regex::Regex::new(r"(?:am|pm|a\.m\.|p\.m\.)")
+                // am/pm junto a una hora (no "examen"/"llamar")
+                let has_suffix = regex::Regex::new(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?:[^a-z]|$)")
                     .unwrap()
                     .is_match(&lower);
                 let has_part = lower.contains("tarde")
@@ -830,29 +850,47 @@ mod tests {
 
         // "Exam Friday at 8 AM" — ejemplo 2
         let i = intent_of("Exam Friday at 8 AM", 0);
-        let fri = midnight(crate::ai::nl::weekday_delta(chrono::Weekday::Fri) as i64);
+        let fri = midnight(crate::ai::nl::weekday_delta_at(chrono::Weekday::Fri, Some(8 * 60)));
         assert_eq!(i.window.start, Some(fri + 8 * HOUR));
         assert_eq!(i.window.end, Some(fri + 9 * HOUR));
         assert!(!i.window.all_day);
         assert_eq!(i.title, "Exam");
         assert!(i.confidence >= 0.8, "explícita: {}", i.confidence);
 
-        // fecha absoluta con mes (misma regla del parser: si el día ya pasó
-        // este mes, rota al próximo día 15)
+        // fecha absoluta con mes: este año si aún no pasó, si no el año
+        // siguiente (antes rotaba al "próximo día 15": test corregido)
         let i = intent_of("el 15 de agosto a las 9 presentar informe", 0);
         let today = chrono::Local::now().date_naive();
-        let (y, m, _) = nl::ymd(today);
-        let year = if 8 < m { y + 1 } else { y };
-        let date = chrono::NaiveDate::from_ymd_opt(year, 8, 15).unwrap();
+        let (y, _, _) = nl::ymd(today);
+        let date = chrono::NaiveDate::from_ymd_opt(y, 8, 15).unwrap();
         let expected = if date >= today {
             date
         } else {
-            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
-            chrono::NaiveDate::from_ymd_opt(ny, nm, 15).unwrap()
+            chrono::NaiveDate::from_ymd_opt(y + 1, 8, 15).unwrap()
         };
         let dms = nl::local_ms(expected.and_hms_opt(0, 0, 0).unwrap());
         assert_eq!(i.window.start, Some(dms + 9 * HOUR));
         assert_eq!(i.title, "Presentar informe");
+    }
+
+    #[test]
+    fn date_range_crosses_year_once() {
+        use chrono::Datelike;
+        let v = detect_date_range("vacaciones del 25 de diciembre al 2 de enero");
+        let (s, e) = v.expect("rango");
+        let sd = ms_to_date(s);
+        let ed = ms_to_date(e);
+        assert_eq!((sd.month(), sd.day()), (12, 25));
+        assert_eq!((ed.month(), ed.day()), (1, 2));
+        assert_eq!(ed.year(), sd.year() + 1, "el año sube UNA sola vez");
+        assert_eq!((ed - sd).num_days(), 8);
+    }
+
+    #[test]
+    fn english_range_inherits_meridiem() {
+        assert_eq!(detect_time_only("from 3 to 5 pm"), Some((15 * 60, 17 * 60)));
+        assert_eq!(detect_time_only("from 10 pm to 1 am"), Some((22 * 60, 25 * 60)));
+        assert_eq!(detect_time_only("de 3 a 5 pm"), Some((15 * 60, 17 * 60)));
     }
 
     #[test]
@@ -986,6 +1024,19 @@ mod tests {
         let wd = crate::ai::nl::weekday_num(sd.date_naive());
         assert!((1..=5).contains(&wd), "cae en día hábil, fue {}", wd);
         assert_eq!(sd.hour(), 18);
+    }
+
+    #[test]
+    fn next_weekday_range_skips_today() {
+        // "proyecto del próximo <hoy> al <hoy+2>": empieza la semana siguiente
+        let today = chrono::Local::now().date_naive();
+        let names = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+        let k = chrono::Datelike::weekday(&today).num_days_from_monday() as usize;
+        let txt = format!("proyecto del próximo {} al {}", names[k], names[(k + 2) % 7]);
+        let i = intent_of(&txt, 0);
+        assert_eq!(i.window.start, Some(midnight(7)), "{txt}");
+        let txt = format!("proyecto del {} al {}", names[k], names[(k + 2) % 7]);
+        assert_eq!(intent_of(&txt, 0).window.start, Some(midnight(0)), "{txt}");
     }
 
     #[test]

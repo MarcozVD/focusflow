@@ -27,7 +27,11 @@
 
   let formOpen = $state(false);
   let editing: ClassRow | null = $state(null);
-  let prefill: { day_of_week: number; start_min: number } | null = null;
+  let prefill = $state<{ day_of_week: number; start_min: number } | null>(null);
+  // Cada apertura del formulario incrementa la clave: ClassForm captura
+  // initial/prefill solo al montar, y reabrirlo ya abierto con otra clase
+  // guardaba sobre el id equivocado. {#key formKey} lo remonta.
+  let formKey = $state(0);
   let formError = $state("");
 
   function mondayOf(d: Date): number {
@@ -122,6 +126,7 @@
     prefill = day
       ? { day_of_week: dowMonFirst(day), start_min: (hour ?? 8) * 60 }
       : null;
+    formKey++;
     formOpen = true;
   }
 
@@ -138,6 +143,7 @@
     if (!c) return;
     editing = c;
     formError = "";
+    formKey++;
     formOpen = true;
   }
 
@@ -257,6 +263,7 @@
 </div>
 
 {#if formOpen}
+  {#key formKey}
   <ClassForm
     initial={editing}
     {prefill}
@@ -270,6 +277,7 @@
       else { formOpen = false; editing = null; }
     }}
   />
+  {/key}
 {/if}
 
 <style>

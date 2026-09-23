@@ -6,6 +6,7 @@ import {
   type ClassInstance,
   type ClassRow,
 } from "./classLogic";
+import { localIsoDate } from "./dateUtils";
 
 export type Priority = "alta" | "media" | "baja";
 export type Status = "pendiente" | "completada" | "en-curso" | "vencida";
@@ -539,6 +540,27 @@ export function closeTaskDetail() {
   store.taskDetail = null;
 }
 
+/** Mantiene el drawer sincronizado tras un cambio: busca la tarea en la caché
+ *  y, si cae fuera de las semanas cargadas, la pide al backend (task_list)
+ *  en vez de cerrar el drawer. Solo se cierra si la tarea ya no existe. */
+async function resyncTaskDetail(id: number) {
+  const cur = store.tasks.find((t) => t.id === id);
+  if (cur) {
+    if (store.taskDetail?.id === id) store.taskDetail = cur;
+    return;
+  }
+  let row: TaskRow | undefined;
+  try {
+    const all = await invoke<TaskRow[]>("task_list");
+    row = all.find((r) => r.id === id);
+  } catch (e) {
+    console.error("resyncTaskDetail", e);
+    return; // error transitorio: conservar el drawer con los datos actuales
+  }
+  if (store.taskDetail?.id !== id) return; // el usuario ya cambió de tarea
+  store.taskDetail = row ? toTask(row) : null;
+}
+
 /** Abre la app principal en la vista de Sesiones de estudio (desde el widget). */
 export function openStudySessions() {
   if (!inTauri()) return;
@@ -581,7 +603,9 @@ function weekKey(d: Date): string {
   const dow = (x.getDay() + 6) % 7;
   x.setDate(x.getDate() - dow);
   x.setHours(0, 0, 0, 0);
-  return x.toISOString().slice(0, 10);
+  // clave en fecha LOCAL: fetchWeek y weekKeysBetween la vuelven a parsear
+  // como local; con toISOString (UTC) en husos positivos daba el domingo
+  return localIsoDate(x);
 }
 
 function rebuildTasks() {
@@ -700,11 +724,20 @@ function setNlToast(text: string, source: string) {
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** Estado visible de una tarea. "Vencida" se decide por el FIN (end_at ya
+ *  normalizado: all-day = fin del día): comparar el inicio marcaba como
+ *  vencidas las tareas en curso y las all-day de hoy. */
+export function taskStatus(
+  r: { completed_at: number | null; status: string },
+  endMs: number,
+  now: number = Date.now(),
+): Status {
+  if (r.completed_at != null) return "completada";
+  if (r.status === "en-curso") return "en-curso";
+  return endMs < now ? "vencida" : "pendiente";
+}
+
 function toTask(r: TaskRow): Task {
-  let status: Status;
-  if (r.completed_at != null) status = "completada";
-  else if (r.status === "en-curso") status = "en-curso";
-  else status = r.start_at < Date.now() ? "vencida" : "pendiente";
   let tags: string[] = [];
   try {
     const parsed = JSON.parse(r.tags || "[]");
@@ -718,6 +751,7 @@ function toTask(r: TaskRow): Task {
   // ya crea las nuevas con end = start + 24h; esto saneala las existentes.
   let endMs = r.end_at;
   if (r.all_day && endMs <= r.start_at) endMs = r.start_at + 86_400_000;
+  const status = taskStatus(r, endMs);
   return {
     id: r.id,
     title: r.title,
@@ -1181,14 +1215,11 @@ export async function init() {
   listenersReady = true;
   try {
     refreshAssistantActions();
-    await listen("tasks:changed", () => {
-      refreshTasks();
-      if (store.taskDetail) {
-        // mantén el drawer sincronizado con los datos frescos
-        const cur = store.tasks.find((t) => t.id === store.taskDetail!.id);
-        if (cur) store.taskDetail = cur;
-        else store.taskDetail = null;
-      }
+    await listen("tasks:changed", async () => {
+      // esperar la recarga: sin await se buscaba en la caché vieja y el
+      // drawer mostraba datos antiguos o se cerraba
+      await refreshTasks();
+      if (store.taskDetail) await resyncTaskDetail(store.taskDetail.id);
     });
     await listen("classes:changed", () => {
       loadClasses();
@@ -1221,6 +1252,11 @@ export async function init() {
       store.syncProgress = null;
       store.syncSummary = { started_at: 0, finished_at: 0, mailboxes: [], total_found: 0, total_suggestions: 0, error: String(e.payload) } satisfies SyncDoneSummary;
       loadSyncStatus();
+    });
+    // refresh_token revocado (invalid_grant): el backend vació los tokens →
+    // recargar la sesión para que la UI deje de mostrar "Gmail conectado"
+    await listen("auth:expired", () => {
+      loadAuthStatus();
     });
   } catch (e) {
     console.error("init", e);
@@ -1487,7 +1523,15 @@ export async function saveGeneralSettings(v: {
       closeToTrayWidget: v.closeToTrayWidget,
       conflictStrict: v.conflictStrict,
     });
-    store.general = { ...v, autostart_actual: v.startWithWindows };
+    // GeneralSettingsView es snake_case (como lo devuelve el backend): con las
+    // claves camelCase los checkboxes se desmarcaban y el 2º guardado mandaba undefined
+    store.general = {
+      start_with_windows: v.startWithWindows,
+      start_minimized: v.startMinimized,
+      close_to_tray_widget: v.closeToTrayWidget,
+      conflict_strict: v.conflictStrict,
+      autostart_actual: v.startWithWindows,
+    };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -1499,7 +1543,6 @@ export async function saveGeneralSettings(v: {
 let nlReqId = 0;
 
 export async function createTaskFromText(text: string): Promise<{ ok: boolean; source: string; error?: string }> {
-  const myId = ++nlReqId;
   if (!inTauri()) {
     store.tasks.push({
       id: Math.max(0, ...store.tasks.map((x) => x.id)) + 1,
@@ -1514,7 +1557,11 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
   }
   // una creación a la vez: la tarea se crea en backend antes de cualquier
   // chequeo; sin esta guardia, Enter repetido la duplicaba
+  // La guardia va ANTES de incrementar nlReqId: una 2ª llamada rechazada no
+  // debe invalidar a la dueña (antes su finally no liberaba nlBusy y la app
+  // quedaba en "creación en curso" hasta reiniciar).
   if (store.nlBusy) return { ok: false, source: "stale", error: "creación en curso" };
+  const myId = ++nlReqId;
   store.nlBusy = true;
   try {
     const r = await invoke<TaskFromTextResult>("task_from_text", { text });
@@ -1552,7 +1599,8 @@ export async function createTaskFromText(text: string): Promise<{ ok: boolean; s
     if (myId !== nlReqId) return { ok: false, source: "stale", error: "cancelada" };
     return { ok: false, source: "error", error: String(e) };
   } finally {
-    if (myId === nlReqId) store.nlBusy = false;
+    // solo la llamada dueña llega aquí (las rechazadas salen antes del try)
+    store.nlBusy = false;
   }
 }
 
@@ -1676,8 +1724,8 @@ export async function deleteTask(id: number): Promise<{ ok: boolean; error?: str
   }
 }
 
-export async function suggestionAccept(id: number) {
-  if (!inTauri()) return;
+export async function suggestionAccept(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
   try {
     const rows = await invoke<TaskRow[]>("suggestion_accept", { id });
     // insertar las tareas creadas directamente en la caché de su semana (crea
@@ -1689,64 +1737,76 @@ export async function suggestionAccept(id: number) {
     }
     rebuildTasks();
     await loadSuggestions();
+    return { ok: true };
   } catch (e) {
     console.error("suggestionAccept", e);
+    return { ok: false, error: String(e) };
   }
 }
 
-export async function suggestionReject(id: number) {
-  if (!inTauri()) return;
+export async function suggestionReject(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
   try {
     await invoke("suggestion_reject", { id });
     await loadSuggestions();
+    return { ok: true };
   } catch (e) {
     console.error("suggestionReject", e);
+    return { ok: false, error: String(e) };
   }
 }
 
 export async function suggestionEdit(
   id: number,
   data: { title: string; categoryId: string; priority: string; startAt: number; endAt: number; description: string; allDay: boolean },
-) {
-  if (!inTauri()) return;
+): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
   try {
     await invoke("suggestion_edit", { id, ...data });
     await loadSuggestions();
+    return { ok: true };
   } catch (e) {
     console.error("suggestionEdit", e);
+    return { ok: false, error: String(e) };
   }
 }
 
-export async function suggestionMerge(id: number, taskId: number) {
-  if (!inTauri()) return;
+export async function suggestionMerge(id: number, taskId: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
   try {
     await invoke("suggestion_merge", { id, taskId });
     await refreshTasks();
     await loadSuggestions();
+    return { ok: true };
   } catch (e) {
     console.error("suggestionMerge", e);
+    return { ok: false, error: String(e) };
   }
 }
 
-export async function suggestionRevert(id: number) {
-  if (!inTauri()) return;
+export async function suggestionRevert(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
   try {
     await invoke("suggestion_revert", { id });
     await refreshTasks();
     await loadSuggestions();
+    return { ok: true };
   } catch (e) {
     console.error("suggestionRevert", e);
+    return { ok: false, error: String(e) };
   }
 }
 
-export async function suggestionDelete(id: number) {
-  if (!inTauri()) return;
+export async function suggestionDelete(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!inTauri()) return { ok: true };
   try {
     await invoke("suggestion_delete", { id });
     await refreshTasks();
     await loadSuggestions();
+    return { ok: true };
   } catch (e) {
     console.error("suggestionDelete", e);
+    return { ok: false, error: String(e) };
   }
 }
 
@@ -1795,7 +1855,7 @@ export async function exportData() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `focusflow-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `focusflow-export-${localIsoDate(new Date())}.json`;
     a.click();
     URL.revokeObjectURL(url);
     return true;

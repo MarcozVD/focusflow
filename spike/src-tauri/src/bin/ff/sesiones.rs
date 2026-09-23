@@ -318,7 +318,8 @@ fn sesion_move(args: Vec<String>, json_out: bool) -> i32 {
         Err(e) => return fail(&format!("error: {e}")),
     };
     // Defaults: la ventana actual; conservar duración si solo se da fecha/from.
-    let cur_day = cur.start_at - cur.start_at % 86_400_000;
+    // medianoche LOCAL (no UTC: con UTC-5 el `% 86_400_000` desplazaba 5 h)
+    let cur_day = focusflow_spike_lib::engine::local_midnight(cur.start_at);
     let day = fecha.unwrap_or(cur_day);
     let from_min = from.unwrap_or((cur.start_at - cur_day) / 60_000);
     let dur_min = dur

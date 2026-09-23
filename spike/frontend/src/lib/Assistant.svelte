@@ -243,6 +243,7 @@
             <p class="answer muted">{m.text || "No pude generar respuesta. Inténtalo de nuevo."}</p>
           {:else if m.turn?.type === "Plan"}
             {@const r = planResult(m.turn.proposal.id)}
+            {@const turnProposal = m.turn.proposal}
             {#if r?.ok}
               <div class="plan-done">Hecho: {r.text}</div>
             {:else if activeProposal && activeProposal.id === m.turn.proposal.id}
@@ -267,8 +268,8 @@
                   {/each}
                 </div>
                 <div class="row">
-                  <button class="btn primary" onclick={() => acceptPlan(m.turn!.proposal)}>Aceptar</button>
-                  <button class="btn" onclick={() => rejectPlan(m.turn!.proposal)}>Descartar</button>
+                  <button class="btn primary" onclick={() => acceptPlan(turnProposal)}>Aceptar</button>
+                  <button class="btn" onclick={() => rejectPlan(turnProposal)}>Descartar</button>
                 </div>
               </div>
             {/if}

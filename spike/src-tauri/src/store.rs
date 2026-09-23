@@ -279,13 +279,26 @@ pub struct ImportSummary {
 
 impl Db {
     pub fn open(data_dir: &PathBuf) -> rusqlite::Result<Self> {
+        Self::open_with(data_dir, true)
+    }
+
+    /// Como `open` pero SIN copia de seguridad: el CLI `ff` abre la BD en
+    /// cada comando y rotaría los `.bak` en segundos, perdiendo la copia
+    /// buena del último arranque de la app.
+    pub fn open_no_backup(data_dir: &PathBuf) -> rusqlite::Result<Self> {
+        Self::open_with(data_dir, false)
+    }
+
+    fn open_with(data_dir: &PathBuf, backup: bool) -> rusqlite::Result<Self> {
         std::fs::create_dir_all(data_dir).ok();
         let conn = Connection::open(data_dir.join("focusflow.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "busy_timeout", 2000)?;
         let db = Db { conn };
         db.migrate()?;
-        db.backup_rotating(data_dir);
+        if backup {
+            db.backup_rotating(data_dir);
+        }
         // datos de demostración SOLO en builds de desarrollo: una app real
         // nunca mezcla datos falsos con los del usuario
         #[cfg(debug_assertions)]
@@ -297,18 +310,34 @@ impl Db {
     /// (`focusflow.db.bak`, `.bak.1`) junto a la DB. Sin esto, un SQLite
     /// corrupto = pérdida total (auditoría 17, hallazgo #2). Nunca impide
     /// el arranque: un error de backup se ignora silenciosamente.
+    /// `VACUUM INTO` falla si el destino existe: antes el `.bak` quedaba
+    /// congelado en la primera copia. Ahora se vuelca a un temporal y, solo
+    /// si salió bien, se rota `.bak` → `.bak.1` y el temporal pasa a `.bak`.
     fn backup_rotating(&self, data_dir: &PathBuf) {
         if !data_dir.join("focusflow.db").exists() {
             return;
         }
         let bak = data_dir.join("focusflow.db.bak");
         let bak1 = data_dir.join("focusflow.db.bak.1");
-        if bak.exists() {
-            let _ = std::fs::copy(&bak, &bak1);
-        }
+        let tmp = data_dir.join("focusflow.db.bak.tmp");
+        let _ = std::fs::remove_file(&tmp);
         // VACUUM INTO: copia consistente aunque haya WAL sin checkpoint.
-        let path = bak.display().to_string().replace('\'', "''");
-        let _ = self.conn.execute_batch(&format!("VACUUM INTO '{path}'"));
+        let path = tmp.display().to_string().replace('\'', "''");
+        if self
+            .conn
+            .execute_batch(&format!("VACUUM INTO '{path}'"))
+            .is_err()
+        {
+            let _ = std::fs::remove_file(&tmp);
+            return;
+        }
+        if bak.exists() {
+            let _ = std::fs::remove_file(&bak1);
+            let _ = std::fs::rename(&bak, &bak1);
+        }
+        if std::fs::rename(&tmp, &bak).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 
     #[cfg(test)]
@@ -855,7 +884,65 @@ impl Db {
             obj.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
         }
 
+        /// Resuelve el id con el que importar una fila (bug: INSERT OR IGNORE
+        /// por id descartaba EN SILENCIO filas distintas que colisionaban con
+        /// un id local, p. ej. al importar el export de otro equipo):
+        /// - id libre → `Some(Some(id))` (se conserva);
+        /// - misma fila (mismo título y created_at: re-importar el mismo
+        ///   export) → `None` (se omite, idempotente);
+        /// - fila distinta → `Some(None)`: se inserta con id nuevo.
+        fn import_id(
+            conn: &Connection,
+            table: &str,
+            id: Option<i64>,
+            title: &str,
+            created_at: i64,
+        ) -> Result<Option<Option<i64>>, String> {
+            let Some(id) = id else {
+                return Ok(Some(None));
+            };
+            let row: Option<(String, i64)> = conn
+                .query_row(
+                    &format!("SELECT title, created_at FROM {table} WHERE id = ?1"),
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(|e| format!("{table} lookup: {e}"))?;
+            Ok(match row {
+                None => Some(Some(id)),
+                Some((t, c)) if t == title && c == created_at => None,
+                // colisión con OTRA fila: si la misma fila ya se importó antes
+                // con id nuevo, no duplicarla (re-importar debe ser idempotente)
+                Some(_) if existing_id(conn, table, title, created_at)?.is_some() => None,
+                Some(_) => Some(None),
+            })
+        }
+
+        /// Fila local con el mismo contenido clave (título + created_at).
+        fn existing_id(
+            conn: &Connection,
+            table: &str,
+            title: &str,
+            created_at: i64,
+        ) -> Result<Option<i64>, String> {
+            conn.query_row(
+                &format!("SELECT id FROM {table} WHERE title = ?1 AND created_at = ?2 LIMIT 1"),
+                rusqlite::params![title, created_at],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("{table} lookup: {e}"))
+        }
+
         let mut summary = ImportSummary::default();
+        // id de tarea en el JSON → id real en esta DB (cambia si colisionó):
+        // las referencias (sesiones de estudio, dedupe de sugerencias) se
+        // remapean con esto
+        let mut task_map: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+        let remap = |m: &std::collections::HashMap<i64, i64>, v: Option<i64>| {
+            v.map(|old| m.get(&old).copied().unwrap_or(old))
+        };
 
         // ── Tareas ──────────────────────────────────────────────────────────
         if let Some(tasks) = v.get("tasks").and_then(|t| t.as_array()) {
@@ -871,6 +958,22 @@ impl Db {
                     "en-curso" => "en-curso",
                     _ => "pendiente",
                 };
+                let json_id = opt_i64(t, "id");
+                let task_id =
+                    match import_id(&tx, "tasks", json_id, title, i64_val(t, "created_at"))? {
+                        Some(v) => v,
+                        None => {
+                            // ya importada (misma fila): las referencias del
+                            // JSON deben apuntar a la fila local existente
+                            if let (Some(old), Some(ex)) = (
+                                json_id,
+                                existing_id(&tx, "tasks", title, i64_val(t, "created_at"))?,
+                            ) {
+                                task_map.insert(old, ex);
+                            }
+                            continue;
+                        }
+                    };
                 let n = tx
                     .execute(
                         "INSERT OR IGNORE INTO tasks
@@ -883,7 +986,7 @@ impl Db {
                          (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
                           ?14,?15,?16,?17,?18,?19,?20)",
                         rusqlite::params![
-                            opt_i64(t, "id"),
+                            task_id,
                             title,
                             cat,
                             prio,
@@ -907,6 +1010,9 @@ impl Db {
                         ],
                     )
                     .map_err(|e| format!("task insert: {e}"))?;
+                if let (Some(old), true) = (json_id, n > 0) {
+                    task_map.insert(old, tx.last_insert_rowid());
+                }
                 summary.tasks += n;
             }
         }
@@ -924,6 +1030,16 @@ impl Db {
                     "accepted" | "rejected" | "merged" | "auto_approved" => str_val(s, "status"),
                     _ => "pending",
                 };
+                let sug_id = match import_id(
+                    &tx,
+                    "suggested_events",
+                    opt_i64(s, "id"),
+                    title,
+                    i64_val(s, "created_at"),
+                )? {
+                    Some(v) => v,
+                    None => continue,
+                };
                 let n = tx
                     .execute(
                         "INSERT OR IGNORE INTO suggested_events
@@ -936,7 +1052,7 @@ impl Db {
                          (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
                           ?14,?15,?16,?17,?18,?19)",
                         rusqlite::params![
-                            opt_i64(s, "id"),
+                            sug_id,
                             str_val(s, "source"),
                             s.get("source_email_id").and_then(|v| v.as_str()),
                             s.get("source_sender").and_then(|v| v.as_str()),
@@ -951,7 +1067,7 @@ impl Db {
                             f64_val(s, "confidence"),
                             str_val(s, "reason"),
                             status,
-                            opt_i64(s, "dedupe_task_id"),
+                            remap(&task_map, opt_i64(s, "dedupe_task_id")),
                             str_val(s, "dedupe_note"),
                             i64_val(s, "created_at"),
                             i64_val(s, "updated_at"),
@@ -969,6 +1085,23 @@ impl Db {
                 if title.trim().is_empty() {
                     continue;
                 }
+                // una clase inválida (fin <= inicio, vigencia invertida) violaba
+                // los CHECK de la tabla y abortaba TODO el import: se omite,
+                // igual que las sesiones de estudio inválidas
+                let (dow, smin, emin) = (
+                    i64_val(c, "day_of_week"),
+                    i64_val(c, "start_min"),
+                    i64_val(c, "end_min"),
+                );
+                let (sdate, edate) = (i64_val(c, "start_date"), i64_val(c, "end_date"));
+                if validate_class(title, dow, smin, emin, sdate, edate).is_err() {
+                    continue;
+                }
+                let class_id =
+                    match import_id(&tx, "classes", opt_i64(c, "id"), title, i64_val(c, "created_at"))? {
+                        Some(v) => v,
+                        None => continue,
+                    };
                 let n = tx
                     .execute(
                         "INSERT OR IGNORE INTO classes
@@ -976,13 +1109,13 @@ impl Db {
                           start_date, end_date, created_at, updated_at)
                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
                         rusqlite::params![
-                            opt_i64(c, "id"),
+                            class_id,
                             title,
-                            i64_val(c, "day_of_week").clamp(0, 6),
-                            i64_val(c, "start_min").clamp(0, 1439),
-                            i64_val(c, "end_min").clamp(1, 1440),
-                            i64_val(c, "start_date"),
-                            i64_val(c, "end_date"),
+                            dow,
+                            smin,
+                            emin,
+                            sdate,
+                            edate,
                             i64_val(c, "created_at"),
                             i64_val(c, "updated_at"),
                         ],
@@ -1004,6 +1137,16 @@ impl Db {
                 if end_at <= start_at {
                     continue; // sesión inválida: fin <= inicio
                 }
+                let study_id = match import_id(
+                    &tx,
+                    "study_sessions",
+                    opt_i64(s, "id"),
+                    title,
+                    i64_val(s, "created_at"),
+                )? {
+                    Some(v) => v,
+                    None => continue,
+                };
                 let n = tx
                     .execute(
                         "INSERT OR IGNORE INTO study_sessions
@@ -1011,11 +1154,11 @@ impl Db {
                           created_at, updated_at)
                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
                         rusqlite::params![
-                            opt_i64(s, "id"),
+                            study_id,
                             title,
                             start_at,
                             end_at,
-                            opt_i64(s, "task_id"),
+                            remap(&task_map, opt_i64(s, "task_id")),
                             str_val(s, "notes"),
                             i64_val(s, "created_at"),
                             i64_val(s, "updated_at"),
@@ -1091,6 +1234,9 @@ impl Db {
             "assistant_actions",
             "plan_proposals",
             "suggested_events",
+            // vínculos sugerencia→tareas (migración 0014): sin esto quedaban
+            // filas huérfanas que apuntaban a ids de tareas futuras
+            "suggestion_tasks",
             "email_seen",
             "sync_state",
             "sync_history",
@@ -1417,9 +1563,17 @@ impl Db {
         notes: &str,
     ) -> rusqlite::Result<StudyRow> {
         validate_study(title, start_at, end_at).map_err(study_err)?;
+        let mut task_id = task_id;
         if let Some(tid) = task_id {
             if self.get_task(tid)?.is_none() {
-                return Err(study_err("La tarea relacionada no existe".into()));
+                // datos previos al fix de `delete`: la sesión conserva el id de
+                // una tarea ya borrada; reenviar ESE mismo id se trata como
+                // "sin tarea" en vez de bloquear la edición
+                let current = self.study_get(id)?.and_then(|s| s.task_id);
+                if current != Some(tid) {
+                    return Err(study_err("La tarea relacionada no existe".into()));
+                }
+                task_id = None;
             }
         }
         let n = self.conn.execute(
@@ -1559,6 +1713,12 @@ impl Db {
             "UPDATE tasks SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
             rusqlite::params![id, now_ms()],
         )?;
+        // la relación opcional sesión→tarea se suelta: si no, editar la
+        // sesión fallaba con "La tarea relacionada no existe"
+        self.conn.execute(
+            "UPDATE study_sessions SET task_id = NULL WHERE task_id = ?1",
+            [id],
+        )?;
         Ok(())
     }
 
@@ -1582,8 +1742,13 @@ impl Db {
         let effective_all_day = all_day.or(stored_all_day).unwrap_or(false);
         let (start_at, end_at) = normalize_task_span(start_at, end_at, effective_all_day);
         let end_at = end_at.max(start_at);
+        // mover a otra hora rearma el recordatorio (si no, un evento
+        // re-programado ya avisado nunca vuelve a sonar); mover sin cambiar
+        // start_at (solo el fin) no re-dispara.
         self.conn.execute(
-            "UPDATE tasks SET start_at = ?2, end_at = ?3,
+            "UPDATE tasks SET
+                    reminder_fired_at = CASE WHEN start_at != ?2 THEN NULL ELSE reminder_fired_at END,
+                    start_at = ?2, end_at = ?3,
                     all_day = CASE WHEN ?5 IS NULL THEN all_day ELSE ?5 END,
                     updated_at = ?4 WHERE id = ?1",
             rusqlite::params![id, start_at, end_at, now_ms(), all_day],
@@ -1608,15 +1773,22 @@ impl Db {
     ) -> rusqlite::Result<()> {
         let reminder_minutes = sanitize_reminder(reminder_minutes);
         let priority = sanitize_priority(priority);
-        let prev: Option<(Option<i64>, bool)> = self
+        let prev: Option<(Option<i64>, bool, i64)> = self
             .conn
             .query_row(
-                "SELECT reminder_minutes, all_day FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT reminder_minutes, all_day, start_at FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
                 [id],
-                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)? != 0)),
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, i64>(1)? != 0,
+                        r.get::<_, i64>(2)?,
+                    ))
+                },
             )
             .optional()?;
         let prev_reminder = prev.as_ref().and_then(|p| p.0);
+        let prev_start = prev.as_ref().map(|p| p.2);
         // all_day=None conserva el valor actual de la tarea; la normalización
         // del span debe usar ESE all_day efectivo (bug M1: editar/fusionar una
         // sugerencia con inicio==fin guardaba un marcador all-day de duración
@@ -1647,8 +1819,9 @@ impl Db {
                 all_day
             ],
         )?;
-        // FR-30: cambiar el recordatorio rearma el disparo (no refirar si no cambió)
-        if prev_reminder != reminder_minutes {
+        // FR-30: cambiar el recordatorio O la hora de inicio rearma el disparo
+        // (no refirar si nada de eso cambió)
+        if prev_reminder != reminder_minutes || prev_start != Some(start_at) {
             self.conn.execute(
                 "UPDATE tasks SET reminder_fired_at = NULL WHERE id = ?1 AND reminder_fired_at IS NOT NULL",
                 [id],
@@ -1756,6 +1929,37 @@ impl Db {
         self.conn
             .execute("DELETE FROM auth_sessions WHERE id = 1", [])?;
         Ok(())
+    }
+
+    /// Guarda un access_token refrescado SOLO si la sesión sigue siendo la
+    /// misma (mismo usuario y refresh_token). El refresco ocurre fuera del
+    /// lock: si entretanto el usuario cerró sesión o cambió de cuenta, un
+    /// `auth_save` a ciegas resucitaba la sesión vieja. Devuelve filas
+    /// afectadas (0 = la sesión cambió; el token se descarta).
+    pub fn auth_update_access(
+        &self,
+        user_id: &str,
+        refresh_token: &str,
+        access_token: &str,
+        expires_at: i64,
+    ) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE auth_sessions SET access_token = ?3, expires_at = ?4, updated_at = ?5
+             WHERE id = 1 AND user_id = ?1 AND refresh_token = ?2",
+            rusqlite::params![user_id, refresh_token, access_token, expires_at, now_ms()],
+        )
+    }
+
+    /// Refresh token revocado/caducado (`invalid_grant`): vacía los tokens de
+    /// ESA sesión (conserva email/nombre para la UI) → `gmail_connected`
+    /// pasa a false y la UI pide volver a iniciar sesión.
+    pub fn auth_drop_tokens(&self, user_id: &str, refresh_token: &str) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE auth_sessions SET access_token = '', refresh_token = '', expires_at = 0,
+                    updated_at = ?3
+             WHERE id = 1 AND user_id = ?1 AND refresh_token = ?2",
+            rusqlite::params![user_id, refresh_token, now_ms()],
+        )
     }
 
     /// Metadata JSON en `tasks.metadata` (ej: enlace a la propuesta de plan
@@ -2658,7 +2862,28 @@ mod tests {
         // segundo arranque: rota y genera focusflow.db.bak
         let db = Db::open(&dir).unwrap();
         assert!(dir.join("focusflow.db.bak").exists());
+        db.create("nueva-tras-backup", "uni", "alta", 1, 2, false).unwrap();
         drop(db);
+        // tercer arranque: el .bak debe reflejar los datos NUEVOS (antes
+        // VACUUM INTO fallaba con destino existente y quedaba congelado)
+        drop(Db::open(&dir).unwrap());
+        let bak = Connection::open(dir.join("focusflow.db.bak")).unwrap();
+        let n: i64 = bak
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE title = 'nueva-tras-backup'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, ".bak actualizado");
+        assert!(dir.join("focusflow.db.bak.1").exists(), "generación anterior");
+        assert!(!dir.join("focusflow.db.bak.tmp").exists());
+        drop(bak);
+        // open_no_backup no rota
+        let before = std::fs::metadata(dir.join("focusflow.db.bak")).unwrap().modified().unwrap();
+        drop(Db::open_no_backup(&dir).unwrap());
+        let after = std::fs::metadata(dir.join("focusflow.db.bak")).unwrap().modified().unwrap();
+        assert_eq!(before, after);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2804,7 +3029,10 @@ mod tests {
     }
 
     #[test]
-    fn move_to_does_not_refire() {
+    fn move_to_rearms_reminder_only_when_start_changes() {
+        // Corregido (auditoría lote A #12): el test anterior
+        // (`move_to_does_not_refire`) codificaba el bug — mover un evento ya
+        // avisado a otra hora NO volvía a avisar nunca.
         let db = db();
         let now = now_ms();
         let t = db
@@ -2819,9 +3047,81 @@ mod tests {
             .unwrap();
         db.set_task_reminder(t.id, 60).unwrap();
         db.mark_reminder_fired(t.id).unwrap();
-        db.move_to(t.id, now + 3_600_000, now + 5_400_000, None)
+        // misma hora de inicio (solo cambia el fin) → no re-dispara
+        db.move_to(t.id, now - 3_600_000, now - 600_000, None)
             .unwrap();
         assert!(db.due_reminders(now).unwrap().is_empty());
+        // nueva hora de inicio → rearmado (ventana 60 min ya vencida: vence ya)
+        db.move_to(t.id, now + 3_600_000, now + 5_400_000, None)
+            .unwrap();
+        assert_eq!(db.due_reminders(now).unwrap().len(), 1);
+        // antes de la nueva ventana, no vence
+        assert!(db.due_reminders(now - 60_000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn update_task_full_rearms_reminder_when_start_changes() {
+        let db = db();
+        let now = now_ms();
+        let t = db
+            .create("tarea", "uni", "media", now - 3_600_000, now - 1_800_000, false)
+            .unwrap();
+        db.set_task_reminder(t.id, 60).unwrap();
+        db.mark_reminder_fired(t.id).unwrap();
+        // mismo recordatorio, NUEVA fecha → vuelve a avisar
+        db.update_task_full(
+            t.id,
+            "tarea",
+            "uni",
+            "media",
+            now + 1_800_000,
+            now + 3_600_000,
+            "",
+            "[]",
+            "",
+            "",
+            Some(60),
+            Some(false),
+        )
+        .unwrap();
+        assert_eq!(db.due_reminders(now).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn auth_update_access_only_touches_same_session() {
+        let db = db();
+        let s = AuthSession {
+            user_id: "u1".into(),
+            email: "a@x.com".into(),
+            name: "A".into(),
+            access_token: "old".into(),
+            refresh_token: "r1".into(),
+            expires_at: 1,
+        };
+        db.auth_save(&s).unwrap();
+        assert_eq!(db.auth_update_access("u1", "r1", "new", 99).unwrap(), 1);
+        let got = db.auth_load().unwrap().unwrap();
+        assert_eq!(got.access_token, "new");
+        assert_eq!(got.expires_at, 99);
+        // la sesión se cerró mientras se refrescaba → NO resucita
+        db.auth_clear().unwrap();
+        assert_eq!(db.auth_update_access("u1", "r1", "zombie", 5).unwrap(), 0);
+        assert!(db.auth_load().unwrap().is_none());
+        // otra cuenta entró entretanto → no se pisa su token
+        db.auth_save(&AuthSession {
+            user_id: "u2".into(),
+            refresh_token: "r2".into(),
+            access_token: "b".into(),
+            ..s.clone()
+        })
+        .unwrap();
+        assert_eq!(db.auth_update_access("u1", "r1", "zombie", 5).unwrap(), 0);
+        assert_eq!(db.auth_load().unwrap().unwrap().access_token, "b");
+        // invalid_grant: vaciar tokens de ESA sesión
+        assert_eq!(db.auth_drop_tokens("u2", "r2").unwrap(), 1);
+        let got = db.auth_load().unwrap().unwrap();
+        assert!(got.access_token.is_empty() && got.refresh_token.is_empty());
+        assert_eq!(got.email, "a@x.com");
     }
 
     fn ins_suggestion(
@@ -3193,6 +3493,105 @@ mod tests {
         let summary2 = db2.import_data(&json_str).unwrap();
         assert_eq!(summary2.tasks, 0);
         assert_eq!(db2.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn import_collision_keeps_distinct_rows_and_remaps_refs() {
+        // Lote B #9: un id del JSON que ya existe localmente con OTRA fila no
+        // debe descartarse en silencio: se inserta con id nuevo y las
+        // referencias (study_sessions.task_id) se remapean.
+        let now = now_ms();
+        let db1 = Db::open_memory_clean_pub().unwrap();
+        let a = db1
+            .create("Tarea remota", "uni", "alta", now, now + 3_600_000, false)
+            .unwrap();
+        db1.study_create("Repaso", now + 7_200_000, now + 10_800_000, Some(a.id), "")
+            .unwrap();
+        let json = serde_json::to_string(&db1.export_data().unwrap()).unwrap();
+
+        let db2 = Db::open_memory_clean_pub().unwrap();
+        let local = db2
+            .create("Tarea local", "per", "baja", now, now + 3_600_000, false)
+            .unwrap();
+        assert_eq!(local.id, a.id, "mismo id en ambas DBs: colisión");
+        let summary = db2.import_data(&json).unwrap();
+        assert_eq!(summary.tasks, 1, "la tarea distinta se importa");
+        let tasks = db2.list().unwrap();
+        assert_eq!(tasks.len(), 2);
+        let remote = tasks.iter().find(|t| t.title == "Tarea remota").unwrap();
+        assert_ne!(remote.id, local.id);
+        let sessions = db2.study_list().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].task_id, Some(remote.id), "referencia remapeada");
+        // re-importar el mismo export sigue siendo idempotente
+        let again = db2.import_data(&json).unwrap();
+        assert_eq!(again.tasks, 0);
+        assert_eq!(again.study_sessions, 0);
+        assert_eq!(db2.list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn import_skips_invalid_class_without_aborting() {
+        // Lote B #10: una clase inválida abortaba todo el import.
+        let json = serde_json::json!({
+            "app": "focusflow",
+            "tasks": [{"id": 1, "title": "T", "start_at": 1, "end_at": 2, "created_at": 5}],
+            "classes": [
+                {"id": 1, "title": "Mala", "day_of_week": 0, "start_min": 600,
+                 "end_min": 540, "start_date": 0, "end_date": 10},
+                {"id": 2, "title": "Buena", "day_of_week": 1, "start_min": 480,
+                 "end_min": 540, "start_date": 0, "end_date": 10}
+            ]
+        })
+        .to_string();
+        let db = Db::open_memory_clean_pub().unwrap();
+        let summary = db.import_data(&json).unwrap();
+        assert_eq!(summary.classes, 1);
+        assert_eq!(summary.tasks, 1);
+        let classes = db.class_list().unwrap();
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].title, "Buena");
+    }
+
+    #[test]
+    fn wipe_clears_suggestion_task_links() {
+        // Lote B #12: wipe_data no borraba suggestion_tasks
+        let db = db();
+        db.link_suggestion_task(7, 9).unwrap();
+        db.wipe_data().unwrap();
+        assert!(db.suggestion_task_ids(7).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_task_unlinks_study_sessions() {
+        // Lote B #6: borrar la tarea dejaba study_sessions.task_id colgando y
+        // editar la sesión fallaba con "La tarea relacionada no existe"
+        let db = db();
+        let now = now_ms();
+        let t = db
+            .create("Tarea", "uni", "media", now, now + 3_600_000, false)
+            .unwrap();
+        let s = db
+            .study_create("Sesión", now + 7_200_000, now + 10_800_000, Some(t.id), "")
+            .unwrap();
+        db.delete(t.id).unwrap();
+        assert_eq!(db.study_get(s.id).unwrap().unwrap().task_id, None);
+        // datos viejos: sesión que aún apunta a la tarea borrada → editar con
+        // ese mismo id no falla (se guarda sin tarea)
+        db.conn
+            .execute(
+                "UPDATE study_sessions SET task_id = ?1 WHERE id = ?2",
+                [t.id, s.id],
+            )
+            .unwrap();
+        let upd = db
+            .study_update(s.id, "Sesión 2", now + 7_200_000, now + 10_800_000, Some(t.id), "")
+            .unwrap();
+        assert_eq!(upd.task_id, None);
+        // un id inexistente DISTINTO sigue siendo error
+        assert!(db
+            .study_update(s.id, "Sesión 3", now + 7_200_000, now + 10_800_000, Some(99_999), "")
+            .is_err());
     }
 }
 

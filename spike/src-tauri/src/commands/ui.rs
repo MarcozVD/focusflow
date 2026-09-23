@@ -306,7 +306,7 @@ pub fn data_export(state: State<'_, Mutex<Db>>) -> Result<String, String> {
 }
 
 /// Importa datos desde un JSON exportado previamente. No borra datos
-/// existentes: usa INSERT OR IGNORE por id (idempotente). Devuelve un
+/// existentes; ids en colisión con otra fila se reasignan (idempotente). Devuelve un
 /// resumen con los conteos de registros insertados en cada tabla.
 #[tauri::command]
 pub fn data_import(
@@ -317,6 +317,8 @@ pub fn data_import(
     let summary = with_db(&state, |db| db.import_data(&json))?;
     let _ = app.emit("tasks:changed", ());
     let _ = app.emit("suggestions:changed", ());
+    // el frontend refresca la bandeja con este evento (no escucha suggestions:changed)
+    let _ = app.emit("email:new-suggestions", ());
     let _ = app.emit("classes:changed", ());
     let _ = app.emit("study:changed", ());
     append_log(&app, "data_import done");

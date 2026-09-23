@@ -18,6 +18,8 @@
     type TaskRow,
     KIND_LABELS,
   } from "./data.svelte";
+  import { localIsoDate } from "./dateUtils";
+  import { suggestionAllDay, suggestionEditDate } from "./suggestionLogic";
 
   const suggestions = $derived(suggestionsStore());
 
@@ -35,11 +37,14 @@
   let eStart = $state("");
   let eEnd = $state("");
   let eDesc = $state("");
+  // all_day original de la sugerencia en edición (el formulario no lo cambia)
+  let eAllDay = $state(false);
+  // último error de una acción (editar/fusionar/aceptar/...): antes se
+  // tragaba con console.error y los cambios se perdían sin aviso
+  let actionError = $state("");
 
-  function iso(ms: number): string {
-    const d = new Date(ms);
-    return d.toISOString().slice(0, 10);
-  }
+  // fecha LOCAL: toISOString() daba el día UTC (+1 día desde las 19:00 en UTC-5)
+  const iso = (ms: number) => localIsoDate(ms);
   function hm(ms: number): string {
     const d = new Date(ms);
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -50,10 +55,20 @@
     eTitle = s.title;
     eCat = s.category_id;
     ePrio = s.priority;
-    eDate = s.start_at ? iso(s.start_at) : iso(Date.now() + 86_400_000);
+    eDate = suggestionEditDate(s.start_at);
     eStart = s.start_at ? hm(s.start_at) : "09:00";
     eEnd = s.end_at ? hm(s.end_at) : "10:00";
     eDesc = s.description;
+    eAllDay = suggestionAllDay(s);
+    actionError = "";
+  }
+
+  /** Ejecuta una acción de sugerencia y muestra su error si falla. */
+  async function run(action: () => Promise<{ ok: boolean; error?: string }>): Promise<boolean> {
+    actionError = "";
+    const r = await action();
+    if (!r.ok) actionError = r.error ?? "No se pudo completar la acción.";
+    return r.ok;
   }
 
   async function startMerge(s: Suggestion) {
@@ -61,9 +76,19 @@
     // detectado), queda preseleccionada y se puede cambiar por cualquier otra
     mergeFor = s.id;
     mergeTask = "";
+    mergeTasks = [];
+    actionError = "";
     // carga TODAS las tareas activas (no solo las de las semanas en caché) y
     // filtra completadas; la sugerida va primero en la lista
-    const all = await invoke<TaskRow[]>("task_list");
+    let all: TaskRow[];
+    try {
+      all = await invoke<TaskRow[]>("task_list");
+    } catch (e) {
+      // sin catch el error subía al banner global y el panel quedaba colgado
+      actionError = `No se pudieron cargar las tareas: ${String(e)}`;
+      mergeFor = null;
+      return;
+    }
     const pend = all.filter((t) => t.status !== "completada");
     pend.sort((a, b) => {
       const sug = s.dedupe_task_id;
@@ -88,21 +113,27 @@
     const startAt = new Date(y, m - 1, d, sh, sm).getTime();
     let endAt = new Date(y, m - 1, d, eh, em).getTime();
     if (endAt < startAt) endAt = startAt + 3_600_000;
-    await suggestionEdit(editing, {
-      title: eTitle,
-      categoryId: eCat,
-      priority: ePrio,
-      startAt,
-      endAt,
-      description: eDesc,
-      allDay: startAt === endAt,
-    });
-    editing = null;
+    const id = editing;
+    const ok = await run(() =>
+      suggestionEdit(id, {
+        title: eTitle,
+        categoryId: eCat,
+        priority: ePrio,
+        startAt,
+        endAt,
+        description: eDesc,
+        // conservar el all_day original (antes se infería de inicio == fin)
+        allDay: eAllDay,
+      }),
+    );
+    // solo cerrar el editor si se guardó: si falla, el usuario conserva sus cambios
+    if (ok) editing = null;
   }
 
   async function doMerge() {
     if (!mergeFor || !mergeTask) return;
-    await suggestionMerge(mergeFor, Number(mergeTask));
+    const ok = await run(() => suggestionMerge(mergeFor!, Number(mergeTask)));
+    if (!ok) return;
     mergeFor = null;
     mergeTask = "";
   }
@@ -139,6 +170,10 @@
     </button>
   </div>
 
+  {#if actionError}
+    <p class="action-err" role="alert">{actionError}</p>
+  {/if}
+
   {#if suggestions.length === 0}
     <div class="empty">
       <p>Sin eventos detectados todavía.</p>
@@ -158,10 +193,10 @@
             <input type="date" bind:value={eDate} />
           </label>
           <label>Inicio
-            <input type="time" bind:value={eStart} />
+            <input type="time" bind:value={eStart} oninput={() => (eAllDay = false)} />
           </label>
           <label>Fin
-            <input type="time" bind:value={eEnd} />
+            <input type="time" bind:value={eEnd} oninput={() => (eAllDay = false)} />
           </label>
           <label>Categoría
             <select bind:value={eCat}>
@@ -239,11 +274,11 @@
         {/if}
         {#if s.status === "pending"}
           <div class="row">
-            <button class="btn primary" onclick={() => suggestionAccept(s.id)}>Aceptar</button>
+            <button class="btn primary" onclick={() => run(() => suggestionAccept(s.id))}>Aceptar</button>
             <button class="btn" onclick={() => startEdit(s)}>Editar</button>
             <button class="btn" onclick={() => startMerge(s)}>Fusionar</button>
-            <button class="btn danger" onclick={() => suggestionReject(s.id)}>Rechazar</button>
-            <button class="btn danger ghost" title="Eliminar definitivamente" onclick={() => suggestionDelete(s.id)}>
+            <button class="btn danger" onclick={() => run(() => suggestionReject(s.id))}>Rechazar</button>
+            <button class="btn danger ghost" title="Eliminar definitivamente" onclick={() => run(() => suggestionDelete(s.id))}>
               Borrar
             </button>
           </div>
@@ -254,8 +289,8 @@
             </span>
             <span class="spacer"></span>
             <button class="btn" onclick={() => startEdit(s)}>Editar</button>
-            <button class="btn ghost" onclick={() => suggestionRevert(s.id)}>Revertir</button>
-            <button class="btn danger ghost" onclick={() => suggestionDelete(s.id)}>Borrar</button>
+            {#if s.status !== "merged"}<button class="btn ghost" onclick={() => run(() => suggestionRevert(s.id))}>Revertir</button>{/if}
+            <button class="btn danger ghost" onclick={() => run(() => suggestionDelete(s.id))}>Borrar</button>
           </div>
         {/if}
       </div>
@@ -264,6 +299,14 @@
 </div>
 
 <style>
+  .action-err {
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: var(--r-md, 8px);
+    background: color-mix(in srgb, #ef4444 12%, transparent);
+    color: #b91c1c;
+    font-size: 13px;
+  }
   .sug {
     max-width: 760px;
     display: flex;

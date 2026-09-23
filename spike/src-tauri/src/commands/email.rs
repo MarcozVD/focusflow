@@ -184,7 +184,7 @@ pub fn email_config_set(
         .map_err(|e| e.to_string())?;
     db.settings_set("email.max_age_days", &max_age_days.to_string())
         .map_err(|e| e.to_string())?;
-    append_log(&app, &format!("email_config_saved user={} mailboxes={:?} enabled={enabled} max_age_days={max_age_days}", config.user, config.mailboxes));
+    append_log(&app, &format!("email_config_saved dominio={} mailboxes={:?} enabled={enabled} max_age_days={max_age_days}", config.user.split('@').nth(1).unwrap_or("?"), config.mailboxes));
     Ok(())
 }
 
@@ -199,10 +199,8 @@ pub fn email_sync_now(app: AppHandle) -> Result<(), String> {
                 s.total_found, s.total_suggestions
             ),
         ),
-        Err(e) => {
-            append_log(&handle, &format!("manual_sync_error: {e}"));
-            let _ = handle.emit("email:sync-error", e);
-        }
+        // run_sync ya emite `email:sync-error` (evita el evento duplicado)
+        Err(e) => append_log(&handle, &format!("manual_sync_error: {e}")),
     });
     Ok(())
 }
@@ -226,10 +224,8 @@ pub fn email_rescan(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), S
                 s.total_found, s.total_suggestions
             ),
         ),
-        Err(e) => {
-            append_log(&handle, &format!("rescan_error: {e}"));
-            let _ = handle.emit("email:sync-error", e);
-        }
+        // run_sync ya emite `email:sync-error` (evita el evento duplicado)
+        Err(e) => append_log(&handle, &format!("rescan_error: {e}")),
     });
     Ok(())
 }
@@ -290,12 +286,18 @@ pub async fn verify_connections(
             },
         };
 
-        let token = {
-            let state = app2.state::<Mutex<Db>>();
-            let db = lock_recover(&state);
-            crate::auth::access_token(&db).unwrap_or_default()
+        // refresco del token FUERA del lock (POST hasta 60 s): antes se hacía
+        // con la DB bloqueada y congelaba todos los comandos IPC
+        let token = match crate::auth::access_token_unlocked(&app2.state::<Mutex<Db>>()) {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                if crate::auth::is_session_expired(&e) {
+                    let _ = app2.emit("auth:expired", &e);
+                }
+                Err(e)
+            }
         };
-        let email = match email::test_connection(&email_cfg, &token) {
+        let email = match token.and_then(|t| email::test_connection(&email_cfg, &t)) {
             Ok((mailbox, n)) => ConnectionCheck {
                 ok: true,
                 detail: format!("Conectado a {mailbox} ({n} correos)"),

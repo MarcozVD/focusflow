@@ -9,7 +9,7 @@
 //!    Credential Manager. El usuario decide (prompt) qué cuenta usar.
 //!
 //! Scopes: identidad (openid email profile) + Gmail solo lectura vía REST API
-//! (`https://www.googleapis.com/auth/gmail.readonly`, scope SENSIBLE).
+//! (`https://www.googleapis.com/auth/gmail.readonly`, scope RESTRINGIDO).
 //! `access_type=offline` + `prompt=consent` garantizan `refresh_token`.
 
 use std::io::{Read, Write};
@@ -24,9 +24,11 @@ use crate::store::{AuthSession, Db};
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-// Scope SENSIBLE (no restringido): la app solo LEE el buzón vía Gmail REST API
-// (users.messages.list/get, format=raw). No usa IMAP/SMTP: el scope completo
-// mail.google.com es RESTRINGIDO y exigiría verificación + CASA anual de pago.
+// Scope RESTRINGIDO: Google clasifica TODOS los scopes de Gmail (incluido
+// gmail.readonly, aunque la app solo LEA users.messages.list/get format=raw)
+// como restricted. Por eso exige verificación de OAuth + CASA anual de pago.
+// NO existe un scope de Gmail no-restringido: o pagas CASA, o dejas Gmail
+// fuera del flujo OAuth (service account + domain delegation).
 const SCOPE: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly";
 const CALLBACK_TIMEOUT_SECS: u64 = 120;
 
@@ -85,23 +87,56 @@ pub fn has_session(db: &Db) -> bool {
         .unwrap_or(false)
 }
 
-/// Access token válido (refresca automáticamente si expiró).
-pub fn access_token(db: &Db) -> Result<String, String> {
-    let mut s = db
-        .auth_load()
-        .map_err(|e| format!("auth_load: {e}"))?
-        .ok_or_else(|| "no hay sesión de Google: inicia sesión primero".to_string())?;
+/// Mensaje (estable) cuando Google revocó/caducó el refresh_token
+/// (`invalid_grant`). Los llamadores con AppHandle emiten `auth:expired`.
+pub const SESSION_EXPIRED: &str =
+    "Tu sesión de Google expiró; vuelve a iniciar sesión en Ajustes para seguir revisando el correo.";
+
+/// ¿El error es la sesión expirada (refresh_token revocado)?
+pub fn is_session_expired(err: &str) -> bool {
+    err.starts_with(SESSION_EXPIRED)
+}
+
+/// Access token válido (refresca automáticamente si expiró) respetando la
+/// regla de la casa: el lock de la DB solo para leer/escribir, el refresco
+/// (POST hasta 60 s) FUERA del lock. Tras refrescar, se guarda solo si la
+/// sesión sigue siendo la misma (logout o cambio de cuenta entretanto → el
+/// token nuevo se descarta en vez de resucitar la sesión vieja). Con
+/// `invalid_grant` se vacían los tokens → la UI deja de mostrar "Gmail
+/// conectado" y el error es [`SESSION_EXPIRED`].
+pub fn access_token_unlocked(state: &std::sync::Mutex<Db>) -> Result<String, String> {
+    let s = {
+        let db = crate::store::lock_recover(state);
+        db.auth_load().map_err(|e| format!("auth_load: {e}"))?
+    }
+    .ok_or_else(|| "no hay sesión de Google: inicia sesión para conectar Gmail".to_string())?;
     if !s.access_token.is_empty() && s.expires_at > crate::store::now_ms() {
         return Ok(s.access_token);
     }
     if s.refresh_token.is_empty() {
-        return Err("la sesión no tiene refresh_token; cierra sesión y vuelve a entrar".into());
+        return Err(
+            "la sesión de Google no tiene token válido; cierra sesión y vuelve a entrar".into(),
+        );
     }
-    let (new_access, expires_in) = refresh(&s.refresh_token)?;
-    s.access_token = new_access;
-    s.expires_at = crate::store::now_ms() + (expires_in as i64) * 1000;
-    db.auth_save(&s).map_err(|e| e.to_string())?;
-    Ok(s.access_token)
+    match refresh(&s.refresh_token) {
+        Ok((new_access, expires_in)) => {
+            let expires_at = crate::store::now_ms() + (expires_in as i64) * 1000;
+            let db = crate::store::lock_recover(state);
+            match db.auth_update_access(&s.user_id, &s.refresh_token, &new_access, expires_at) {
+                Ok(n) if n > 0 => Ok(new_access),
+                // 0 filas: la sesión se cerró o cambió de cuenta durante el
+                // refresco → no seguir leyendo el buzón de la cuenta anterior
+                Ok(_) => Err("la sesión de Google cambió durante la sincronización; reintenta".into()),
+                Err(e) => Err(format!("auth_save: {e}")),
+            }
+        }
+        Err(e) if e.starts_with(INVALID_GRANT) => {
+            let db = crate::store::lock_recover(state);
+            let _ = db.auth_drop_tokens(&s.user_id, &s.refresh_token);
+            Err(SESSION_EXPIRED.to_string())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Configuración IMAP de Gmail derivada de la sesión (host/puerto/TLS fijos).
@@ -118,8 +153,14 @@ pub fn gmail_email_config(session_email: &str) -> crate::email::EmailConfig {
     cfg
 }
 
+/// Cierra sesión: borra tokens y el checkpoint del correo (`sync_state`) para
+/// que otra cuenta no herede el cursor de la anterior (se saltaría su
+/// correo reciente). `email_seen` se conserva a propósito: son Message-ID
+/// globales (no por cuenta); borrarlo re-enviaría a la IA todo lo ya
+/// analizado al volver a entrar con la misma cuenta (cuota y duplicados).
 pub fn sign_out(db: &Db) -> Result<(), String> {
-    db.auth_clear().map_err(|e| e.to_string())
+    db.auth_clear().map_err(|e| e.to_string())?;
+    db.sync_state_clear_all().map_err(|e| e.to_string())
 }
 
 /// Flujo completo de inicio de sesión: navegador + callback + intercambio.
@@ -242,6 +283,9 @@ pub fn refresh(refresh_token: &str) -> Result<(String, u64), String> {
     Ok((t.access_token, t.expires_in))
 }
 
+/// Prefijo estable del error de token revocado/caducado.
+const INVALID_GRANT: &str = "invalid_grant";
+
 fn post_token(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -251,23 +295,57 @@ fn post_token(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
         .post(TOKEN_URL)
         .form(&params)
         .send()
-        .map_err(|e| format!("token request: {e}"))?;
+        .map_err(|e| format!("token request: {}", e.without_url()))?;
     let status = resp.status();
-    let text = resp.text().map_err(|e| format!("token response: {e}"))?;
+    let text = resp
+        .text()
+        .map_err(|e| format!("token response: {}", e.without_url()))?;
     if !status.is_success() {
-        return Err(format!("Google devolvió {status}: {text}"));
+        return Err(token_error(status.as_u16(), &text));
     }
-    serde_json::from_str(&text).map_err(|e| format!("token parse: {e} ({text})"))
+    // sin `text` en el error: el cuerpo contiene los tokens
+    serde_json::from_str(&text).map_err(|e| format!("token parse: {e}"))
+}
+
+/// Error corto del endpoint de tokens (sin JSON crudo). `invalid_grant` →
+/// prefijo estable para que el llamador invalide la sesión.
+fn token_error(status: u16, body: &str) -> String {
+    #[derive(Deserialize, Default)]
+    struct TokenErr {
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        error_description: String,
+    }
+    let e: TokenErr = serde_json::from_str(body).unwrap_or_default();
+    if e.error == INVALID_GRANT {
+        return format!("{INVALID_GRANT}: {}", e.error_description);
+    }
+    if e.error.is_empty() {
+        format!("Google devolvió {status}")
+    } else {
+        format!("Google devolvió {status}: {} {}", e.error, e.error_description)
+            .trim_end()
+            .to_string()
+    }
 }
 
 /// Recibe el callback HTTP en `listener` y extrae el `code`, validando `state`.
 /// Devuelve la respuesta HTTP "puedes cerrar esta pestaña" al navegador.
+/// Atiende VARIAS conexiones hasta el deadline: el navegador abre
+/// preconexiones vacías y pide /favicon.ico; antes la primera conexión
+/// decidía el login y lo rompía.
 fn recv_callback(listener: TcpListener, expected_state: &str) -> Result<String, String> {
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let deadline = std::time::Instant::now() + Duration::from_secs(CALLBACK_TIMEOUT_SECS);
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return handle_connection(stream, expected_state),
+            Ok((stream, _)) => {
+                if let Some(result) = handle_connection(stream, expected_state) {
+                    return result;
+                }
+                // no era /callback (favicon, preconexión): seguir esperando
+            }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if std::time::Instant::now() > deadline {
                     return Err(format!("la autorización tardó más de {CALLBACK_TIMEOUT_SECS} s. Inténtalo de nuevo."));
@@ -279,30 +357,60 @@ fn recv_callback(listener: TcpListener, expected_state: &str) -> Result<String, 
     }
 }
 
-fn handle_connection(mut stream: TcpStream, expected_state: &str) -> Result<String, String> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .map_err(|e| e.to_string())?;
+/// Decisión (pura, testeable) sobre una petición al servidor de callback.
+#[derive(Debug, PartialEq)]
+enum CallbackDecision {
+    /// Otra ruta (favicon, preconexión vacía): 404 y seguir esperando.
+    NotCallback,
+    /// `code` con `state` correcto.
+    Code(String),
+    /// /callback inválido (state distinto → posible CSRF, usuario canceló,
+    /// sin code): el login termina con error.
+    Reject(String),
+}
+
+fn decide_callback(path: &str, expected_state: &str) -> CallbackDecision {
+    let route = path.split('?').next().unwrap_or("");
+    if route != "/callback" {
+        return CallbackDecision::NotCallback;
+    }
+    let (code, state) = parse_callback_query(path);
+    match (code, state) {
+        (Some(code), Some(state)) if state == expected_state && !code.is_empty() => {
+            CallbackDecision::Code(code)
+        }
+        (_, Some(state)) if state != expected_state => CallbackDecision::Reject(
+            "state no coincide. Cierra esta pestaña e inténtalo de nuevo.".into(),
+        ),
+        _ => CallbackDecision::Reject(
+            "Callback sin código de autorización (¿cancelaste el permiso?).".into(),
+        ),
+    }
+}
+
+/// `None` = la conexión no era el callback (seguir esperando);
+/// `Some(Ok(code))` / `Some(Err(..))` = el login termina.
+fn handle_connection(mut stream: TcpStream, expected_state: &str) -> Option<Result<String, String>> {
+    // En Windows el socket aceptado hereda el modo no bloqueante del
+    // listener: sin esto `read` devuelve WouldBlock al instante.
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let mut buf = [0u8; 8192];
-    let n = stream
-        .read(&mut buf)
-        .map_err(|e| format!("leer request: {e}"))?;
+    // preconexión vacía / timeout: no es fatal, se sigue esperando
+    let n = stream.read(&mut buf).ok()?;
+    if n == 0 {
+        return None;
+    }
     let req = String::from_utf8_lossy(&buf[..n]).to_string();
 
     let first = req.lines().next().unwrap_or("");
     let path = first.split_whitespace().nth(1).unwrap_or("");
-    let (code, state) = parse_callback_query(path);
+    let decision = decide_callback(path, expected_state);
 
-    let (status, body) = match (code.clone(), state) {
-        (Some(_), Some(state)) if state == expected_state => ("200 OK", ok_page()),
-        (_, Some(_)) => (
-            "400 Bad Request",
-            error_page("state no coincide. Cierra esta pestaña e inténtalo de nuevo."),
-        ),
-        _ => (
-            "400 Bad Request",
-            error_page("Callback sin código de autorización."),
-        ),
+    let (status, body) = match &decision {
+        CallbackDecision::NotCallback => ("404 Not Found", String::new()),
+        CallbackDecision::Code(_) => ("200 OK", ok_page()),
+        CallbackDecision::Reject(msg) => ("400 Bad Request", error_page(msg)),
     };
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -311,7 +419,13 @@ fn handle_connection(mut stream: TcpStream, expected_state: &str) -> Result<Stri
     );
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
-    code.ok_or_else(|| "no se recibió el code de Google".to_string())
+    match decision {
+        CallbackDecision::NotCallback => None,
+        CallbackDecision::Code(code) => Some(Ok(code)),
+        // state distinto → Err: devolver el code igualmente anulaba la
+        // protección CSRF (el intercambio seguía adelante)
+        CallbackDecision::Reject(msg) => Some(Err(msg)),
+    }
 }
 
 fn ok_page() -> String {
@@ -540,6 +654,77 @@ mod tests {
         let (code, state) = parse_callback_query("/");
         assert!(code.is_none());
         assert!(state.is_none());
+    }
+
+    #[test]
+    fn callback_state_mismatch_is_rejected_not_accepted() {
+        // CSRF: un state distinto NUNCA devuelve el code
+        assert_eq!(
+            decide_callback("/callback?code=ABC&state=otro", "esperado"),
+            CallbackDecision::Reject(
+                "state no coincide. Cierra esta pestaña e inténtalo de nuevo.".into()
+            )
+        );
+        assert!(matches!(
+            decide_callback("/callback?code=ABC", "esperado"),
+            CallbackDecision::Reject(_)
+        ));
+        assert!(matches!(
+            decide_callback("/callback?error=access_denied&state=esperado", "esperado"),
+            CallbackDecision::Reject(_)
+        ));
+        assert_eq!(
+            decide_callback("/callback?code=ABC&state=esperado", "esperado"),
+            CallbackDecision::Code("ABC".into())
+        );
+    }
+
+    #[test]
+    fn callback_other_routes_keep_waiting() {
+        assert_eq!(
+            decide_callback("/favicon.ico", "s"),
+            CallbackDecision::NotCallback
+        );
+        assert_eq!(decide_callback("/", "s"), CallbackDecision::NotCallback);
+        assert_eq!(decide_callback("", "s"), CallbackDecision::NotCallback);
+    }
+
+    #[test]
+    fn recv_callback_survives_preconnect_and_favicon() {
+        // integración real sobre loopback: preconexión vacía + favicon antes
+        // del callback bueno (antes, la 1.ª conexión decidía el login)
+        use std::io::{Read as _, Write as _};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || recv_callback(listener, "st"));
+        let addr = format!("127.0.0.1:{port}");
+        drop(TcpStream::connect(&addr).unwrap()); // preconexión que se cierra
+        let mut fav = TcpStream::connect(&addr).unwrap();
+        fav.write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        let mut resp = String::new();
+        let _ = fav.read_to_string(&mut resp);
+        assert!(resp.starts_with("HTTP/1.1 404"), "{resp}");
+        let mut cb = TcpStream::connect(&addr).unwrap();
+        cb.write_all(b"GET /callback?code=C0DE&state=st HTTP/1.1\r\nHost: x\r\n\r\n")
+            .unwrap();
+        let mut resp = String::new();
+        let _ = cb.read_to_string(&mut resp);
+        assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+        assert_eq!(h.join().unwrap(), Ok("C0DE".to_string()));
+    }
+
+    #[test]
+    fn token_errors_are_short_and_flag_invalid_grant() {
+        let e = token_error(
+            400,
+            r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#,
+        );
+        assert!(e.starts_with(INVALID_GRANT), "{e}");
+        let e = token_error(401, r#"{"error":"invalid_client","error_description":"x"}"#);
+        assert!(!e.starts_with(INVALID_GRANT) && !e.contains('{'), "{e}");
+        let e = token_error(500, "<html>oops</html>");
+        assert_eq!(e, "Google devolvió 500");
+        assert!(is_session_expired(SESSION_EXPIRED));
     }
 
     #[test]

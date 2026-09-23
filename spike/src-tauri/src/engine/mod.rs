@@ -35,16 +35,22 @@ pub const DAY_MS: i64 = 24 * HOUR_MS;
 /// before HH:MM" lo reemplaza; sobre horarios explícitos solo lo eleva.
 pub const DEFAULT_WORK_START_MIN: u32 = 6 * 60;
 
-/// ms epoch local para un NaiveDateTime (mismo convenio que `ai::nl`).
-/// Gap/solape DST: `earliest()` resuelve de forma determinista; si la hora
-/// local no existe (p. ej. medianoche en el salto), se interpreta como UTC
-/// en vez de devolver 0 (epoch 1970) — auditoría 17, hallazgo #9.
+/// ms epoch local para un NaiveDateTime (helper común de `ai::nl`,
+/// `ai::validation` y el engine). Solape DST: la primera ocurrencia. Hueco
+/// DST (la hora local no existe, p. ej. 00:00 del salto): se avanza a la
+/// primera hora válida (dt + 1 h, luego +2 h) en vez de interpretarla como
+/// UTC (desplazaba el evento tantas horas como el offset).
 pub fn local_ms(dt: NaiveDateTime) -> i64 {
-    match Local.from_local_datetime(&dt) {
-        chrono::LocalResult::Single(d) => d.timestamp_millis(),
-        chrono::LocalResult::Ambiguous(d, _) => d.timestamp_millis(),
-        chrono::LocalResult::None => dt.and_utc().timestamp_millis(),
+    for shift in 0..=2 {
+        let cand = dt + chrono::Duration::hours(shift);
+        match Local.from_local_datetime(&cand) {
+            chrono::LocalResult::Single(d) => return d.timestamp_millis(),
+            chrono::LocalResult::Ambiguous(d, _) => return d.timestamp_millis(),
+            chrono::LocalResult::None => continue,
+        }
     }
+    // imposible en zonas reales; último recurso determinista
+    dt.and_utc().timestamp_millis()
 }
 
 /// Medianoche local (ms) del día que contiene `ms`.
@@ -926,6 +932,25 @@ fn time_of_day_min(ms: i64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_ms_normal_datetime_matches_chrono() {
+        let dt = NaiveDate::from_ymd_opt(2026, 3, 10)
+            .unwrap()
+            .and_hms_opt(14, 30, 0)
+            .unwrap();
+        let exp = Local
+            .from_local_datetime(&dt)
+            .earliest()
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(local_ms(dt), exp);
+        assert_eq!(crate::ai::nl::local_ms(dt), exp);
+        assert_eq!(
+            crate::ai::validation::naive_to_ms(dt.date(), dt.time()),
+            exp
+        );
+    }
     use chrono::Datelike;
 
     fn dt((y, mo, d): (i32, u32, u32), h: u32, m: u32) -> i64 {

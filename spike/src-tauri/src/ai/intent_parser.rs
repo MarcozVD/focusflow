@@ -129,8 +129,18 @@ pub fn parse_batch_json(v: &Value) -> AiResult<IntentBatch> {
             Err(e) => return Err(e),
         }
     }
+    // Un intent inválido no tumba el lote: se descartan los inválidos y se
+    // devuelve el resto. Solo si TODOS son inválidos se mantiene el error.
     if !errors.is_empty() {
-        return Err(AiError::BadResponse(errors.join("; ")));
+        if intents.is_empty() {
+            return Err(AiError::BadResponse(errors.join("; ")));
+        }
+        // solo el conteo: sin títulos ni contenido del usuario en el log
+        eprintln!(
+            "[ai] lote: {} intent(s) inválido(s) descartado(s), {} válido(s)",
+            errors.len(),
+            intents.len()
+        );
     }
     Ok(IntentBatch {
         intents,
@@ -203,6 +213,19 @@ mod tests {
             AiError::BadResponse(m) => assert!(m.contains("end antes de start"), "{m}"),
             other => panic!("esperado BadResponse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_batch_json_keeps_valid_when_some_invalid() {
+        let mixed = json!({"intents": [
+            {"intent_type": "task", "title": "Estudiar física", "confidence": 0.7},
+            {"intent_type": "event", "title": "X", "start_date": "2026-08-23", "end_date": "2026-08-05", "confidence": 0.5},
+            {"intent_type": "task", "title": "Pagar luz", "confidence": 0.6}
+        ]});
+        let batch = parse_batch_json(&mixed).expect("los válidos sobreviven");
+        assert_eq!(batch.intents.len(), 2);
+        assert_eq!(batch.intents[0].title, "Estudiar física");
+        assert_eq!(batch.intents[1].title, "Pagar luz");
     }
 
     #[test]

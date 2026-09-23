@@ -350,8 +350,13 @@
   }
 
   async function removeTrusted(s: string) {
-    await invoke("trusted_senders_remove", { sender: s });
-    await loadEmailConfig();
+    try {
+      await invoke("trusted_senders_remove", { sender: s });
+      await loadEmailConfig();
+    } catch (e) {
+      // sin catch: unhandledrejection → banner global "Algo falló en la interfaz"
+      saved = `No se pudo quitar el remitente: ${e}`;
+    }
   }
 
   async function verifyAll() {

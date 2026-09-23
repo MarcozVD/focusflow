@@ -22,6 +22,12 @@ pub async fn auth_google_sign_in(app: AppHandle) -> Result<auth::AuthSessionView
         let state = app2.state::<std::sync::Mutex<Db>>();
         {
             let db = lock_recover(&state);
+            // otra cuenta distinta a la anterior → no heredar el checkpoint
+            // del correo (se saltaría su correo reciente)
+            let prev_user = db.auth_load().ok().flatten().map(|s| s.user_id);
+            if prev_user.is_some_and(|u| u != session.user_id) {
+                let _ = db.sync_state_clear_all();
+            }
             db.auth_save(&session).map_err(|e| e.to_string())?;
             let cfg = auth::gmail_email_config(&session.email);
             let json = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
@@ -33,7 +39,7 @@ pub async fn auth_google_sign_in(app: AppHandle) -> Result<auth::AuthSessionView
     .await;
     match res {
         Ok(Ok(v)) => {
-            append_log(&app, &format!("auth_sign_in ok user={}", v.email));
+            append_log(&app, &format!("auth_sign_in ok dominio={}", v.email.split('@').nth(1).unwrap_or("?")));
             // enfoca la ventana principal: el usuario acaba de autorizar en el
             // navegador y la app debe traerse a primer plano automáticamente
             crate::show_main(&app);
@@ -50,10 +56,11 @@ pub async fn auth_google_sign_in(app: AppHandle) -> Result<auth::AuthSessionView
     }
 }
 
-/// Cierra sesión: borra los tokens de la DB (refresh_token incluido).
+/// Cierra sesión: borra los tokens de la DB (refresh_token incluido) y el
+/// checkpoint del correo (ver `auth::sign_out`).
 #[tauri::command]
 pub fn auth_google_sign_out(app: AppHandle, state: State<'_, Mutex<Db>>) -> Result<(), String> {
-    with_db(&state, |db| db.auth_clear().map_err(|e| e.to_string()))?;
+    with_db(&state, auth::sign_out)?;
     append_log(&app, "auth_sign_out");
     Ok(())
 }

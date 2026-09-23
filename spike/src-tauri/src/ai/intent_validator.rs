@@ -131,8 +131,10 @@ fn parse_constraint_kind(v: &serde_json::Value) -> Result<ConstraintKind, AiErro
     }
 }
 
+/// u32 del JSON del LLM; fuera de rango → None (antes `as u32` truncaba:
+/// 4294967297 minutos se volvía 1).
 fn parse_u32(v: &serde_json::Value) -> Option<u32> {
-    v.as_u64().map(|n| n as u32)
+    v.as_u64().and_then(|n| u32::try_from(n).ok())
 }
 
 /// Convierte el JSON del proveedor en `Intent`, sin aplicar aún invariantes
@@ -194,8 +196,8 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
         .and_then(|d| ms_of_date_time(d, obj.get("deadline_time")));
 
     let preparation = match (obj.get("preparation_minutes"), obj.get("preparation_note")) {
-        (Some(m), _) if m.as_u64().map(|x| x > 0).unwrap_or(false) => Some(Preparation {
-            minutes: m.as_u64().unwrap() as u32,
+        (Some(m), _) if parse_u32(m).map(|x| x > 0).unwrap_or(false) => Some(Preparation {
+            minutes: parse_u32(m).unwrap_or(0),
             note: obj
                 .get("preparation_note")
                 .and_then(|n| n.as_str())
@@ -218,7 +220,10 @@ pub fn parse_intent_json(v: &serde_json::Value) -> Result<Intent, AiError> {
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|x| x.as_u64())
-                        .map(|n| n as u8)
+                        // fuera de u8 → 0 (inválido, lo rechaza validate_intent
+                        // igual que un 8); antes `n as u8` convertía 257 en
+                        // 1 = lunes y el valor basura pasaba la validación
+                        .map(|n| u8::try_from(n).unwrap_or(0))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -689,6 +694,17 @@ mod tests {
         v2["recurrence"] = json!({"frequency": "weekly", "interval": 1, "by_day": [0, 8], "count": null, "until": null});
         let err2 = parse_and_validate(&v2).expect_err("by_day inválido");
         assert!(err2.to_string().contains("by_day"), "{err2}");
+    }
+
+    #[test]
+    fn llm_numbers_are_not_truncated() {
+        // 257 como u8 era 1 (lunes) y pasaba: ahora se rechaza
+        let mut v = base_json();
+        v["recurrence"] = json!({"frequency": "weekly", "interval": 1, "by_day": [257], "count": null, "until": null});
+        assert!(parse_and_validate(&v).is_err(), "by_day 257 no es lunes");
+        // interval > u32 era (2^32 + 1) as u32 = 1: ahora fuera de rango → default
+        assert_eq!(parse_u32(&json!(4_294_967_297u64)), None);
+        assert_eq!(parse_u32(&json!(42)), Some(42));
     }
 
     #[test]
