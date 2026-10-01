@@ -66,14 +66,16 @@
 <style>
   .overlay {
     position: fixed; inset: 0; z-index: 70;
-    background: rgba(15, 23, 42, 0.42);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     display: grid; place-items: center; padding: var(--s-4);
   }
   .modal {
     width: min(400px, 100%);
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--e3);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     padding: var(--s-5);
     display: flex; flex-direction: column; gap: var(--s-2);
   }

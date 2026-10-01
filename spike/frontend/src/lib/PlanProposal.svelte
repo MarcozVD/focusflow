@@ -264,8 +264,9 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: color-mix(in srgb, var(--bg) 55%, transparent);
-    backdrop-filter: blur(3px);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     z-index: 90;
     border: none;
     padding: 0;
@@ -281,8 +282,8 @@
     display: flex;
     flex-direction: column;
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--e3);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     border: 1px solid var(--border);
     z-index: 91;
     overflow: hidden;
