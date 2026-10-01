@@ -219,7 +219,7 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 4. `text-wrap: balance` en titulares largos (onboarding).
 5. Texto nunca se difumina: color plano, peso ≥ 400.
 6. **Ningún `font-size` literal:** todo sale de `--fs-*`. Cumplido en toda la app: núcleo diario (`Calendar`, `EventBlock`, `TaskCheck`, `TopBar`, `Sidebar`, `TitleBar`, `App`, `TaskDrawer`, `QuickAdd`, `Widget`) y fase 2 (`Settings`, `Onboarding`, `Login`, `Assistant`, `PlanProposal`, `Suggestions`, `ContextualToast`, `ClassConflictDialog`, `StudySessions`, `StudyForm`, `Schedule`, `ClassForm`).
-7. **Capitalización en español: solo la primera letra.** Nada de `text-transform: capitalize` (daría «Sesiones De Estudio», «30 De Septiembre»). La inicial la aplica el helper `cap()` de `TopBar.svelte` al título de la vista.
+7. **Capitalización en español: solo la primera letra.** Nada de `text-transform: capitalize` (daría «Sesiones De Estudio», «30 De Septiembre»). La inicial la aplica el helper compartido `capitalizeFirst` (`dateUtils.ts`) — lo usan la TopBar (título de la vista) y el encabezado del popup del día.
 
 ---
 
@@ -327,12 +327,12 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 1. ~~**Radios de botón inconsistentes**~~ **resuelto:** todos los `border-radius` salen ya de `--r-*` (núcleo diario y fase 2); no quedan literales en px.
 2. **`.btn` duplicado con variantes locales:** cada componente redefine su `.btn` (Suggestions, Settings, TaskDrawer, ContextualToast, PlanProposal) con diferencias sutiles (padding 8/16 vs 9/14 vs 7/12). No existe un `Button.svelte` global — el componente está **propuesto**.
 3. **Foco:** `:focus-visible` global define outline 2 px `--primary-soft-2`, pero `TaskDrawer` sigue usando `box-shadow: 0 0 0 3px var(--primary-soft)` en inputs (`Settings` ya usa el foco global) — dos idiomas de foco.
-4. **Overlines/capitalización:** la mayoría usa `text-transform: uppercase` + `letter-spacing 0.06–0.1em` (lo correcto en español). El `capitalize` se quitó de la TopBar (helper `cap()`), pero el encabezado del popup de día (`.pop-head`, `Calendar.svelte:965`) sigue con `text-transform: capitalize`.
+4. ~~**Capitalización del popup**~~ **resuelto:** ni la TopBar ni el popup de día usan ya `text-transform: capitalize`; ambos aplican la mayúscula inicial con `capitalizeFirst` (`dateUtils.ts`). La convención de overlines se mantiene (`uppercase` + tracking 0.06–0.1em).
 5. ~~Sombras de drawer vs modal~~ **resuelto:** el drawer y su diálogo de borrado usan ya `--e3`, la misma elevación que los modales.
 6. **Drag toast vs toast contextual:** dos sistemas de toast distintos (`.drag-toast` en Calendar, `.toast` en ContextualToast, `.toast` en QuickAdd) con estilos diferentes.
 7. **`.ghost` (sin fondo)** y **`.danger`** como variantes de botón solo existen en algunos componentes.
-8. **Relieve en elementos flotantes:** `.fatal` (`App.svelte`, banner fijo) y `.widget` (`Widget.svelte`) todavía usan `--shadow-raised-lg`; la regla del §2.6 pide elevación (`--e2`/`--e3`) en lo que flota, no relieve.
-9. **Pesos 700 fuera de rol:** `Assistant.svelte:439` (`.task-ref-level`) y `Settings.svelte:1213` (`.vdot`) siguen en 700; según §4.3 solo el título de pantalla y el hero lo usan.
+8. **Relieve en elementos flotantes — parcial:** `.fatal` (`App.svelte`) ya usa `--e3`. `.widget` (`Widget.svelte`) **conserva `--shadow-raised-lg` a propósito**: es la tarjeta de su propia ventana sobre el escritorio, no una superficie flotante sobre un overlay, así que le corresponde relieve y no elevación.
+9. ~~**Pesos 700 fuera de rol**~~ **resuelto:** `.task-ref-level` (Assistant) y `.vdot` (Settings) pasan a 600; el 700 queda solo en el título de pantalla y el hero (§4.3).
 
 ---
 
