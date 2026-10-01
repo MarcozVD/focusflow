@@ -318,25 +318,25 @@
     z-index: 120;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--s-3);
     max-width: min(640px, calc(100vw - 40px));
     background: var(--surface);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-raised-lg, 0 12px 32px rgba(0, 0, 0, 0.18));
-    padding: 10px 14px;
-    font-size: 13px;
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     font-weight: 600;
   }
   .fatal button {
     border: none;
     background: var(--danger);
     color: #fff;
-    border-radius: 8px;
-    padding: 5px 12px;
-    font-size: 12px;
-    font-weight: 700;
+    border-radius: var(--r-xs);
+    padding: var(--s-1) var(--s-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
   }
@@ -357,9 +357,9 @@
     border-left: 3px solid var(--border);
     border-radius: var(--r-md);
     box-shadow: var(--e2);
-    padding: 10px 14px;
+    padding: var(--s-3) var(--s-4);
     color: var(--text-1);
-    font-size: 13px;
+    font-size: var(--fs-base);
     font-weight: 500;
   }
   .nl-toast.error {

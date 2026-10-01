@@ -68,8 +68,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--s-5);
-    padding: var(--s-5) var(--s-8);
+    /* contenedor: padding vertical y gap un escalón por encima (aire);
+       el horizontal se mantiene alineado con .cal-wrap/.page-wrap */
+    gap: var(--s-6);
+    padding: var(--s-6) var(--s-8);
   }
   .left {
     display: flex;
@@ -77,7 +79,7 @@
     gap: var(--s-5);
   }
   .title {
-    font-size: 22px;
+    font-size: var(--fs-xl);
     font-weight: 700;
     letter-spacing: -0.02em;
     text-transform: capitalize;
@@ -85,14 +87,14 @@
   .nav {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--s-1_5);
   }
   .arrow {
     width: 34px;
     height: 34px;
     border: none;
     background: var(--surface);
-    border-radius: 12px;
+    border-radius: var(--r-sm);
     box-shadow: var(--e1);
     color: var(--text-2);
     display: inline-flex;
@@ -112,10 +114,10 @@
   .today {
     border: none;
     background: var(--surface);
-    border-radius: 12px;
+    border-radius: var(--r-sm);
     box-shadow: var(--e1);
-    padding: 8px 14px;
-    font-size: 13px;
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     font-weight: 600;
     color: var(--text-1);
     transition: all var(--dur-fast) var(--ease-out);
@@ -127,17 +129,17 @@
   .switcher {
     display: inline-flex;
     background: var(--surface);
-    border-radius: 12px;
+    border-radius: var(--r-sm);
     box-shadow: var(--shadow-inset-sm);
-    padding: 3px;
-    gap: 2px;
+    padding: var(--s-1);
+    gap: var(--s-0_5);
   }
   .sw {
     border: none;
     background: transparent;
-    border-radius: 9px;
-    padding: 6px 12px;
-    font-size: 12.5px;
+    border-radius: var(--r-xs);
+    padding: var(--s-1_5) var(--s-3);
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-3);
     font-family: inherit;

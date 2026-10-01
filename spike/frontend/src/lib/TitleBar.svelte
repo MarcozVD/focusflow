@@ -83,24 +83,24 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: var(--s-2);
   }
   .logo {
     width: 22px;
     height: 22px;
-    border-radius: 7px;
+    border-radius: var(--r-xs);
     background: var(--primary);
     color: #fff;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: var(--fs-sm);
+    font-weight: 600;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     box-shadow: 0 4px 10px -2px color-mix(in srgb, var(--primary) 55%, transparent);
   }
   .name {
-    font-size: 13px;
-    font-weight: 700;
+    font-size: var(--fs-base);
+    font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--text-2);
   }
@@ -126,7 +126,7 @@
     content: "";
     position: absolute;
     inset: 8px 7px;
-    border-radius: 10px;
+    border-radius: var(--r-sm);
     background: transparent;
     transition: background var(--dur-fast) var(--ease-out);
     z-index: 0;
@@ -143,11 +143,11 @@
   }
   .ctl.min:hover::before {
     background: var(--surface-2);
-    box-shadow: inset 2px 2px 5px rgba(31, 41, 55, 0.06), inset -2px -2px 5px rgba(255, 255, 255, 0.9);
+    box-shadow: var(--shadow-inset-sm);
   }
   .ctl.max:hover::before {
     background: var(--primary-soft);
-    box-shadow: inset 2px 2px 5px rgba(31, 41, 55, 0.06), inset -2px -2px 5px rgba(255, 255, 255, 0.9);
+    box-shadow: var(--shadow-inset-sm);
   }
   .ctl.max:hover {
     color: var(--primary);
