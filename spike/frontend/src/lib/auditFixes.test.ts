@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { localIsoDate } from "./dateUtils";
 import { suggestionAllDay, suggestionEditDate } from "./suggestionLogic";
-import { taskStatus } from "./data.svelte";
+import { taskStatus, toggledState } from "./data.svelte";
 
 // Regresiones de la auditoría: fecha UTC vs local, "vencida" por inicio y
 // all_day inferido del formulario.
@@ -29,6 +29,23 @@ describe("taskStatus", () => {
   });
   it("completada gana sobre vencida", () => {
     expect(taskStatus({ completed_at: 5, status: "pendiente" }, 0, 10)).toBe("completada");
+  });
+});
+
+describe("toggledState", () => {
+  it("completar → completada y progreso 100", () => {
+    const t = { status: "pendiente" as const, end: new Date(2_000_000) };
+    expect(toggledState(t, 1_000_000)).toEqual({ status: "completada", progress: 100 });
+  });
+
+  it("reabrir con fin futuro → pendiente y progreso 0", () => {
+    const t = { status: "completada" as const, end: new Date(2_000_000) };
+    expect(toggledState(t, 1_000_000)).toEqual({ status: "pendiente", progress: 0 });
+  });
+
+  it("reabrir con fin pasado → vencida y progreso 0", () => {
+    const t = { status: "completada" as const, end: new Date(500_000) };
+    expect(toggledState(t, 1_000_000)).toEqual({ status: "vencida", progress: 0 });
   });
 });
 

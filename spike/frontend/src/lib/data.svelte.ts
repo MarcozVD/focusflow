@@ -702,6 +702,21 @@ function putInCache(t: Task) {
   weekCache.get(k)!.set(t.id, t);
 }
 
+/** Sustituye la copia de una tarea allí donde YA esté cacheada: una tarea que
+ *  cruza el límite semanal vive en varias semanas y putInCache solo actualiza
+ *  la de su inicio (rebuildTasks podía quedarse con la copia vieja). Si no está
+ *  en ninguna semana, se inserta por su semana de inicio. */
+function replaceInCache(t: Task) {
+  let found = false;
+  for (const w of weekCache.values()) {
+    if (w.has(t.id)) {
+      w.set(t.id, t);
+      found = true;
+    }
+  }
+  if (!found) putInCache(t);
+}
+
 export async function refreshTasks() {
   if (store.lastRange) {
     await refreshRange(new Date(store.lastRange.from), new Date(store.lastRange.to));
@@ -1188,20 +1203,48 @@ export async function addTask(t: Omit<Task, "id">) {
   store.tasks.push({ ...t, id: Math.max(0, ...store.tasks.map((x) => x.id)) + 1 });
 }
 
-export async function completeTask(id: number) {
+/** Estado siguiente al pulsar Completar/Reabrir (puro, sin store).
+ *  Reabrir replica `set_completed(done=false)` del backend (store.rs):
+ *  status "pendiente", `completed_at` null y progreso 0; el estado visible
+ *  se recalcula con `taskStatus`, que puede dejarla "vencida" si su fin ya pasó. */
+export function toggledState(
+  t: { status: Status; end: Date },
+  now: number = Date.now(),
+): { status: Status; progress: number } {
+  if (t.status !== "completada") return { status: "completada", progress: 100 };
+  return {
+    status: taskStatus({ completed_at: null, status: "pendiente" }, t.end.getTime(), now),
+    progress: 0,
+  };
+}
+
+/** Completa/reabre una tarea de forma optimista: el estado se aplica antes del
+ *  invoke (también en la caché, para que un rebuild previo a `tasks:changed`
+ *  no lo revierta) y devuelve el nuevo `done`, o `null` si el backend falla
+ *  (en ese caso restaura el estado previo y avisa con un toast). */
+export async function completeTask(id: number): Promise<boolean | null> {
   const t = store.tasks.find((x) => x.id === id);
-  if (!t) return;
-  const done = t.status !== "completada";
+  if (!t) return null;
+  const next = toggledState(t);
+  const done = next.status === "completada";
+  const prev: Task = { ...t };
+  const updated: Task = { ...t, ...next };
+  replaceInCache(updated);
+  rebuildTasks();
+  if (store.taskDetail?.id === id) store.taskDetail = store.tasks.find((x) => x.id === id) ?? updated;
   if (inTauri()) {
     try {
       await invoke("task_complete", { id, done });
     } catch (e) {
       console.error("completeTask", e);
+      replaceInCache(prev);
+      rebuildTasks();
+      if (store.taskDetail?.id === id) store.taskDetail = store.tasks.find((x) => x.id === id) ?? prev;
+      setNlToast(`No se pudo actualizar la tarea: ${e}`, "error");
+      return null;
     }
-    return;
   }
-  t.status = done ? "completada" : "pendiente";
-  t.progress = done ? 100 : t.progress;
+  return done;
 }
 
 /** El widget y la ventana principal montan App + WidgetPage: los listeners

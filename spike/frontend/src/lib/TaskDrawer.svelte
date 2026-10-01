@@ -121,8 +121,8 @@
   async function toggleDone() {
     const t = detail;
     if (!t) return;
-    await completeTask(t.id);
-    feedback = t.status === "completada" ? "Reabierta" : "Completada ✓";
+    const done = await completeTask(t.id);
+    feedback = done === null ? "No se pudo actualizar" : done ? "Completada ✓" : "Reabierta";
   }
 
   async function duplicate() {

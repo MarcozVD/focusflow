@@ -88,12 +88,21 @@ Paso 0 (orquestador): capturas **antes** (ver §5).
 
 ### T3 · `completeTask` optimista
 **Archivo:** `src/lib/data.svelte.ts` (l.1191) (+ test)
-- Helper puro exportado `toggledState(t, now)` → `{ status, progress }`: completar = `"completada"`, `100`; reabrir = `taskStatus({ completed_at: null, status: "pendiente" }, t.end.getTime(), now)` y progreso previo.
+- Helper puro exportado `toggledState(t, now)` → `{ status, progress }`: completar = `"completada"`, `100`; reabrir = `taskStatus({ completed_at: null, status: "pendiente" }, t.end.getTime(), now)` y progreso `0` (igual que `set_completed` en el backend, `store.rs`).
 - En Tauri: aplicar el nuevo estado **también en la caché** (`putInCache({ ...t, ...nuevo })` + `rebuildTasks()`), no solo mutar el proxy, para que una reconstrucción antes de `tasks:changed` no revierta el cambio. Luego `invoke("task_complete", { id, done })`. Si falla: restaurar el estado previo en caché, `rebuildTasks()` y `setNlToast("No se pudo actualizar la tarea: …", "error")`.
 - Modo navegador: misma ruta con el helper.
+- Si `store.taskDetail` es esa tarea, apuntarlo al objeto nuevo (y al restaurado en el rollback) para que el botón Completar/Reabrir del drawer cambie al instante.
+- `completeTask` devuelve el nuevo `done` (`boolean`); `TaskDrawer.toggleDone` arma el feedback con ese valor (hoy lee `t.status` tras el `await` y en modo navegador sale invertido).
 - Tests en `auditFixes.test.ts` (ya importa de `data.svelte`): completar, reabrir futura → `pendiente`, reabrir pasada → `vencida`.
 
 **Aceptación:** `npm test` verde; en Tauri el cambio visual es inmediato.
+
+### T3b · Mostrar `nlToast` (bug previo)
+**Archivo:** `src/App.svelte`
+`setNlToast` guarda mensajes (p. ej. "No se pudo crear…", "No se pudo actualizar la tarea…") pero **ningún componente los pinta** desde el commit inicial. Sin esto, un fallo del check rápido (T5) solo revierte en silencio.
+- Renderizar `nlToast()` en el layout principal: toast flotante abajo al centro, `--surface` + `--e2` + `--r-md`, sin solaparse con `ContextualToast`.
+- `source === "error"` → `role="alert"` e indicador `--danger`; resto → `role="status"`, `aria-live="polite"`.
+- Entrada/salida con `--dur-base` / `--ease-out`.
 
 ### T4 · EventBlock: estado "hundida gris" y bloqueo de drag/resize
 **Archivo:** `src/lib/EventBlock.svelte`
