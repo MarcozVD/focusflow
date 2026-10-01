@@ -11,7 +11,7 @@
 | # | Tema | Decisión |
 |---|------|----------|
 | D1 | Alcance de completadas | Visibles en **todo el calendario**: semana, día, mes y popup del día. Widget (Ahora/Siguiente), contadores del Sidebar, selector de StudyForm, Sugerencias, `studyConflicts` y guard de conflicto de clase **siguen excluyéndolas**. |
-| D2 | Look de completada | **Hundida gris**: fondo `--surface-2`, sombra `--shadow-inset` (más profunda que la `--shadow-inset-sm` de las pendientes), borde izquierdo `--text-3`, título tachado en `--text-3`, icono ✓. **Sin `opacity` global** (legibilidad). Sin hover-lift. |
+| D2 | Look de completada | **Hundida gris**: fondo `--surface-2`, sombra `--shadow-inset` (más profunda que la `--shadow-inset-sm` de las pendientes), borde izquierdo `--text-3`, título tachado en `--text-2` (contenido esencial: `--text-3` es solo para meta, ACCESSIBILITY.md §5; hora y descripción sí en `--text-3`), icono ✓. **Sin `opacity` global** (legibilidad). Sin hover-lift. |
 | D3 | Interacción | **Solo click** (abre TaskDrawer → "Reabrir"). Sin arrastrar ni redimensionar. z-index por debajo de las pendientes. |
 | D4 | Completar desde calendario | **Check al hover/focus**: círculo neumórfico en bloques no compactos, chips de la fila superior y filas del popup. Click = completar/reabrir sin abrir el drawer. Bloques compactos (<36 px) y minichips del mes: solo vía drawer. En una completada el check queda **siempre visible** (hace de indicador ✓). |
 | D5 | Animación | **Hundir + tachar**, solo CSS, `--dur-slow` / `--ease-out`: sombra se hunde, color se apaga a gris, la línea de tachado se dibuja izq→der. Reabrir = inverso. `prefers-reduced-motion`: regla global de `app.css`. |
@@ -107,7 +107,9 @@ Paso 0 (orquestador): capturas **antes** (ver §5).
 ### T4 · EventBlock: estado "hundida gris" y bloqueo de drag/resize
 **Archivo:** `src/lib/EventBlock.svelte`
 - `.evt.done`: `background: var(--surface-2)`, `border-left-color: var(--text-3)`, `box-shadow: var(--shadow-inset)`, `z-index: 0`, sin `transform` en hover, `cursor: pointer`. Eliminar `opacity: 0.5`.
-- Textos en done: título y hora en `--text-3`; ocultar `prio-dot` / `prio-bar`; descripción en `--text-3`.
+- Textos en done: título en `--text-2`; hora y descripción en `--text-3`; ocultar `prio-dot` / `prio-bar`.
+- `.evt.inicio` / `.evt.fin` se declaran **antes** que `.evt.done` (misma especificidad: si no, un stub completado conserva el tinte).
+- En compacto (`.evt-inline`) el título va a una línea (`-webkit-line-clamp: 1`): el ✓ resta ancho.
 - Tachado animado: envolver el texto del título en `<span class="strike">` inline con
   `background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0% 1.5px;`
   `transition: background-size var(--dur-slow) var(--ease-out);` → en done `background-size: 100% 1.5px`. Con `box-decoration-break: slice` (por defecto) la línea recorre las dos líneas del clamp de forma secuencial.
