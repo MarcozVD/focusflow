@@ -279,7 +279,6 @@
     max-height: 320px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-width: thin;
   }
   .sec {
     display: flex;
