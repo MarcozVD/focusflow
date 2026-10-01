@@ -425,8 +425,8 @@
      clases y mismos valores para que sesiones se vea igual que horario. */
   .cal {
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-raised);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
     display: flex;
@@ -466,7 +466,8 @@
     background: var(--surface-2);
   }
   .day-head.today .num {
-    background: var(--study);
+    background: var(--grad-accent);
+    box-shadow: var(--glow-accent);
     color: #fff;
   }
   .dow {
@@ -531,13 +532,17 @@
     overflow: hidden;
   }
   .day-col.today {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--study) 25%, transparent);
+    /* resaltado sutil dentro del pozo, sin líneas duras */
+    background: color-mix(in srgb, var(--study) 6%, transparent);
   }
   .time-area {
     position: relative;
     flex: 1;
     min-height: 0;
     cursor: copy;
+    /* cuadrícula hundida (pozo) */
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
   }
   .slots {
     position: absolute;
@@ -580,7 +585,8 @@
     text-align: left;
     overflow: hidden;
     z-index: 1;
-    box-shadow: var(--shadow-inset-sm);
+    /* sesión: relieve mínimo elevado sobre su tinte teal */
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     min-width: 0;
     cursor: pointer;
@@ -588,7 +594,7 @@
   }
   .stu-block:hover {
     transform: translateY(-1px) scale(1.01);
-    box-shadow: var(--e1);
+    box-shadow: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
     z-index: 3;
   }
   /* Conflicto con clase (regla 10): borde ámbar; el usuario decidió seguir. */

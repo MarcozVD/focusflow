@@ -292,8 +292,8 @@
      mismos valores para que horario se vea exactamente igual. */
   .cal {
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-raised);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
     display: flex;
@@ -331,7 +331,8 @@
     background: var(--surface-2);
   }
   .day-head.today .num {
-    background: var(--primary);
+    background: var(--grad-accent);
+    box-shadow: var(--glow-accent);
     color: #fff;
   }
   .dow {
@@ -397,13 +398,17 @@
     overflow: hidden;
   }
   .day-col.today {
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
+    /* resaltado sutil dentro del pozo, sin líneas duras */
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
   .time-area {
     position: relative;
     flex: 1;
     min-height: 0;
     cursor: copy;
+    /* cuadrícula hundida (pozo) */
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
   }
   .slots {
     position: absolute;
@@ -446,7 +451,8 @@
     text-align: left;
     overflow: hidden;
     z-index: 1;
-    box-shadow: var(--shadow-inset-sm);
+    /* bloque de clase: relieve mínimo elevado sobre su tinte primario */
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     min-width: 0;
     cursor: pointer;
@@ -454,7 +460,7 @@
   }
   .cls-block:hover {
     transform: translateY(-1px) scale(1.01);
-    box-shadow: var(--e1);
+    box-shadow: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
     z-index: 3;
   }
   .cb-inline {

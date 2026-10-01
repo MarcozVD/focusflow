@@ -813,8 +813,8 @@
 <style>
   .cal {
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-raised);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
     display: flex;
@@ -840,11 +840,13 @@
     flex-shrink: 0;
   }
   .month-grid {
-    /* 6 filas de altura FIJA: todos los meses se ven idénticos, con o sin
-       tareas. Si la ventana no alcanza, el scroll aparece en .cal-wrap. */
+    /* 6 filas de altura flexible (mínimo 80px por celda): llenan el alto de
+       la tarjeta si sobra y, si la ventana no alcanza, scrollea .content
+       junto con la TopBar. */
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    grid-template-rows: repeat(6, 80px);
+    grid-template-rows: repeat(6, minmax(80px, 1fr));
+    flex: 1;
     min-height: 0;
     /* contenedor: un escalón por encima del gap base (aire) */
     gap: var(--s-2);
@@ -854,6 +856,7 @@
     background: var(--surface-2);
     border: none;
     border-radius: var(--r-md);
+    box-shadow: var(--shadow-inset-sm);
     padding: var(--s-1) var(--s-1);
     text-align: left;
     display: flex;
@@ -866,13 +869,15 @@
   }
   .cell:hover {
     transform: translateY(-1px);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-inset-sm);
   }
   .cell.outside {
     opacity: 0.4;
   }
   .cell.today {
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
+    /* anillo de acento, sin relleno duro */
+    outline: 1.5px solid var(--primary);
+    outline-offset: -1.5px;
   }
   .daynum {
     font-size: var(--fs-xs);
@@ -887,8 +892,9 @@
     flex-shrink: 0;
   }
   .cell.today .daynum {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--glow-accent);
   }
   .chips {
     display: flex;
@@ -904,8 +910,9 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border: none;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-full);
     padding: 1px var(--s-1_5);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -947,7 +954,7 @@
     width: min(380px, calc(100% - 48px));
     max-height: 70%;
     background: var(--surface);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     box-shadow: var(--e3);
     border: 1px solid var(--border);
     /* contenedor: padding y gaps un escalón por encima (aire) */
@@ -1017,7 +1024,8 @@
     align-items: center;
     gap: var(--s-2);
     background: var(--surface-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     border: none;
@@ -1026,10 +1034,13 @@
     color: inherit;
     text-align: left;
     cursor: pointer;
-    transition: background var(--dur-fast) var(--ease-out);
+    transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .pop-item:hover {
     background: var(--surface-3);
+  }
+  .pop-list .chip-wrap.done .pop-item {
+    box-shadow: var(--shadow-inset-sm);
   }
   .pop-dot {
     width: 8px;
@@ -1104,7 +1115,8 @@
     background: var(--surface-2);
   }
   .day-head.today .num {
-    background: var(--primary);
+    background: var(--grad-accent);
+    box-shadow: var(--glow-accent);
     color: #fff;
   }
   .dow {
@@ -1177,12 +1189,16 @@
     overflow: hidden;
   }
   .day-col.today {
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
+    /* resaltado sutil dentro del pozo, sin líneas duras */
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
   .time-area {
     position: relative;
     flex: 1;
     min-height: 0;
+    /* cuadrícula hundida (pozo) */
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
   }
   .allday-row {
     display: flex;
@@ -1191,7 +1207,8 @@
     padding: var(--s-1) var(--s-1);
     min-height: 30px;
     border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
     border-radius: var(--r-sm) var(--r-sm) 0 0;
     flex-shrink: 0;
     overflow: hidden;
@@ -1215,8 +1232,9 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 14%, var(--surface));
     border: none;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-full);
     padding: var(--s-0_5) var(--s-2);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1446,17 +1464,18 @@
     left: 6px;
     right: 6px;
     border: none;
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--text-2);
     font-size: var(--fs-2xs);
     font-weight: 600;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-full);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     padding: var(--s-1) 0;
     z-index: 4;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .more-evts:hover {
     color: var(--primary);
-    background: var(--primary-soft);
+    box-shadow: var(--btn-shadow-hover);
   }
 </style>
