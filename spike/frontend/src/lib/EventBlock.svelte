@@ -193,8 +193,10 @@
   .evt.study {
     z-index: 0;
   }
+  /* El hover de la sesión NO sube z-index: si lo hiciera taparía la tarea
+     que la solapa (el efecto visual de hover se mantiene en .evt:hover). */
   .evt.study:hover {
-    z-index: 4;
+    z-index: 0;
   }
   .evt.overdue {
     border-left-style: dashed;
