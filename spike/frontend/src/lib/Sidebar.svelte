@@ -171,7 +171,7 @@
     /* panel elevado, separado de los bordes de la ventana */
     margin: var(--s-4) 0 var(--s-4) var(--s-4);
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
     transition: width var(--dur-base) var(--ease-out), padding var(--dur-base) var(--ease-out);
   }
@@ -249,7 +249,7 @@
     height: 40px;
     padding: 0;
     margin: var(--s-2) auto;
-    border-radius: 50%;
+    border-radius: var(--r-icon);
   }
   .side.collapsed .add-horario.add-study {
     margin-top: var(--s-2);
@@ -259,7 +259,7 @@
     height: 40px;
     padding: 0;
     margin: 0 auto;
-    border-radius: 50%;
+    border-radius: var(--r-icon);
   }
   .side.collapsed .section-label,
   .side.collapsed .cats,
@@ -281,7 +281,7 @@
     background: var(--surface);
     box-shadow: var(--btn-shadow);
     color: var(--text-3);
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -301,7 +301,7 @@
   .logo {
     width: 34px;
     height: 34px;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-icon);
     background: var(--primary);
     color: #fff;
     font-weight: 600;
@@ -329,7 +329,7 @@
     gap: var(--s-3);
     border: none;
     background: transparent;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-md);
     font-weight: 500;
@@ -359,7 +359,7 @@
     margin: var(--s-2) 0 var(--s-4);
     padding: var(--s-2) var(--s-3);
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     background: var(--surface);
     box-shadow: var(--btn-shadow);
     color: var(--primary);
@@ -387,7 +387,7 @@
     font-weight: 600;
     min-width: 20px;
     height: 20px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -412,7 +412,7 @@
     gap: var(--s-2);
     border: none;
     background: transparent;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     font-weight: 500;
@@ -435,7 +435,7 @@
     font-weight: 600;
     color: var(--text-3);
     background: var(--surface-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: 1px var(--s-2);
   }
   .today-box {
@@ -444,7 +444,7 @@
     align-items: center;
     gap: var(--s-2);
     background: var(--surface-2);
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     /* pozo hundido sutil */
     box-shadow: var(--shadow-inset-sm);
     padding: var(--s-2) var(--s-3);
@@ -474,7 +474,7 @@
     border: none;
     background: var(--surface);
     box-shadow: var(--btn-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2);
     font-size: var(--fs-base);
     font-weight: 500;

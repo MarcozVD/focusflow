@@ -74,14 +74,14 @@
   .modal {
     width: min(400px, 100%);
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     padding: var(--s-5);
     display: flex; flex-direction: column; gap: var(--s-2);
   }
   header { display: flex; align-items: center; gap: var(--s-2); }
   .badge {
-    width: 30px; height: 30px; border-radius: var(--r-full);
+    width: 30px; height: 30px; border-radius: var(--r-icon);
     background: var(--danger-bg); color: var(--danger);
     display: grid; place-items: center; font-size: var(--fs-lg); font-weight: 600;
   }
@@ -93,14 +93,14 @@
     font-size: var(--fs-base);
     background: var(--primary-soft);
     border-left: 3px solid var(--primary);
-    border-radius: var(--r-md); padding: var(--s-1_5) var(--s-2);
+    border-radius: var(--r-well); padding: var(--s-1_5) var(--s-2);
   }
   .cl .tm { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: var(--fs-sm); }
   footer { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
   .btn {
     flex: 1; font: inherit; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-    border-radius: var(--r-md); padding: var(--s-2) var(--s-2);
+    border-radius: var(--r-control); padding: var(--s-2) var(--s-2);
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }

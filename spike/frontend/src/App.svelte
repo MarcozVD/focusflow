@@ -368,7 +368,7 @@
     background: var(--surface);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     box-shadow: var(--e3);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
@@ -378,7 +378,7 @@
     border: none;
     background: var(--danger);
     color: #fff;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-control);
     padding: var(--s-1) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -400,7 +400,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-left: 3px solid var(--border);
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     box-shadow: var(--e2);
     padding: var(--s-3) var(--s-4);
     color: var(--text-1);

@@ -289,7 +289,7 @@
     bottom: var(--s-4);
     width: min(400px, calc(100vw - 2 * var(--s-4)));
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     z-index: 95;
     display: flex;
@@ -326,7 +326,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-2);
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     box-shadow: var(--btn-shadow);
     font-size: var(--fs-base);
     transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -393,6 +393,7 @@
     flex-shrink: 0;
     margin: 0;
     border: var(--input-border);
+   /* El riel del interruptor es píldora en ambos estilos */
     border-radius: var(--r-full);
     background: var(--surface);
     box-shadow: var(--shadow-inset-sm);
@@ -429,7 +430,7 @@
     border: var(--input-border);
     background: var(--input-bg);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
@@ -448,7 +449,7 @@
     border-color: var(--primary);
   }
   textarea {
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     resize: vertical;
     font-weight: 400;
     text-transform: none;
@@ -481,7 +482,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
@@ -528,7 +529,7 @@
   .dlg {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     padding: var(--s-6);
     width: min(320px, 100%);

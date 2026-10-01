@@ -194,7 +194,7 @@
     /* contenedor: gap y padding un escalón por encima (aire) */
     gap: var(--s-3);
     background: var(--input-bg);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     height: 44px;
     padding: 0 var(--s-5);
     box-shadow: var(--input-shadow);
@@ -206,7 +206,7 @@
     box-shadow: var(--input-shadow), inset 0 0 0 2px var(--primary-soft-2);
   }
   .qa.expanded {
-    border-radius: var(--r-full) var(--r-full) var(--r-sm) var(--r-sm);
+    border-radius: var(--r-control) var(--r-control) var(--r-chip) var(--r-chip);
   }
   .bolt {
     color: var(--primary);
@@ -235,7 +235,7 @@
     font-family: inherit;
     color: var(--text-3);
     background: var(--surface-2);
-    border-radius: var(--r-xs);
+    border-radius: var(--r-chip);
     padding: var(--s-0_5) var(--s-2);
     box-shadow: var(--shadow-inset-sm);
     white-space: nowrap;
@@ -248,7 +248,7 @@
     left: 0;
     right: 0;
     background: var(--surface);
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     box-shadow: var(--e3);
     border: 1px solid var(--border);
     /* contenedor: padding y gap un escalón por encima (aire) */
@@ -269,7 +269,7 @@
     font-weight: 600;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1) var(--s-2);
     border: none;
     box-shadow: var(--btn-shadow);
@@ -279,7 +279,7 @@
     background: var(--grad-accent);
     color: #fff;
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);
     font-weight: 600;
@@ -306,7 +306,7 @@
     margin-top: var(--s-2);
     background: var(--surface);
     box-shadow: var(--e2);
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-sm);
     color: var(--text-2);
@@ -315,7 +315,7 @@
     border: none;
     background: var(--grad-accent);
     color: #fff;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -342,7 +342,7 @@
     gap: var(--s-2);
     background: var(--surface);
     border-left: 3px solid var(--success);
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     box-shadow: var(--e2);
     padding: var(--s-2) var(--s-5);
     font-size: var(--fs-base);

@@ -96,7 +96,7 @@
     height: 34px;
     border: none;
     background: var(--surface);
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     box-shadow: var(--btn-shadow);
     color: var(--text-2);
     display: inline-flex;
@@ -114,7 +114,7 @@
   .today {
     border: none;
     background: var(--surface);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
@@ -132,7 +132,7 @@
   .switcher {
     display: inline-flex;
     background: var(--surface);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     /* riel hundido; la opción activa va elevada */
     box-shadow: var(--shadow-inset-sm);
     padding: var(--s-1);
@@ -141,7 +141,7 @@
   .sw {
     border: none;
     background: transparent;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;

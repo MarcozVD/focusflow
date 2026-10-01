@@ -59,7 +59,7 @@
     z-index: 60;
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     padding: var(--s-4);
     box-shadow: var(--e2);
     animation: rise 0.25s var(--ease-out);
@@ -88,7 +88,7 @@
     color: var(--primary);
     background: var(--primary-soft);
     padding: var(--s-1) var(--s-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
   }
   .x {
     border: none;
@@ -97,7 +97,7 @@
     font-size: var(--fs-lg);
     cursor: pointer;
     padding: var(--s-0_5) var(--s-1_5);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-icon);
   }
   .x:hover {
     background: var(--surface-3);
@@ -115,7 +115,7 @@
   }
   .btn {
     padding: var(--s-2) var(--s-3);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-1);

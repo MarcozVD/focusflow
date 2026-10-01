@@ -206,7 +206,7 @@
 <style>
   .widget {
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     /* ventana fija y transparente: --raised (no -lg) para que la sombra
        quepa dentro del margen y no se recorte contra el borde */
     box-shadow: var(--shadow-raised);
@@ -240,7 +240,7 @@
   .logo {
     width: 20px;
     height: 20px;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-icon);
     background: var(--primary);
     color: #fff;
     font-size: var(--fs-xs);
@@ -301,7 +301,7 @@
     gap: var(--s-2);
     border: none;
     background: transparent;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
     padding: var(--s-1) var(--s-2);
     font-size: var(--fs-sm);
     font-family: inherit;
@@ -335,7 +335,7 @@
     font-weight: 600;
     color: var(--primary);
     background: var(--primary-soft);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     box-shadow: var(--shadow-raised-sm);
     padding: var(--s-0_5) var(--s-2);
     flex-shrink: 0;
@@ -351,7 +351,7 @@
     font-weight: 600;
     color: var(--text-2);
     background: var(--surface-3);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     box-shadow: var(--shadow-raised-sm);
     padding: var(--s-0_5) var(--s-2);
     flex-shrink: 0;
@@ -373,7 +373,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     box-shadow: var(--btn-shadow);
     font-size: var(--fs-xs);
     line-height: 1;
@@ -422,7 +422,7 @@
     cursor: pointer;
     box-shadow: var(--btn-shadow);
     padding: var(--s-1) var(--s-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .foot-btn:hover {
