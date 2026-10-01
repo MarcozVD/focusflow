@@ -35,6 +35,11 @@
 
   onMount(() => {
     const onErr = (e: ErrorEvent) => {
+      // Aviso benigno del navegador al redimensionar (ResizeObserver): no es fatal.
+      if (/ResizeObserver loop/.test(e.message)) {
+        console.debug("[ui] aviso benigno ignorado:", e.message);
+        return;
+      }
       fatalError = e.message || "Error inesperado de interfaz";
     };
     const onRej = (e: PromiseRejectionEvent) => {
@@ -52,6 +57,15 @@
 
   // Vistas de lectura: columna más estrecha (~880px) centrada con la TopBar.
   const reading = $derived(view === "sugerencias" || view === "asistente" || view === "ajustes");
+
+  // Scroll unificado: al cambiar de vista o de submodo (horario/sesiones) la
+  // columna vuelve arriba; las flechas de fecha dentro de la misma vista no.
+  let contentEl = $state<HTMLElement | null>(null);
+  $effect(() => {
+    void view;
+    void hmode;
+    if (contentEl) contentEl.scrollTop = 0;
+  });
 
   // Toast global de data.svelte (setNlToast): errores de acciones rápidas
   // (crear/actualizar tarea…) que antes no se pintaba en ningún sitio.
@@ -202,7 +216,7 @@
     <TitleBar />
     <div class="body">
       <Sidebar {view} {setView} {navigate} />
-      <main class="content">
+      <main class="content" bind:this={contentEl}>
         <div class="content-inner" class:reading>
           <TopBar {date} {view} {navigate} {goToday} {hmode} {setHmode} />
           {#if view === "sesiones"}

@@ -146,12 +146,22 @@
   $effect(() => {
     const el = dayEls[0];
     if (!el) return;
+    // rAF + solo asignar si cambió: evita el "ResizeObserver loop" al
+    // redimensionar (la asignación síncrona encadenaba otra medida).
+    let raf = 0;
     const ro = new ResizeObserver(() => {
-      timeAreaH = el.clientHeight;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const h = el.clientHeight;
+        if (h !== timeAreaH) timeAreaH = h;
+      });
     });
     ro.observe(el);
     timeAreaH = el.clientHeight;
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   });
 
   /**
