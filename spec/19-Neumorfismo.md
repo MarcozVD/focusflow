@@ -146,3 +146,23 @@ Lo que no salió exactamente como el plan y por qué:
 7. **Widget con relieve `--shadow-raised`.** D15 lo pedía como las demás superficies, pero al ser ventana fija con `margin: var(--s-4)` la sombra larga (`--raised-lg`) se recortaba contra el borde; queda la media.
 8. **Foco del TaskDrawer resuelto (deuda previa).** Se retiró su `box-shadow` verde de foco: ahora solo cambia el borde y el anillo lo da el `:focus-visible` global (un único idioma de foco).
 9. **`--text-2` claro medido en 12.5:1, no 13.8:1.** El §D13 apuntaba ~13.8:1 para `--text-1`; el cálculo WCAG sobre `#1F2937`/`#E9EDF2` da **12.48:1** (sigue AAA). Documentado con el valor real en ACCESSIBILITY.md.
+
+---
+
+## 7. Ajustes tras la prueba del usuario
+
+Cambios que llegaron **después** de probar la interfaz, por cuatro cosas que el usuario pidió corregir. Se commitearon aparte del plan original.
+
+1. **Las sesiones de estudio tapaban las tareas** en la vista de semana/día. Los bloques compartían escala de `z-index` sin orden explícito y una sesión al solaparse quedaba por encima. Se fijó la escala **sesión 0 · completada 1 · pendiente 2 · hover 4 · fantasma 5** (con huecos a propósito, para intercalar hover y arrastre sin reordenar). La completada sube de 0 a 1 porque ahora debe ganarle a la sesión, y todas vuelven a 4 en `:hover`. `Calendar.svelte` mueve su `.class-strip` a 2 y su `.now-line` a 5 para compartir la escala.
+
+2. **La barra de prioridad se pintaba en bloques bajos** y desplazaba el texto. `EventBlock.svelte` ahora solo la muestra con `height >= 50`; por debajo no cabe y estorba.
+
+3. **Barras de scroll ocultas en toda la app** (`app.css`: `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`). El riel visible rompía la superficie continua del neumorfismo y en oscuro quedaba más marcado. **Solo es pintura**: no se toca ningún `overflow`, así que rueda, trackpad, teclado y gestos táctiles siguen desplazando, y el `.body` del widget heredó el comportamiento sin tocar su código. Lo que sí hay que vigilar es el descubrimiento, y por eso los fundidos de `mask-image` quedan como señal obligatoria (ACCESSIBILITY §8).
+
+4. **Sistema de forma: rectangular por defecto, redondeada como opción.** D4 pedía píldoras y círculos en todas partes; el resultado fue una interfaz poco sobria. Se sustituye por seis **tokens de radio semánticos** —`--r-control` (10 px), `--r-chip` (8 px), `--r-card` (18 px), `--r-well` (12 px), `--r-icon` (10 px) y `--r-check` (5 px)— que con `data-shape="round"` entregan los radios anteriores (píldoras, `--r-card: 28px`, `--r-icon`/`--r-check` al 50 %). Reglas:
+   - El atributo va en `<html>`: `data-shape="round"`, o **se elimina** en la forma rectangular.
+   - La preferencia se guarda en `localStorage` bajo `ff-ui` (`shape`) y **no viaja al backend** (que solo persiste tema y acento): la sincronización entre ventanas, widget incluido, va por el evento `storage` con `initUiPrefsSync()`.
+   - Selector **«Forma» (Rectangular / Redondeada)** en Ajustes → Apariencia, junto al de tema.
+   - Se quedan **siempre circulares** los puntos de categoría y prioridad, el knob del interruptor, el anillo de pulso del widget, el spinner de Onboarding y los círculos con icono dentro (✓ del toast, icono del diálogo de borrado): es geometría, no forma de contenedor.
+   - El **riel del interruptor** sigue en `--r-full` en ambas formas, porque su lectura de "encendido/apagado" depende de la forma de píldora.
+   - Migración en tres lotes de commits para poder revertir por capas: Settings + TaskCheck → App y el resto de la barra y diálogos → calendario, formularios y vistas.

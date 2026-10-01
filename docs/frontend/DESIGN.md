@@ -161,7 +161,7 @@ Toasts, menús, banners y popups conservan la elevación clásica (`--e1` hover 
 | `--overlay` | ver §3.1/§3.2 | Fondo del overlay: gris translúcido **del propio tema** |
 | `--overlay-blur` | `8px` | `backdrop-filter: blur()` (con prefijo `-webkit-`) |
 
-Los paneles de modal (formularios de clase y sesión, conflictos, PlanProposal, diálogo de borrado, TaskDrawer) usan `--surface` + `--r-xl` + `--shadow-raised-lg`.
+Los paneles de modal (formularios de clase y sesión, conflictos, PlanProposal, diálogo de borrado, TaskDrawer) usan `--surface` + `--r-card` + `--shadow-raised-lg`.
 
 **Por qué overlay claro:** un overlay oscuro bajo una luz blanca fuerte produce el halo que obligaba antes a bajar los modales a `--e3`. Desenfocar el gris del tema mantiene el relieve sin halo; en oscuro el overlay es oscuro y la luz del relieve es casi imperceptible, así que el problema desaparece por construcción.
 
@@ -242,30 +242,50 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 
 ---
 
-## 6. Radius
+## 6. Radius — el sistema de forma
+
+**Hay una escala numérica y una forma.** La escala sigue viva para casos puntuales, pero **ningún componente elige radio directamente**: todos usan los seis tokens semánticos, que son los que cambian con la preferencia del usuario.
+
+### 6.1 Tokens de forma
+
+| Token | Qué envuelve | Rectangular (por defecto) | Redondeada (`data-shape="round"`) |
+|-------|-------------|---------------------------|-----------------------------------|
+| `--r-control` | Botones, inputs, selects, textareas, switchers, `.qa` de QuickAdd | **10 px** | 999 px (píldora) |
+| `--r-chip` | Chips, badges, `kbd`, píldoras pequeñas, franjas finas | **8 px** | 999 px |
+| `--r-card` | Tarjetas, paneles, modales, sidebar, drawer, calendario, franja de "todo el día" | **18 px** | 28 px |
+| `--r-well` | Pozos: columnas de semana, celdas del mes, fichas de estadística, cajas de error | **12 px** | 16 px |
+| `--r-icon` | Botones de icono, flechas, cerrar, añadir, tema, logo, day-head, `.today-box` del calendario | **10 px** | 50 % (círculo) |
+| `--r-check` | `TaskCheck` | **5 px** | 50 % (círculo) |
+
+```css
+:root                        { --r-control: 10px; --r-chip: 8px; --r-card: 18px;
+                              --r-well: 12px;   --r-icon: 10px;  --r-check: 5px; }
+:root[data-shape="round"]    { --r-control: 999px; --r-chip: 999px; --r-card: 28px;
+                              --r-well: 16px;     --r-icon: 50%;    --r-check: 50%; }
+```
+
+- **Por defecto es rectangular con esquinas suavizadas.** El redondeo extremo (píldoras y círculos por todas partes) hacía la interfaz menos sobria; la forma redondeada queda como **opción** en Ajustes → Apariencia.
+- El atributo vive en `<html>`: `data-shape="round"` o, en rectangular, **se elimina el atributo**. Lo aplica `applyShape()` (`data.svelte.ts`), que valida el valor y lo guarda en `localStorage` bajo `ff-ui` (`shape: "soft" | "round"`). No viaja al backend: el widget lo recibe por el evento `storage`, igual que el resto de ventanas.
+- Los valores en `data-shape="round"` son los radios del neumorfismo anterior, así que ese estilo es reconocible.
+
+### 6.2 Lo que se queda siempre circular
+
+`border-radius: 50%` literal, en ambos estilos, porque no es una forma de contenedor sino una **geometría inherente**:
+
+- **Puntos de categoría y prioridad:** `.cat-dot`, `.dot` (sidebar, widget, PlanProposal), `.pop-dot` (popup del mes), `.kdot`, `.prio-dot` de los bloques.
+- **Knob del interruptor** (`input[type="checkbox"]::before` del TaskDrawer).
+- **Anillo de pulso** del widget (`.pulse`) y **spinner** de Onboarding (`.fwait::before`).
+- **Círculos con icono dentro:** el ✓ del toast de QuickAdd y el icono del diálogo de borrado.
+
+### 6.3 Escala numérica (uso residual)
 
 ```css
 --r-xs: 6px   --r-sm: 10px  --r-md: 16px  --r-lg: 22px  --r-xl: 28px  --r-full: 999px
 ```
 
-| Token | Uso real |
-|-------|----------|
-| `--r-xs` (6 px) | Elementos pequeños y densos: `.prio-dot`, `kbd`, insignias muy pequeñas |
-| `--r-sm` (10 px) | EventBlocks y celdas del mes (contenido denso) |
-| `--r-md` (16 px) | Celdas del mes, `day-head`, campos con etiqueta larga, notas |
-| `--r-lg` (22 px) | Fichas hundidas de estadística, ficha auxiliar del modal |
-| `--r-xl` (28 px) | **Tarjetas y paneles:** calendario, sidebar, Ajustes, Sugerencias, PlanProposal, Login, Onboarding, widget, modales, TaskDrawer |
-| `--r-full` | **Píldoras:** botones, inputs, selects, chips, pills, switchers, badges, interruptores, botones de diálogo |
-| `50%` | Botones de icono y botones circulares (flechas, cerrar, añadir, tema) |
+Solo para casos que no son un componente (uniones de radios, anillos, `mask-image`). Cuando el valor sea el radio de una superficie, control o chip, usa el token de forma.
 
-**Mapeo de literales:** `≤ 9px → --r-xs` · `10–12px → --r-sm` · `14–18px → --r-md` · `22–24px → --r-lg` · `28px → --r-xl` · `999px → --r-full`. `50%` se queda literal.
-
-**Reglas de forma (spec 19 · D4):**
-1. **Todo control es píldora:** botones, inputs, selects, textareas, chips y pills usan `--r-full`.
-2. **Todo contenedor es `--r-xl`:** tarjetas, paneles y modales.
-3. **Botón de icono = círculo** (`border-radius: 50%`).
-4. **La excepción es el contenido denso:** bloques y celdas del calendario se quedan en `--r-sm`/`--r-md` para no regalar espacio.
-5. Sin esquinas rectas en ninguna parte.
+**Mapeo de literales a tokens:** `4–6px → --r-chip` · `8–10px → --r-control / --r-chip` · `10–12px → --r-well` · `14–18px → --r-card` · `28px → --r-card` · `999px → --r-control / --r-chip` · `50% → --r-icon / --r-check`, salvo los círculos de §6.2.
 
 ---
 
@@ -340,15 +360,40 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 
 - La cadena flex se propaga con `.cal-wrap { flex: 1 0 auto; min-height: 0 }` y `.view-fill`, para que el wrapper de la transición `{#key}` no la rompa.
 - La grilla del mes usa `grid-template-rows: repeat(6, minmax(80px, 1fr))` + `flex: 1`: las filas **se estiran** para llenar la tarjeta (a 2560×1440 `.cal` medía 605 px y dejaba ~170 px vacíos) y, si la ventana no alcanza, el overflow cae en `.content` junto con la TopBar.
+- **Orden de apilado en semana/día** (`z-index`), para que nada tape lo que importa:
+
+  | z | Elemento | Razón |
+  |---|----------|-------|
+  | **0** | `.evt.study` (sesión de estudio) | Cede: las tareas van siempre por delante |
+  | **1** | `.evt.done` (completada) | Hundida y gris, pero por encima de la sesión |
+  | **2** | `.evt` pendiente y `.class-strip` | La franja de clase comparte escala con los bloques |
+  | **4** | `.evt:hover` / `.evt.done:hover` / `.evt.study:hover` | El hover sube al frente sin cambiar el orden base |
+  | **5** | `.evt.dragging` (fantasma del arrastre) y `.now-line` | Lo transitorio va por encima de todo lo estático |
+
+  Sin esa escala, las sesiones de estudio tapaban las tareas al solaparse. Al completar, el bloque pasa a `z-index: 1` (gana a la sesión) y al hacer hover sube a `4` para poder registrarse encima.
 - **`ResizeObserver` del calendario:** mide en `requestAnimationFrame` y **solo asigna `timeAreaH` si el valor cambió**, cancelando el frame en el cleanup. La asignación síncrona encadenaba otra medida y disparaba el aviso `ResizeObserver loop completed with undelivered notifications`; `App.svelte` además lo filtra del manejador de errores fatales (`console.debug`), porque es benigno.
 
 ### 9.3 Barra lateral
 
-- **Panel:** margen `--s-4` a izquierda/alto/bajo, `--r-xl`, `--shadow-raised`, `var(--surface)`. Ancho 232 px. Su zona scrolleable (`.side-scroll`) lleva fundido de 16 px arriba y abajo con `mask-image` y padding extra inferior (`--s-5`) para que el último elemento no toque el borde redondeado.
+- **Panel:** margen `--s-4` a izquierda/alto/bajo, `--r-card`, `--shadow-raised`, `var(--surface)`. Ancho 232 px. Su zona scrolleable (`.side-scroll`) lleva fundido de 16 px arriba y abajo con `mask-image` y padding extra inferior (`--s-5`) para que el último elemento no toque el borde redondeado.
 - **Modo iconos (D11/D12):** automático por debajo de **1200 px** de ancho (`matchMedia("(max-width: 1199px)")`); botón manual que guarda la preferencia en `localStorage` (`ff.sidebar` → `auto | collapsed | expanded`) y **vuelve a `auto`** cuando la elección coincide con la automática. En modo iconos (72 px, padding incluido): tooltips + `aria-label` en cada icono, contador de Sugerencias como badge sobre su icono, botones de añadir circulares, botón de tema y de expandir circulares, y se ocultan categorías y caja de "hoy".
 - La caja de "hoy" es un **pozo** (`--surface-2` + `--shadow-inset-sm`).
 
-### 9.4 Ventana
+### 9.4 Barras de scroll: ocultas, con el scroll intacto
+
+**No se dibujan, pero se desplazan.** El riel visible rompía la superficie continua del neumorfismo (y en oscuro quedaba más marcado aún), así que `app.css` las oculta de forma global:
+
+```css
+*                    { scrollbar-width: none; }   /* Firefox */
+*::-webkit-scrollbar  { width: 0; height: 0; display: none; }  /* Chromium/WebKit */
+*::-webkit-scrollbar-corner { display: none; }
+```
+
+- **Solo es pintura:** el `overflow` de cada scroller no cambia, así que **rueda, trackpad, teclado (espacio, Inicio/Fin, RePág/AvPág), arrastre de scrollbar y gestos táctiles siguen funcionando**. `scrollbar-width: none` no desactiva el scroll; solo evita que se dibuje la barra.
+- **La posición en la lista se comunica con los fundidos:** al no haber riel, el contenido desplazable se señala con las máscaras de `mask-image` de **16 px** en `.side-scroll` (sidebar) y en el body del `TaskDrawer`, y de **24 px** arriba en el `.body` del Asistente. Son la única pista de que hay más contenido, así que **no se quitan**.
+- Ámbito: `*`, así que el widget (`.body` con `overflow-y: auto` y `max-height: 320px`) y los popups heredan el comportamiento sin código propio.
+
+### 9.5 Ventana
 
 - **Mínimo 960×640** (`tauri.conf.json`), antes 800×600: a 1024×640 la sidebar de 232 px se comía un cuarto del ancho, "Añadir sesión de estudio" partía en dos líneas y los 7 días quedan de ~90 px.
 
@@ -358,14 +403,14 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 
 ### 10.1 Lo que se repite de forma consistente
 
-- **Botón primario:** `--grad-accent` + `--btn-primary-shadow` + `#fff`, píldora; hover `filter: brightness(1.05)`; active `--btn-shadow-active`.
-- **Botón secundario/pill:** `--surface` + `--btn-shadow`; hover `--btn-shadow-hover`; active hundido.
-- **Botón de icono:** 40 px circular con `--btn-shadow`.
+- **Botón primario:** `--grad-accent` + `--btn-primary-shadow` + `#fff`, `--r-control`; hover `filter: brightness(1.05)`; active `--btn-shadow-active`.
+- **Botón secundario/pill:** `--surface` + `--btn-shadow` en `--r-control`; hover `--btn-shadow-hover`; active hundido.
+- **Botón de icono:** 40 px con `--r-icon` y `--btn-shadow` (círculo en forma redondeada).
 - **Botón peligroso:** texto `--danger` sobre la superficie en relieve (dejó de pintarse en rojo sólido).
-- **Chip de categoría:** texto `color-mix(var(--c) 60%, var(--text-1))` sobre `color-mix(var(--c) 13%, var(--surface))`, `--r-full` y relieve mínimo de 2 px.
-- **Input:** `--input-bg` + `--input-shadow` + `--input-border` en `--r-full` (los textarea en `--r-lg`); el foco **solo cambia el borde** a `--primary` y el anillo lo da el `:focus-visible` global.
-- **Interruptor:** riel 40×22 hundido (`--shadow-inset-sm`) con knob circular elevado (`--btn-shadow`); activo con `--grad-accent`.
-- **Tarjetas:** `--surface` + `--r-xl` + `--shadow-raised`; calendario, modales y TaskDrawer usan `--shadow-raised-lg`.
+- **Chip de categoría:** texto `color-mix(var(--c) 60%, var(--text-1))` sobre `color-mix(var(--c) 13%, var(--surface))`, `--r-chip` y relieve mínimo de 2 px.
+- **Input:** `--input-bg` + `--input-shadow` + `--input-border` en `--r-control` (los textarea en `--r-card`); el foco **solo cambia el borde** a `--primary` y el anillo lo da el `:focus-visible` global.
+- **Interruptor:** riel 40×22 **siempre en `--r-full`** (es píldora en ambos estilos) con knob circular elevado (`--btn-shadow`); activo con `--grad-accent`.
+- **Tarjetas:** `--surface` + `--r-card` + `--shadow-raised`; calendario, modales y TaskDrawer usan `--shadow-raised-lg`.
 
 ### 10.2 Deuda visual (registrar, no "arreglar" sin plan)
 
@@ -378,8 +423,9 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 
 - **Foco:** `TaskDrawer` ya no usa anillo propio; todo el repo usa el `:focus-visible` global.
 - **Superficie = fondo:** ya no hay superficies blancas.
-- **Radios literales:** todo sale de `--r-*` (o `50%` en círculos).
+- **Radios literales:** todo sale de los tokens de forma `--r-*` (o `50%` en los círculos de §6.2).
 - **Pesos:** 700 solo en título de pantalla y hero.
+- **Barras de scroll:** ocultas globalmente sin tocar el `overflow` (§9.4).
 
 ---
 
@@ -389,7 +435,7 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 2. ¿La luz viene de arriba-izquierda en TODAS las superficies?
 3. ¿Superficie = fondo (nunca blanco sobre blanco)?
 4. ¿Hover = un nivel más de relieve y press = hundido?
-5. ¿Botones/inputs/chips en píldora, tarjetas en `--r-xl`, iconos circulares?
+5. ¿El radio sale del token de forma (`--r-control`, `--r-chip`, `--r-card`, `--r-well`, `--r-icon`, `--r-check`), nunca de un literal?
 6. ¿Contenido denso con relieve mínimo de 2 px?
 7. ¿Overlay claro desenfocado bajo los modales (nunca halo)?
 8. ¿Números tabulares, overlines uppercase con tracking?

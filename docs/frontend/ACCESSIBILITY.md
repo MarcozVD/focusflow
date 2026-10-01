@@ -1,7 +1,7 @@
 # ACCESSIBILITY.md — Accesibilidad de FocusFlow
 
 **Método:** auditoría sobre el código real (`spike/frontend/src/`) + warnings de `svelte-check`/`vite-plugin-svelte` observados en el arranque del dev server. Cada hallazgo indica: estado actual, evidencia y mejora propuesta.
-**Última actualización:** 2026-10-01 (spec 19: superficie = fondo gris, relieve en controles, línea sutil en campos, interruptores accesibles).
+**Última actualización:** 2026-10-01 (spec 19: superficie = fondo gris, relieve en controles, línea sutil en campos, interruptores accesibles, barras de scroll ocultas y sistema de forma).
 
 > **Principio rector:** el neumorfismo no debe destruir la accesibilidad. La profundidad visual nunca es el único indicador de estado. El producto ya cumple varios principios clave; esta auditoría separa lo que está bien de lo que es deuda.
 
@@ -20,6 +20,7 @@
 | Reduced motion | 🟢 Global respetado (120 ms) + GSAP off en onboarding |
 | Status announcements | 🟡 Faltan `aria-live` en varios estados |
 | Color independence | 🟢 Sólida (estados multi-canal) |
+| Scroll discovery | 🟡 Barras ocultas; los fundidos de máscara las sustituyen |
 | Calendar accessibility | 🟡 Estructura OK; drag sin teclado |
 
 ---
@@ -156,11 +157,39 @@
 
 ---
 
-## 8. Reduced motion
+## 8. Scroll visible (barras ocultas)
+
+`app.css` oculta las barras de scroll en toda la app:
+
+```css
+*                   { scrollbar-width: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+```
+
+**No afecta al desplazamiento.** Es una regla puramente visual: no cambia el `overflow` de ningún scroller, así que
+
+- **rueda y trackpad** desplazan igual,
+- **teclado** también: `Tab` para entrar en la región desplazable y luego espacio, `Inicio`/`Fin`, `RePág`/`AvPág` y flechas; no hay que arrastrar la barra para avanzar,
+- el gesto de arrastre del contenido y el táctil quedan intactos.
+
+**Riesgo asumido:** sin riel visible cuesta saber *cuánto* queda por ver, y un usuario de teclado puede no descubrir que una región scrollea. Compensaciones en el repo:
+
+- **Fundidos de máscara (`mask-image`)** de 16 px en el `.side-scroll` del sidebar y en el body del `TaskDrawer`, y de 24 px en la conversación del Asistente: el contenido se corta a media tarjeta justo donde seguiría.
+- El scroll unificado hace que la TopBar suba con el contenido, así que al desplazarse se ve que la página entera se mueve.
+
+**Deuda / vigilancia:**
+
+1. Ninguna región desplazable expone `aria` que indique el tamaño del contenido; para quien navega con lector de pantalla, "hay más abajo" solo se percibe por el fundido, que es puramente visual. *Propuesta:* añadir `tabindex="0"` a los scrollers con `role="region"` y `aria-label`, de modo que sean alcanzables y nombrados.
+2. `.body` del widget es scrollean (`max-height: 320px`, `overscroll-behavior: contain`) pero **sin fundido**: con la barra oculta no hay ninguna pista visual de que la lista continue. *Propuesta:* añadirle máscara de 16 px como en el drawer.
+3. En modo de alto contraste forzado la barra seguiría oculta y el fondo es sólido, así que la única pista sigue siendo el fundido: comprobar que se distingue.
+
+---
+
+## 9. Reduced motion
 
 **Excelente — es el más maduro:**
 
-- `app.css:203-209`: `@media (prefers-reduced-motion: reduce)` fuerza 120 ms en TODAS las animaciones/transiciones (incluidas las del neumorfismo: el press de los botones no se anima si el usuario lo pide).
+- `app.css:187-194`: `@media (prefers-reduced-motion: reduce)` fuerza 120 ms en TODAS las animaciones/transiciones (incluidas las del neumorfismo: el press de los botones no se anima si el usuario lo pide).
 - Onboarding (`Onboarding.svelte`): detecta `matchMedia("(prefers-reduced-motion: reduce)")` y **desactiva GSAP por completo** (solo fade CSS de 0 ms).
 - Svelte transitions (`fade`, `slide`, `scale`) se reducen vía la media query global.
 
@@ -168,7 +197,7 @@
 
 ---
 
-## 9. Status announcements (aria-live)
+## 10. Status announcements (aria-live)
 
 **Faltante — deuda principal de accesibilidad:**
 
@@ -183,7 +212,7 @@
 
 ---
 
-## 10. Color independence
+## 11. Color independence
 
 **Sólido — el diseño ya es multi-canal:**
 
@@ -199,7 +228,7 @@
 
 ---
 
-## 11. Calendar accessibility
+## 12. Calendar accessibility
 
 **Estructura OK:**
 
@@ -215,10 +244,11 @@
 2. Popup de día sin `role="dialog"` ni focus management.
 3. Los "+N más" de semana son botones que abren el día; OK.
 4. Los eventos vencidos se distinguen por dashed border + texto en tooltip; en el bloque visible solo dashed — el `title` lo comunica al hover, pero un screen reader lee el título de la tarea, no el estado vencida. *Propuesta:* añadir `aria-label` con estado cuando aplique.
+5. **Apilado en semana/día (spec 19):** las sesiones de estudio van por detrás de las tareas (`z-index: 0` frente a `2`), así que un usuario con baja visión puede no distinguir que hay un bloque debajo. Se compensa con el orden de lectura del DOM y con el borde izquierdo de color de cada bloque, pero el solapamiento sigue siendo una señal puramente visual.
 
 ---
 
-## 12. Plan de acción (priorizado)
+## 13. Plan de acción (priorizado)
 
 | # | Acción | Impacto |
 |---|--------|---------|
@@ -230,5 +260,7 @@
 | 6 | `aria-hidden` explícito en iconos decorativos del sidebar | Bajo |
 | 7 | Alternativa de teclado para drag & drop (largo plazo) | Medio (requiere diseño) |
 | 8 | Resolver warnings de `svelte-check` (TitleBar role, TaskDrawer overlays) | Bajo–Medio |
+| 9 | `role="region"` + `tabindex="0"` en los scrollers (ver §8) | Medio |
+| 10 | Fundido de máscara en el `.body` del widget | Bajo |
 
 > **Nota para la landing:** debe heredar estos estándares (focus-visible, reduced-motion, role=status en interacciones, contraste AA) desde el inicio, no como añadido.
