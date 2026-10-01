@@ -834,7 +834,7 @@
   }
   section {
     background: var(--surface);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     box-shadow: var(--shadow-raised);
     /* tarjeta: padding y gap interno un escalón por encima (aire) */
     padding: var(--s-8);
@@ -1209,7 +1209,8 @@
   }
   .stat {
     background: var(--surface-2);
-    border-radius: var(--r-md);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-inset-sm);
     padding: var(--s-3);
     display: flex;
     flex-direction: column;

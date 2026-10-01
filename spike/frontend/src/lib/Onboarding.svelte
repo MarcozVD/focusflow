@@ -469,9 +469,9 @@
     height: 88px;
     display: grid;
     place-items: center;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     background: var(--surface);
-    box-shadow: var(--shadow-raised-lg);
+    box-shadow: var(--shadow-raised);
   }
   .logo img {
     width: 56px;
@@ -513,7 +513,7 @@
     align-items: flex-start;
     background: var(--surface);
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-xl);
     padding: var(--s-4) var(--s-5);
     box-shadow: var(--shadow-raised);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
@@ -621,7 +621,7 @@
   .guide .g-card {
     background: var(--surface);
     border: none;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     box-shadow: var(--shadow-raised);
     /* tarjeta: padding y gap interno un escalón por encima (aire) */
     padding: var(--s-8);
@@ -671,7 +671,7 @@
   }
   fieldset {
     border: none;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     background: var(--surface);
     box-shadow: var(--shadow-raised);
     /* tarjeta: padding y gap interno un escalón por encima (aire) */

@@ -329,7 +329,7 @@
   }
   .empty {
     background: var(--surface-2);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     padding: var(--s-8);
     text-align: center;
   }
@@ -338,7 +338,7 @@
   }
   .card {
     background: var(--surface);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     box-shadow: var(--shadow-raised);
     /* tarjeta de sugerencia: padding y gap entre filas un escalón más (aire) */
     padding: var(--s-6);

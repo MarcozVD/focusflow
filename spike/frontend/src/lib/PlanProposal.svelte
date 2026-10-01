@@ -367,8 +367,9 @@
     align-items: flex-start;
     gap: var(--s-2);
     padding: var(--s-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-lg);
     background: var(--surface-2);
+    box-shadow: var(--shadow-raised-sm);
     margin-bottom: var(--s-1_5);
   }
   .under-main {
@@ -411,8 +412,9 @@
   }
   .plan-item {
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-xl);
     background: var(--surface-2);
+    box-shadow: var(--shadow-raised);
     /* tarjeta de propuesta: padding y gap un escalón por encima (aire) */
     padding: var(--s-3) var(--s-4);
     margin-bottom: var(--s-2);
