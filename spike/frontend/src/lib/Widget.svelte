@@ -207,8 +207,12 @@
   .widget {
     background: var(--surface);
     border-radius: var(--r-xl);
-    box-shadow: var(--shadow-raised-lg);
+    /* ventana fija y transparente: --raised (no -lg) para que la sombra
+       quepa dentro del margen y no se recorte contra el borde */
+    box-shadow: var(--shadow-raised);
     border: 1px solid var(--border);
+    /* margen interno suficiente para el alcance de la sombra */
+    margin: var(--s-4);
     padding: var(--s-4);
     display: flex;
     flex-direction: column;
@@ -333,6 +337,7 @@
     color: var(--primary);
     background: var(--primary-soft);
     border-radius: var(--r-full);
+    box-shadow: var(--shadow-raised-sm);
     padding: var(--s-0_5) var(--s-2);
     flex-shrink: 0;
     white-space: nowrap;
@@ -348,6 +353,7 @@
     color: var(--text-2);
     background: var(--surface-3);
     border-radius: var(--r-full);
+    box-shadow: var(--shadow-raised-sm);
     padding: var(--s-0_5) var(--s-2);
     flex-shrink: 0;
     white-space: nowrap;
@@ -365,14 +371,16 @@
   .qa-btn {
     width: 22px;
     height: 20px;
-    border: 1px solid var(--border);
-    background: var(--surface-3);
+    border: none;
+    background: var(--surface);
     color: var(--text-2);
     border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     font-size: var(--fs-xs);
     line-height: 1;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
     opacity: 0;
   }
   .sec:hover .qa-btn,
@@ -381,12 +389,14 @@
   }
   .qa-btn:hover {
     background: var(--primary);
-    border-color: var(--primary);
+    box-shadow: var(--btn-shadow-hover);
     color: #fff;
+  }
+  .qa-btn:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .qa-btn[title="Completar"]:hover {
     background: var(--success);
-    border-color: var(--success);
   }
   .empty {
     font-size: var(--fs-sm);
@@ -406,17 +416,35 @@
     align-items: center;
     gap: var(--s-1);
     border: none;
-    background: transparent;
+    background: var(--surface);
     color: var(--text-3);
     font-size: var(--fs-xs);
     font-weight: 600;
     cursor: pointer;
+    box-shadow: var(--btn-shadow);
     padding: var(--s-1) var(--s-2);
     border-radius: var(--r-full);
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .foot-btn:hover {
     color: var(--primary);
-    background: var(--primary-soft);
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .foot-btn:active {
+    box-shadow: var(--btn-shadow-active);
+  }
+  /* acción principal del widget: Abrir la app */
+  .foot .foot-btn:first-child {
+    background: var(--grad-accent);
+    color: #fff;
+    box-shadow: var(--btn-primary-shadow);
+  }
+  .foot .foot-btn:first-child:hover {
+    color: #fff;
+    filter: brightness(1.05);
+  }
+  .foot .foot-btn:first-child:active {
+    box-shadow: var(--btn-shadow-active);
+    filter: brightness(0.97);
   }
 </style>
