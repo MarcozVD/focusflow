@@ -167,7 +167,8 @@
     gap: var(--s-0_5);
     overflow: hidden;
     z-index: 1;
-    box-shadow: var(--shadow-inset-sm);
+    /* pendientes: relieve mínimo elevado sobre el tinte de categoría */
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     transition:
       transform var(--dur-fast) var(--ease-out),
       box-shadow var(--dur-fast) var(--ease-out),
@@ -181,7 +182,7 @@
   }
   .evt:hover {
     transform: translateY(-1px) scale(1.01);
-    box-shadow: var(--e1);
+    box-shadow: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
     z-index: 3;
   }
   .evt:active {
