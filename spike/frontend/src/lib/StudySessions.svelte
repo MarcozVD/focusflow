@@ -676,14 +676,16 @@
   /* Diálogo de conflicto (mismo lenguaje visual que el resto). */
   .overlay {
     position: fixed; inset: 0; z-index: 70;
-    background: rgba(15, 23, 42, 0.42);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     display: grid; place-items: center; padding: var(--s-4);
   }
   .modal {
     width: min(420px, 100%);
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--e3);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     /* contenedor: padding y gap un escalón por encima (aire) */
     padding: var(--s-6);
     display: flex; flex-direction: column; gap: var(--s-3);

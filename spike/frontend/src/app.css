@@ -58,6 +58,10 @@
   --line-input: rgba(91, 100, 114, 0.22);
   --shadow-reach: 48px;
 
+  /* Overlay de modales (D8): gris translúcido desenfocado, sin halo */
+  --overlay: color-mix(in srgb, var(--bg) 60%, transparent);
+  --overlay-blur: 8px;
+
   /* Controles (D3/D4): relieve que se hunde al pulsar; derivan de neu-* */
   --btn-shadow: var(--shadow-raised-sm);
   --btn-shadow-hover: 6px 6px 12px var(--neu-dark), -6px -6px 12px var(--neu-light);
@@ -109,6 +113,7 @@
   --text-2: #a6adbb;
   --text-3: #6b7280;
   --border: #333845;
+  --overlay: rgba(12, 14, 18, 0.55);
 
   /* Neumorfismo oscuro: solo cambian neu-dark/neu-light */
   --neu-dark: rgba(0, 0, 0, 0.55);

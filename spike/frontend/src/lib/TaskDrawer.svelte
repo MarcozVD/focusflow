@@ -276,22 +276,25 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 18, 24, 0.32);
-    backdrop-filter: blur(2px);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     z-index: 90;
   }
+  /* Panel flotante separado de los bordes de la ventana */
   .drawer {
     position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(400px, 100vw);
+    top: var(--s-4);
+    right: var(--s-4);
+    bottom: var(--s-4);
+    width: min(400px, calc(100vw - 2 * var(--s-4)));
     background: var(--surface);
-    box-shadow: var(--e3);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     z-index: 95;
     display: flex;
     flex-direction: column;
-    border-left: 1px solid var(--border);
+    overflow: hidden;
   }
   .head {
     display: flex;
@@ -343,6 +346,21 @@
     /* contenedor: gap entre campos y padding un escalón por encima (aire) */
     gap: var(--s-4);
     padding: var(--s-5) var(--s-6);
+    /* fundido arriba/abajo de la zona scrolleable (16px) */
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
   }
   label {
     display: flex;
@@ -498,8 +516,9 @@
   .dlg-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 18, 24, 0.4);
-    backdrop-filter: blur(3px);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     z-index: 120;
     display: flex;
     align-items: center;
@@ -509,8 +528,8 @@
   .dlg {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    box-shadow: var(--e3);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised-lg);
     padding: var(--s-6);
     width: min(320px, 100%);
     text-align: center;
