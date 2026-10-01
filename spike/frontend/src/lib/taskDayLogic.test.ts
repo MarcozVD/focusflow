@@ -5,6 +5,7 @@ import {
   isMultiDay,
   lastCoveredDayMs,
   tasksOnDay,
+  isMiddleDay,
   segmentFor,
   allDayChipsOn,
   multiDayChipsOn,
@@ -163,7 +164,7 @@ describe("chips", () => {
     ]);
   });
 
-  it("multi-día completada aparece como chip en días intermedios", () => {
+  it("multi-día completada NO aparece en chips de días intermedios", () => {
     const multiDone = t({
       id: 90,
       title: "MD",
@@ -171,8 +172,62 @@ describe("chips", () => {
       end: d(2026, 8, 12, 14),
       status: "completada",
     });
-    expect(multiDayChipsOn([multiDone], d(2026, 8, 11))).toEqual([multiDone]);
-    expect(topChipsOn([multiDone], d(2026, 8, 11))).toEqual([multiDone]);
+    expect(multiDayChipsOn([multiDone], d(2026, 8, 11))).toEqual([]);
+    expect(topChipsOn([multiDone], d(2026, 8, 11))).toEqual([]);
+  });
+
+  it("completada multi-día con horario: en monthChipsOn solo inicio y fin", () => {
+    const multiDone = t({
+      id: 91,
+      title: "MD2",
+      start: d(2026, 8, 10, 10),
+      end: d(2026, 8, 12, 14),
+      status: "completada",
+    });
+    expect(monthChipsOn([multiDone], d(2026, 8, 10)).map((x) => x.id)).toEqual([91]);
+    expect(monthChipsOn([multiDone], d(2026, 8, 11))).toEqual([]);
+    expect(monthChipsOn([multiDone], d(2026, 8, 12)).map((x) => x.id)).toEqual([91]);
+  });
+
+  it("completada all-day multi-día (10→13): días 10 y 12 sí, 11 no", () => {
+    const adDone = t({
+      id: 92,
+      title: "AD done",
+      start: d(2026, 8, 10),
+      end: d(2026, 8, 13),
+      allDay: true,
+      status: "completada",
+    });
+    expect(allDayChipsOn([adDone], d(2026, 8, 10)).map((x) => x.id)).toEqual([92]);
+    expect(allDayChipsOn([adDone], d(2026, 8, 11))).toEqual([]);
+    expect(allDayChipsOn([adDone], d(2026, 8, 12)).map((x) => x.id)).toEqual([92]);
+    expect(monthChipsOn([adDone], d(2026, 8, 11))).toEqual([]);
+  });
+
+  it("pendiente multi-día sigue apareciendo en el día intermedio", () => {
+    const multiPend = t({ id: 93, title: "MP", start: d(2026, 8, 10, 10), end: d(2026, 8, 12, 14) });
+    expect(monthChipsOn([multiPend], d(2026, 8, 11)).map((x) => x.id)).toEqual([93]);
+    expect(multiDayChipsOn([multiPend], d(2026, 8, 11)).map((x) => x.id)).toEqual([93]);
+  });
+});
+
+describe("isMiddleDay", () => {
+  it("inicio y fin → false; intermedio → true", () => {
+    const m = t({ id: 95, title: "M", start: d(2026, 8, 10, 10), end: d(2026, 8, 12, 14) });
+    expect(isMiddleDay(m, d(2026, 8, 10))).toBe(false);
+    expect(isMiddleDay(m, d(2026, 8, 11))).toBe(true);
+    expect(isMiddleDay(m, d(2026, 8, 12))).toBe(false);
+  });
+
+  it("tarea de un día → false", () => {
+    const s = t({ id: 96, title: "S", start: d(2026, 8, 10, 9), end: d(2026, 8, 10, 11) });
+    expect(isMiddleDay(s, d(2026, 8, 10))).toBe(false);
+  });
+
+  it("fin exactamente a medianoche: el fin real es el día anterior, no intermedio", () => {
+    const m = t({ id: 97, title: "M", start: d(2026, 8, 10, 10), end: d(2026, 8, 12, 0) });
+    expect(isMiddleDay(m, d(2026, 8, 10))).toBe(false);
+    expect(isMiddleDay(m, d(2026, 8, 11))).toBe(false);
   });
 });
 

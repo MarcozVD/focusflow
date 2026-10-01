@@ -61,9 +61,18 @@ export function isMultiDay(t: TaskLike): boolean {
   return daySpanDays(t) > 1;
 }
 
-/** Tareas que cubren el día (incluidas las completadas). Predicado único. */
+/** ¿Es `d` un día INTERMEDIO de la tarea (ni inicio ni último día cubierto)?
+ *  Mismo criterio que los chips "cont": un fin a medianoche pertenece al día
+ *  anterior (lastCoveredDayMs), así el último día real no es intermedio. */
+export function isMiddleDay(t: TaskLike, d: Date): boolean {
+  return isMultiDay(t) && !sameDay(t.start, d) && !sameDay(new Date(lastCoveredDayMs(t)), d);
+}
+
+/** Tareas que cubren el día (incluidas las completadas). Las completadas
+ *  multi-día solo cuentan en su día de inicio y de fin: en los intermedios
+ *  no se pintan (chips del mes/todo el día/popup). Predicado único. */
 export function tasksOnDay<T extends TaskLike>(tasks: T[], d: Date): T[] {
-  return tasks.filter((t) => coversDay(t, d));
+  return tasks.filter((t) => coversDay(t, d) && !(t.status === "completada" && isMiddleDay(t, d)));
 }
 
 /** Comparador puro y estable: no-completadas antes que completadas, sin
@@ -121,9 +130,7 @@ export function allDayChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
 /** Multi-día con horario (no all-day) en días INTERMEDIOS → chip "cont".
  *  Los días de inicio/fin se representan con su stub en el área de tiempo. */
 export function multiDayChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
-  return tasksOnDay(tasks, d).filter(
-    (t) => !t.allDay && isMultiDay(t) && !sameDay(t.start, d) && !sameDay(new Date(lastCoveredDayMs(t)), d),
-  );
+  return tasksOnDay(tasks, d).filter((t) => !t.allDay && isMiddleDay(t, d));
 }
 
 /** Chips de la fila superior (semana/día): todo el día + multi-día intermedio,
