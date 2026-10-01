@@ -1,6 +1,6 @@
 # 19 — Neumorfismo real + layout responsivo
 
-**Estado:** Plan aprobado · **Fecha:** 2026-09-30
+**Estado:** ✅ Completado · **Fecha:** 2026-10-01 (plan 2026-09-30)
 **Origen:** sesión de grilling (3 rondas) tras las fases del spec 18.
 **Referencias visuales:** 3 capturas de la galería del usuario (`OneDrive\Imágenes\Screenshots\Captura de pantalla 2026-09-30 225824.png`, `…225843.png`, `…225848.png`): kits de *soft UI* clásico. Complementa `spec/refimg.jpeg`.
 **Rama:** `feat/ui-neumorfismo` (sale de `feat/ui-polish-resto`) → PR #4 apilado sobre #3.
@@ -129,4 +129,20 @@ DESIGN.md (D-01 reemplazado por D3, superficie = fondo, tokens nuevos, reglas de
 
 ## 5. Fuera de alcance
 
-Cambiar la fuente · rediseñar la anatomía de los bloques del calendario (solo cambia su relieve) · landing page · lógica de negocio. El backend solo cambia en `tauri.conf.json` (tamaño mínimo de ventana). Pendientes registrados aparte: el foco de los inputs del TaskDrawer (DESIGN.md) y el horario por defecto de StudyForm que cruza la medianoche.
+Cambiar la fuente · rediseñar la anatomía de los bloques del calendario (solo cambia su relieve) · landing page · lógica de negocio. El backend solo cambia en `tauri.conf.json` (tamaño mínimo de ventana). Pendiente registrado aparte: el horario por defecto de StudyForm que cruza la medianoche.
+
+---
+
+## 6. Desvíos y hallazgos durante la implementación
+
+Lo que no salió exactamente como el plan y por qué:
+
+1. **Tokens de control centralizados.** Los valores de §2 ganaron un grupo de tokens derivados en `app.css` (`--btn-shadow`, `--btn-shadow-hover`, `--btn-shadow-active`, `--btn-primary-shadow`, `--input-bg`, `--input-shadow`, `--input-border`) para que los ~13 componentes no repitan las fórmulas de sombra. `--overlay` y `--overlay-blur` también viven ahí (D8).
+2. **Acento en oscuro: `--primary` derivado, no `--accent` pisado.** Se cumplió D7 dejando que cada tema derive `--primary` con `color-mix(... 75%, #fff)`; `applyUiPrefs` solo fija `--accent`.
+3. **Grilla del mes que se estira.** No estaba en el plan, pero a 2560×1440 el mes dejaba ~170 px vacíos: la grilla pasó de 80 px fijos a `repeat(6, minmax(80px, 1fr))` + `flex: 1` (T1, D10).
+4. **Scroll unificado con reset obligatorio.** Al unificar el scroll (D9) aparecía el arrastre de la posición anterior al cambiar de vista; se añadió un `$effect` sobre `view`/`hmode` que resetea `scrollTop`. Las flechas de fecha no lo disparan (misma vista).
+5. **`ResizeObserver` en `requestAnimationFrame`.** El observer del calendario medía y asignaba en el mismo frame, encadenando otra medida y disparando el aviso benigno `ResizeObserver loop` que `App.svelte` mostraba como error fatal. Se programa la medida en `rAF`, solo se asigna si el valor cambió, y el handler global filtra ese aviso.
+6. **Interruptores, no componente nuevo.** Los toggles (D3) siguen siendo `<input type="checkbox">` nativos con `appearance: none`; no se creó `Switch.svelte` porque no era necesario para el lenguaje visual y así el teclado/estado nativos quedan intactos.
+7. **Widget con relieve `--shadow-raised`.** D15 lo pedía como las demás superficies, pero al ser ventana fija con `margin: var(--s-4)` la sombra larga (`--raised-lg`) se recortaba contra el borde; queda la media.
+8. **Foco del TaskDrawer resuelto (deuda previa).** Se retiró su `box-shadow` verde de foco: ahora solo cambia el borde y el anillo lo da el `:focus-visible` global (un único idioma de foco).
+9. **`--text-2` claro medido en 12.5:1, no 13.8:1.** El §D13 apuntaba ~13.8:1 para `--text-1`; el cálculo WCAG sobre `#1F2937`/`#E9EDF2` da **12.48:1** (sigue AAA). Documentado con el valor real en ACCESSIBILITY.md.
