@@ -161,10 +161,10 @@
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-left: 3px solid var(--c);
     border-radius: var(--r-sm);
-    padding: 4px 8px;
+    padding: var(--s-1) var(--s-2);
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--s-0_5);
     overflow: hidden;
     z-index: 1;
     box-shadow: var(--shadow-inset-sm);
@@ -248,24 +248,24 @@
     place-items: center;
     width: 13px;
     height: 13px;
-    border-radius: 4px;
+    border-radius: var(--r-xs);
     background: color-mix(in srgb, var(--c) 20%, transparent);
     color: var(--c);
     flex-shrink: 0;
   }
   .evt-time {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     color: var(--text-2);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--s-1);
     transition: color var(--dur-slow) var(--ease-out);
   }
   .evt-title {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-1);
     line-height: 1.25;
@@ -278,7 +278,7 @@
     transition: color var(--dur-slow) var(--ease-out);
   }
   .evt-desc {
-    font-size: 10px;
+    font-size: var(--fs-2xs);
     color: var(--text-3);
     line-height: 1.2;
     display: -webkit-box;
@@ -304,7 +304,7 @@
   .evt-inline {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--s-1);
     min-width: 0;
     height: 100%;
   }
@@ -314,8 +314,8 @@
     line-clamp: 1;
   }
   .evt-time-mini {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     color: var(--text-2);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
