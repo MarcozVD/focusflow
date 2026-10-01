@@ -1875,7 +1875,7 @@ export async function rescanEmail() {
     store.syncProgress = null;
     store.syncSummary = null;
     await invoke("email_rescan");
-    setNlToast("Reescanenado el correo…", "sync");
+    setNlToast("Reescaneando el correo…", "sync");
   } catch (e) {
     store.syncRunning = false;
     console.error("rescanEmail", e);

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fade } from "svelte/transition";
+  import { fade, fly } from "svelte/transition";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import TitleBar from "./lib/TitleBar.svelte";
@@ -16,7 +16,7 @@
   import Settings from "./lib/Settings.svelte";
   import Onboarding from "./lib/Onboarding.svelte";
   import Login from "./lib/Login.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies } from "./lib/data.svelte";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies, nlToast } from "./lib/data.svelte";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
   import ContextualToast from "./lib/ContextualToast.svelte";
 
@@ -49,6 +49,12 @@
   });
 
   const onboardingPending = $derived(showOnboarding || onboarding()?.completed === false);
+
+  // Toast global de data.svelte (setNlToast): errores de acciones rápidas
+  // (crear/actualizar tarea…) que antes no se pintaba en ningún sitio.
+  const nlToastMsg = $derived(nlToast());
+  const reduceMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   $effect(() => {
     if (onboarding()?.completed) showOnboarding = false;
@@ -238,6 +244,17 @@
       <TaskDrawer />
     {/if}
     <ClassConflictDialog />
+    {#if nlToastMsg}
+      <div
+        class="nl-toast"
+        class:error={nlToastMsg.source === "error"}
+        role={nlToastMsg.source === "error" ? "alert" : "status"}
+        aria-live={nlToastMsg.source === "error" ? "assertive" : "polite"}
+        transition:fly={{ y: 12, duration: reduceMotion ? 0 : 200 }}
+      >
+        {nlToastMsg.text}
+      </div>
+    {/if}
     {#if !isWidget}
       <ContextualToast onplan={planFromNotif} />
     {/if}
@@ -322,6 +339,31 @@
     font-weight: 700;
     cursor: pointer;
     flex-shrink: 0;
+  }
+  /* Toast global (nlToast): abajo al centro, fuera de la esquina de
+     ContextualToast (abajo a la derecha). `margin-inline: auto` centra sin
+     transform propio: Svelte fly anima transform y pisaría un translateX. */
+  .nl-toast {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    margin-inline: auto;
+    width: fit-content;
+    max-width: min(520px, calc(100vw - 40px));
+    z-index: 90;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--e2);
+    padding: 10px 14px;
+    color: var(--text-1);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .nl-toast.error {
+    border-left-color: var(--danger);
   }
   :global([data-widget] html) {
     background: transparent;
