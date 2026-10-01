@@ -125,9 +125,54 @@ describe("chips", () => {
     expect(monthChipsOn([multi], d(2026, 8, 12))).toEqual([multi]);
   });
 
-  it("tasksOnDay excluye completadas", () => {
+  it("tasksOnDay incluye completadas", () => {
     const done = t({ id: 23, title: "D", start: d(2026, 8, 10, 9), end: d(2026, 8, 10, 10), status: "completada" });
-    expect(tasksOnDay([done], d(2026, 8, 10))).toEqual([]);
+    expect(tasksOnDay([done], d(2026, 8, 10))).toEqual([done]);
+  });
+
+  it("monthChipsOn: pendientes antes que completadas", () => {
+    const done1 = t({ id: 60, title: "D1", start: d(2026, 8, 10, 9), end: d(2026, 8, 10, 10), status: "completada" });
+    const pend1 = t({ id: 61, title: "P1", start: d(2026, 8, 10, 10), end: d(2026, 8, 10, 11) });
+    const done2 = t({ id: 62, title: "D2", start: d(2026, 8, 10, 11), end: d(2026, 8, 10, 12), status: "completada" });
+    const pend2 = t({ id: 63, title: "P2", start: d(2026, 8, 10, 12), end: d(2026, 8, 10, 13) });
+    expect(monthChipsOn([done1, pend1, done2, pend2], d(2026, 8, 10)).map((x) => x.id)).toEqual([
+      61, 63, 60, 62,
+    ]);
+  });
+
+  it("topChipsOn: pendientes antes que completadas sobre el resultado concatenado", () => {
+    const adDone = t({
+      id: 70,
+      title: "AD done",
+      start: d(2026, 8, 10),
+      end: d(2026, 8, 12),
+      allDay: true,
+      status: "completada",
+    });
+    const multiPend = t({ id: 71, title: "M pend", start: d(2026, 8, 10, 10), end: d(2026, 8, 12, 14) });
+    expect(topChipsOn([adDone, multiPend], d(2026, 8, 11)).map((x) => x.id)).toEqual([71, 70]);
+  });
+
+  it("pendientes-primero conserva el orden cronológico dentro de cada grupo", () => {
+    const done9 = t({ id: 80, title: "D9", start: d(2026, 8, 10, 9), end: d(2026, 8, 10, 10), status: "completada" });
+    const pend8 = t({ id: 81, title: "P8", start: d(2026, 8, 10, 8), end: d(2026, 8, 10, 9) });
+    const done13 = t({ id: 82, title: "D13", start: d(2026, 8, 10, 13), end: d(2026, 8, 10, 14), status: "completada" });
+    const pend15 = t({ id: 83, title: "P15", start: d(2026, 8, 10, 15), end: d(2026, 8, 10, 16) });
+    expect(monthChipsOn([done9, pend8, done13, pend15], d(2026, 8, 10)).map((x) => x.id)).toEqual([
+      81, 83, 80, 82,
+    ]);
+  });
+
+  it("multi-día completada aparece como chip en días intermedios", () => {
+    const multiDone = t({
+      id: 90,
+      title: "MD",
+      start: d(2026, 8, 10, 10),
+      end: d(2026, 8, 12, 14),
+      status: "completada",
+    });
+    expect(multiDayChipsOn([multiDone], d(2026, 8, 11))).toEqual([multiDone]);
+    expect(topChipsOn([multiDone], d(2026, 8, 11))).toEqual([multiDone]);
   });
 });
 

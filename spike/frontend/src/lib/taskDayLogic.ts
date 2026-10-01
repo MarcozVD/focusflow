@@ -61,9 +61,15 @@ export function isMultiDay(t: TaskLike): boolean {
   return daySpanDays(t) > 1;
 }
 
-/** Tareas activas (no completadas) que cubren el día. Predicado único. */
+/** Tareas que cubren el día (incluidas las completadas). Predicado único. */
 export function tasksOnDay<T extends TaskLike>(tasks: T[], d: Date): T[] {
-  return tasks.filter((t) => t.status !== "completada" && coversDay(t, d));
+  return tasks.filter((t) => coversDay(t, d));
+}
+
+/** Comparador puro y estable: no-completadas antes que completadas, sin
+ *  alterar el orden relativo dentro de cada grupo (sort estable en JS). */
+export function pendingFirst(a: TaskLike, b: TaskLike): number {
+  return Number(a.status === "completada") - Number(b.status === "completada");
 }
 
 // ---------------------------------------------------------------------------
@@ -120,14 +126,16 @@ export function multiDayChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
   );
 }
 
-/** Chips de la fila superior (semana/día): todo el día + multi-día intermedio. */
+/** Chips de la fila superior (semana/día): todo el día + multi-día intermedio,
+ *  con pendientes antes que completadas. */
 export function topChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
-  return [...allDayChipsOn(tasks, d), ...multiDayChipsOn(tasks, d)];
+  return [...allDayChipsOn(tasks, d), ...multiDayChipsOn(tasks, d)].sort(pendingFirst);
 }
 
-/** Tareas de un día para el MES y el POPUP: todo lo que cubre el día. */
+/** Tareas de un día para el MES y el POPUP: todo lo que cubre el día,
+ *  con pendientes antes que completadas. */
 export function monthChipsOn<T extends TaskLike>(tasks: T[], d: Date): T[] {
-  return tasksOnDay(tasks, d);
+  return tasksOnDay(tasks, d).sort(pendingFirst);
 }
 
 /** Texto del chip según el rol del día (único, inicio, fin o medio). */
