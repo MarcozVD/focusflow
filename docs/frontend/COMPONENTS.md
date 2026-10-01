@@ -35,7 +35,9 @@
 ## TopBar — `TopBar.svelte`
 
 - **Propósito:** título de la vista + navegación temporal (anterior/siguiente/hoy) + QuickAdd.
-- **Anatomía:** título (22 px/700) + botones arrow (34 px raised e1) + "Hoy" + `<QuickAdd/>`.
+- **Anatomía:** título (`--fs-xl`/700, `letter-spacing -0.02em`) + botones arrow (raised e1) + "Hoy" + `<QuickAdd/>`. En Horario y Sesiones añade el conmutador Semana/Día.
+- **Título por vista:** `Semana`, `Mes`, `Día`, `Mi horario`, `Sesiones de estudio`, `Eventos detectados`, `Ajustes`, `Asistente`. La vista `asistente` muestra su título **sin** el bloque de navegación (las flechas no tienen sentido ahí), igual que Sugerencias y Ajustes, que ya lo ocultaban.
+- **Capitalización:** la mayúscula inicial la aplica el helper `cap()` (`charAt(0).toUpperCase() + slice(1)`) sobre el texto de la vista. **No** hay `text-transform: capitalize`: en español capitalizaría cada palabra («Sesiones De Estudio», «30 De Septiembre»).
 - **Estados:** hover: translateY(-1px) + e2; active: `--shadow-inset-sm` (se hunde — *press táctil correcto*).
 - **Accesibilidad:** `aria-label` en arrows; el título es texto plano (semántica de h1 real propuesta).
 - **Neumorfismo:** botones raised individuales sobre base plana — jerarquía clara.
@@ -144,7 +146,7 @@
 ## QuickAdd — `QuickAdd.svelte`
 
 - **Propósito:** captura por lenguaje natural — la entrada principal del producto.
-- **Anatomía:** input inset (44 px, `--surface-3`, `--shadow-inset`, radio 15) con icono rayo `--primary`, placeholder con ejemplo, `kbd` "Ctrl⇧Espacio"; preview flotante con chips de entidades detectadas + botón Planificar; banner "IA lenta" con fallback local; toast de confirmación.
+- **Anatomía:** input inset (44 px, `--surface-3`, `--shadow-inset`, radio `--r-md` (16 px)) con icono rayo `--primary`, placeholder con ejemplo, `kbd` "Ctrl⇧Espacio"; preview flotante con chips de entidades detectadas + botón Planificar; banner "IA lenta" con fallback local; toast de confirmación.
 - **Estados:** `:focus-within` = borde `--primary` + anillo inset; `expanded` cuando hay preview; `disabled` durante procesado (anti doble-envío).
 - **Comportamiento:**
   - Detección local de entidades (mañana/el N/próximo lunes/horario/urgente/recordatorio/categoría) → chips de color.
@@ -165,12 +167,22 @@ No existe como componente único. El concepto se implementa en: `PlanProposal.sv
 ## SuggestionReview — `Suggestions.svelte`
 
 - **Propósito:** bandeja de eventos detectados del correo para revisar antes de aceptar.
+- **Encabezado:** **sin h2 propio** — el título «Eventos detectados» lo pone la TopBar. La vista abre con el subtítulo («Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.») y el botón «Comprobar correo ahora» en una sola fila centrada (`align-items: center`); el h2 duplicado se retiró en la fase 2.
 - **Anatomía:** card por sugerencia: kind badge (Evento/Vencimiento/Disponibilidad/Tarea) + status + remitente + confianza; título h3; descripción + razón (itálica); meta (chip categoría, fecha/hora, prep, prioridad); aviso de duplicado; acciones (Aceptar/Editar/Fusionar/Rechazar/Borrar).
 - **Estados:** `pending` (botones de acción), `settled` (aceptada/rechazada/fusionada/auto-aprobada → revertir/editar/borrar, con cuenta atrás de 1 h), edición inline (card con formulario), fusión (select de tarea).
 - **Comportamiento:** botón "Comprobar correo ahora"; estados con semántica de color (pending=primary, accepted=success, rejected=danger, merged=primary).
 - **Responsive:** cards apiladas, max-width 760 px.
 - **Neumorfismo:** cards raised; formularios de edición inset.
 - **Deuda:** no usa `<dialog>`; los formularios son `<div class="card edit">`.
+
+---
+
+## Asistente — `Assistant.svelte`
+
+- **Propósito:** chat con el asistente IA sobre el calendario (respuestas y acciones propuestas).
+- **Encabezado:** **sin h1/h2 propio** — el título «Asistente» lo pone la TopBar (y sin navegación temporal). La vista conserva subtítulo y chips; el encabezado duplicado se retiró en la fase 2.
+- **Estados:** mensajes que entran con fade; `task-ref-level` (chip de nivel); errores con "Reintentar"; indicador "Analizando tu calendario…".
+- **Neumorfismo:** mensajes del asistente como superficies raised; migrado a tokens (`--fs-*`, `--s-*`, `--r-*`).
 
 ---
 
@@ -188,6 +200,15 @@ La lógica de email vive en el backend Rust (detección) y se presenta en `Sugge
 - **Comportamiento:** reloj local cada 30 s; prioridad de secciones: current → relevant → next → important; `widgetAction` (complete/postpone/start) vía IPC; abre app/agenda/asistente.
 - **Accesibilidad:** botones con `title`; focus-visible en qa-btns; el estado "todo claro" es texto. Deuda: sin `aria-live` para cambios de sección.
 - **Neumorfismo:** contenedor `--r-xl` + `--shadow-raised-lg` + borde `--border` — *la pieza flotante por excelencia*.
+
+---
+
+## StudySessions / Schedule — sesiones de estudio y horario
+
+- **Propósito:** `StudySessions.svelte` (bloques de sesión de estudio) y `Schedule.svelte` (bloques de clase) dibujan la cuadrícula semanal/diaria con la misma silueta que `EventBlock`.
+- **Bloques:** contenido **alineado arriba** (`justify-content: flex-start`): si no cabe, solo se recorta por abajo, sin comerse el texto. En **compacto (< 36 px)** pasan a una línea (hora + título inline, `-webkit-line-clamp: 1`); el título no compacto es clamp a 2 líneas. En sesiones, la tarea vinculada ("↳ …") solo se muestra a partir de 62 px.
+- **Gutter:** la franja superior cede aire (`padding-top` `--s-1_5`) para que la primera etiqueta de hora («6 a») no salga cortada por el `translateY(-6px)`.
+- **Modales (`StudyForm` / `ClassForm`):** `--e3` (sin el halo que dejaba `--shadow-raised-lg`) y `width: min(480px, 100%)` para que las etiquetas no partan («Día de la semana *»). La fila usa `align-items: end`, de modo que fecha, horas, tarea relacionada y notas quedan alineadas aunque una etiqueta ocupe dos líneas; la columna del horario es de ancho natural y los inputs de hora reservan `min-width: 124px` para mostrar la hora completa («11:01 p. m.») junto al icono de reloj.
 
 ---
 
@@ -229,7 +250,7 @@ Real: `input/select/textarea` con `background: var(--surface-3)`, `box-shadow: v
 
 - QuickAdd toast: fixed bottom-center, `--surface`, borde-izq success, e2.
 - Drag toast (Calendar): fixed bottom-center, `--danger` sólido, e2.
-- ContextualToast: bottom-right, `--surface-2`, `--r-xl`, `--shadow-raised-lg`, animación rise.
+- ContextualToast: bottom-right, `--surface-2`, `--r-xl`, `--e2` (deja `--shadow-raised-lg`, cuyo relieve dejaba un halo sobre el overlay), animación rise.
 
 ---
 

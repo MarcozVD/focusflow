@@ -1,6 +1,6 @@
 # 18 — UI Polish: tareas completadas visibles + tokens de tipografía y espaciado
 
-**Estado:** Plan aprobado · **Fecha:** 2026-09-30
+**Estado:** Fase 1 en PR #2 · Fase 2 completada · **Fecha:** 2026-09-30
 **Origen:** sesión de grilling (13 decisiones) sobre `spike/frontend`.
 **Alcance:** solo frontend. El backend (`list_range`) ya devuelve las completadas (filtra solo `deleted_at`).
 
