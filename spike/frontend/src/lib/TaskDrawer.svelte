@@ -321,15 +321,19 @@
     width: 32px;
     height: 32px;
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-sm);
+    border-radius: 50%;
+    box-shadow: var(--btn-shadow);
     font-size: var(--fs-base);
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .x:hover {
     color: var(--danger);
-    background: var(--danger-bg);
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .x:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .body {
     flex: 1;
@@ -369,29 +373,32 @@
     opacity: 0.45;
     cursor: not-allowed;
   }
-  input,
+  input:not([type="checkbox"]),
   select,
   textarea {
-    border: 1px solid var(--border);
-    background: var(--surface-3);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
     width: 100%;
     text-transform: none;
     letter-spacing: normal;
     font-weight: 400;
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
-  input:focus,
+  /* El foco usa el :focus-visible global (outline); sin anillo propio que
+     choque con el inset del campo (pendiente de DESIGN.md). */
+  input:not([type="checkbox"]):focus,
   select:focus,
   textarea:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px var(--primary-soft);
   }
   textarea {
+    border-radius: var(--r-lg);
     resize: vertical;
     font-weight: 400;
     text-transform: none;
@@ -422,26 +429,32 @@
   }
   .btn {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     font-weight: 600;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
     flex: 1;
   }
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--e1);
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .btn:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
+  }
+  .btn.primary:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.ghost {
-    background: transparent;
-    border: 1px solid var(--border);
+    background: var(--surface);
   }
   .btn.danger {
     color: var(--danger);
