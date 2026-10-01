@@ -159,12 +159,9 @@
 
 <div class="sug">
   <div class="head">
-    <div class="head-left">
-      <h2>Eventos detectados</h2>
-      <p class="hint">
-        Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.
-      </p>
-    </div>
+    <p class="hint">
+      Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.
+    </p>
     <button class="btn check-now" onclick={syncNow} disabled={syncRunning()}>
       {syncRunning() ? "Comprobando…" : "Comprobar correo ahora"}
     </button>
@@ -301,11 +298,11 @@
 <style>
   .action-err {
     margin: 0;
-    padding: 8px 12px;
-    border-radius: var(--r-md, 8px);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-md);
     background: color-mix(in srgb, #ef4444 12%, transparent);
     color: #b91c1c;
-    font-size: 13px;
+    font-size: var(--fs-base);
   }
   .sug {
     max-width: 760px;
@@ -314,19 +311,13 @@
     gap: var(--s-4);
     padding-bottom: var(--s-8);
   }
-  .head h2 {
-    font-size: 20px;
-    margin: 0 0 4px;
-  }
   .head {
     display: flex;
-    align-items: flex-start;
+    /* sin h2 encima: subtítulo y botón comparten fila → centrados */
+    align-items: center;
     justify-content: space-between;
     gap: var(--s-4);
     flex-wrap: wrap;
-  }
-  .head-left {
-    min-width: 0;
   }
   .check-now {
     flex-shrink: 0;
@@ -334,7 +325,7 @@
   .hint,
   .sub {
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-base);
     margin: 0;
   }
   .empty {
@@ -350,10 +341,11 @@
     background: var(--surface);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-raised);
-    padding: var(--s-5);
+    /* tarjeta de sugerencia: padding y gap entre filas un escalón más (aire) */
+    padding: var(--s-6);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--s-3);
   }
   .card.edit {
     box-shadow: var(--shadow-raised), inset 0 0 0 2px var(--primary-soft-2);
@@ -362,14 +354,14 @@
   .top {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 12px;
+    gap: var(--s-2);
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .status {
-    font-weight: 700;
-    font-size: 11px;
-    padding: 3px 10px;
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    padding: var(--s-1) var(--s-2);
     border-radius: var(--r-full);
     background: var(--surface-3);
     color: var(--text-2);
@@ -377,10 +369,10 @@
   .kind {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-weight: 700;
-    font-size: 11px;
-    padding: 3px 10px;
+    gap: var(--s-1_5);
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    padding: var(--s-1) var(--s-2);
     border-radius: var(--r-full);
     background: var(--primary-soft);
     color: var(--primary);
@@ -416,12 +408,12 @@
   .settled-row {
     align-items: center;
     background: var(--surface-2);
-    border-radius: 12px;
-    padding: 8px 10px;
-    margin-top: 2px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-2);
+    margin-top: var(--s-0_5);
   }
   .settled-note {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .spacer {
@@ -441,12 +433,12 @@
   }
   h3 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
   .desc,
   .reason {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-base);
     color: var(--text-2);
   }
   .reason {
@@ -455,8 +447,8 @@
   .meta {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 12.5px;
+    gap: var(--s-2);
+    font-size: var(--fs-sm);
     color: var(--text-2);
     flex-wrap: wrap;
   }
@@ -465,7 +457,7 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-radius: var(--r-full);
-    padding: 3px 10px;
+    padding: var(--s-1) var(--s-2);
   }
   .prio {
     color: var(--danger);
@@ -480,22 +472,22 @@
   }
   .dupe {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--warning);
   }
   .row {
     display: flex;
-    gap: 8px;
+    gap: var(--s-2);
     flex-wrap: wrap;
-    margin-top: 4px;
+    margin-top: var(--s-1);
   }
   .btn {
     border: none;
     background: var(--surface-2);
     color: var(--text-1);
-    border-radius: 12px;
-    padding: 8px 16px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-4);
+    font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
     transition: all var(--dur-fast) var(--ease-out);
@@ -528,9 +520,9 @@
     border: none;
     background: var(--surface-3);
     box-shadow: var(--shadow-inset-sm);
-    border-radius: 12px;
-    padding: 10px 14px;
-    font-size: 14px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-md);
     color: var(--text-1);
     font-family: inherit;
     outline: none;
@@ -546,13 +538,13 @@
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 10px;
+    gap: var(--s-2);
   }
   .grid label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
+    gap: var(--s-1);
+    font-size: var(--fs-sm);
     color: var(--text-3);
     font-weight: 600;
   }
@@ -561,8 +553,8 @@
     border: none;
     background: var(--surface-3);
     box-shadow: var(--shadow-inset-sm);
-    border-radius: 10px;
-    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-2);
     color: var(--text-1);
     font-family: inherit;
     outline: none;
@@ -574,7 +566,7 @@
   }
   .mt {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-base);
     color: var(--text-2);
   }
 </style>
