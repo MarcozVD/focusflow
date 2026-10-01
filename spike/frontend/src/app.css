@@ -25,6 +25,18 @@
 
   --font: "Inter", "Segoe UI", system-ui, sans-serif;
 
+  /* Tipografía: 8 pasos, base 13 (cuerpo UI); pesos 400/500/600, 700 solo títulos */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 32px;
+
+  /* Radios */
+  --r-xs: 6px;
   --r-sm: 10px;
   --r-md: 16px;
   --r-lg: 22px;
@@ -49,7 +61,8 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  /* Espaciado: grid 4px + micro-gaps (0_5 y 1_5) */
+  --s-0_5: 2px; --s-1: 4px; --s-1_5: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
   --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
 }
 
@@ -106,7 +119,7 @@ body {
   font-family: var(--font);
   background: var(--bg);
   color: var(--text-1);
-  font-size: 14px;
+  font-size: var(--fs-md);
   -webkit-font-smoothing: antialiased;
   transition: background var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
 }
