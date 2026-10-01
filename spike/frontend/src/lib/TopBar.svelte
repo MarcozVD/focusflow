@@ -18,7 +18,11 @@
     setHmode?: (m: "semana" | "dia") => void;
   } = $props();
 
-  const title = $derived(
+  /** Mayúscula SOLO en la primera letra (en español "miércoles, 30 de
+   *  septiembre" no debe ir con cada palabra capitalizada). */
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  const title = $derived(cap(
     view === "mes"
       ? `${MONTHS_ES[date.getMonth()]} ${date.getFullYear()}`
       : view === "dia"
@@ -35,14 +39,16 @@
             ? "Eventos detectados"
             : view === "ajustes"
               ? "Ajustes"
-              : "Semana",
-  );
+              : view === "asistente"
+                ? "Asistente"
+                : "Semana",
+  ));
 </script>
 
 <div class="top">
   <div class="left">
     <div class="title">{title}</div>
-    {#if view !== "sugerencias" && view !== "ajustes"}
+    {#if view !== "sugerencias" && view !== "ajustes" && view !== "asistente"}
       <div class="nav">
         <button class="arrow" onclick={() => navigate(-1)} aria-label="Anterior">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -82,7 +88,6 @@
     font-size: var(--fs-xl);
     font-weight: 700;
     letter-spacing: -0.02em;
-    text-transform: capitalize;
   }
   .nav {
     display: flex;
