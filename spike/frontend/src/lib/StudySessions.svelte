@@ -425,7 +425,7 @@
      clases y mismos valores para que sesiones se vea igual que horario. */
   .cal {
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
@@ -451,7 +451,7 @@
     flex: 1;
     border: none;
     background: transparent;
-    border-radius: var(--r-md);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
@@ -486,7 +486,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     color: var(--text-1);
   }
 
@@ -525,7 +525,7 @@
   .day-col {
     flex: 1;
     position: relative;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -563,7 +563,7 @@
     right: 2px;
     height: 2px;
     background: var(--study);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     z-index: 2;
     pointer-events: none;
   }
@@ -665,7 +665,7 @@
     background: var(--study);
     color: #fff;
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     cursor: pointer;
     box-shadow: var(--e1);
@@ -684,7 +684,7 @@
   .modal {
     width: min(420px, 100%);
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     /* contenedor: padding y gap un escalón por encima (aire) */
     padding: var(--s-6);
@@ -692,7 +692,7 @@
   }
   .modal header { display: flex; align-items: center; gap: var(--s-2); }
   .badge {
-    width: 30px; height: 30px; border-radius: var(--r-full);
+    width: 30px; height: 30px; border-radius: var(--r-icon);
     background: var(--warning-bg); color: var(--warning);
     display: grid; place-items: center; font-size: var(--fs-lg); font-weight: 600;
   }
@@ -705,14 +705,14 @@
     font-size: var(--fs-base);
     background: color-mix(in srgb, var(--study) 10%, transparent);
     border-left: 3px solid var(--study);
-    border-radius: var(--r-md); padding: var(--s-1_5) var(--s-2);
+    border-radius: var(--r-well); padding: var(--s-1_5) var(--s-2);
   }
   .cl .tm { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: var(--fs-sm); }
   footer { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
   .btn {
     flex: 1; font: inherit; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-    border-radius: var(--r-md); padding: var(--s-2) var(--s-2);
+    border-radius: var(--r-control); padding: var(--s-2) var(--s-2);
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary.study { background: var(--study); border-color: var(--study); color: #fff; }

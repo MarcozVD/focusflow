@@ -90,7 +90,7 @@
     gap: var(--s-6);
     background: var(--surface);
     border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     padding: var(--s-10);
     box-shadow: var(--shadow-raised);
   }
@@ -99,7 +99,7 @@
     height: 64px;
     display: grid;
     place-items: center;
-    border-radius: var(--r-md);
+    border-radius: var(--r-icon);
     background: var(--surface-2, var(--surface));
   }
   .logo img {
@@ -123,7 +123,7 @@
     color: #1f1f1f;
     border: none;
     padding: var(--s-3) var(--s-6);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     font-weight: 600;
     cursor: pointer;

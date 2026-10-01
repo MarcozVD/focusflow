@@ -469,7 +469,7 @@
     height: 88px;
     display: grid;
     place-items: center;
-    border-radius: var(--r-xl);
+    border-radius: var(--r-icon);
     background: var(--surface);
     box-shadow: var(--shadow-raised);
   }
@@ -513,7 +513,7 @@
     align-items: flex-start;
     background: var(--surface);
     border: none;
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     padding: var(--s-4) var(--s-5);
     box-shadow: var(--shadow-raised);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
@@ -528,7 +528,7 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-icon);
     background: var(--primary-soft);
     color: var(--primary);
     font-size: var(--fs-lg);
@@ -574,7 +574,7 @@
   .back {
     width: 38px;
     height: 38px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     border: none;
     background: var(--surface);
     color: var(--text-2);
@@ -621,7 +621,7 @@
   .guide .g-card {
     background: var(--surface);
     border: none;
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
     /* tarjeta: padding y gap interno un escalón por encima (aire) */
     padding: var(--s-8);
@@ -643,7 +643,7 @@
     line-height: 1.65;
     color: var(--text-2);
     background: var(--primary-soft);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-3);
   }
   .g-steps {
@@ -671,7 +671,7 @@
   }
   fieldset {
     border: none;
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     background: var(--surface);
     box-shadow: var(--shadow-raised);
     /* tarjeta: padding y gap interno un escalón por encima (aire) */
@@ -706,7 +706,7 @@
   .inp {
     border: var(--input-border);
     background: var(--input-bg);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
@@ -754,7 +754,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -805,13 +805,13 @@
     font-weight: 600;
     color: var(--success);
     background: var(--success-bg);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-2) var(--s-3);
   }
   .ferrbox {
     border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
     background: var(--danger-bg);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-2) var(--s-3);
     display: flex;
     flex-direction: column;
@@ -840,7 +840,7 @@
     word-break: break-all;
     color: var(--text-2);
     background: var(--surface);
-    border-radius: var(--r-xs);
+    border-radius: var(--r-well);
     padding: var(--s-2);
     max-height: 120px;
     overflow-y: auto;
@@ -850,7 +850,7 @@
     font-size: var(--fs-sm);
     color: var(--text-3);
     background: var(--surface-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-2) var(--s-3);
   }
   .fwait {
@@ -884,7 +884,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-6);
     font-size: var(--fs-base);

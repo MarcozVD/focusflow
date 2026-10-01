@@ -258,7 +258,7 @@
     place-items: center;
     width: 13px;
     height: 13px;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-icon);
     background: color-mix(in srgb, var(--c) 20%, transparent);
     color: var(--c);
     flex-shrink: 0;
@@ -308,7 +308,7 @@
     display: inline-block;
     width: 100%;
     height: 2px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: var(--danger);
   }
   .evt-inline {
@@ -384,7 +384,7 @@
     transform: translateX(-50%);
     width: 28px;
     height: 3px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: color-mix(in srgb, var(--c) 70%, var(--text-1));
     box-shadow: var(--shadow-inset-sm);
   }

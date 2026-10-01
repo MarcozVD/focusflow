@@ -292,7 +292,7 @@
      mismos valores para que horario se vea exactamente igual. */
   .cal {
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
@@ -318,7 +318,7 @@
     flex: 1;
     border: none;
     background: transparent;
-    border-radius: var(--r-md);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
@@ -351,7 +351,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     color: var(--text-1);
   }
 
@@ -391,7 +391,7 @@
   .day-col {
     flex: 1;
     position: relative;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -429,7 +429,7 @@
     right: 2px;
     height: 2px;
     background: var(--primary);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     z-index: 2;
     pointer-events: none;
   }
@@ -519,7 +519,7 @@
     background: var(--primary);
     color: #fff;
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     cursor: pointer;
     box-shadow: var(--e1);

@@ -221,7 +221,7 @@
   .modal {
     width: min(480px, 100%);
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     /* contenedor: padding y gap un escalón por encima (aire) */
     padding: var(--s-6);
@@ -236,7 +236,7 @@
     font-size: var(--fs-md);
     cursor: pointer;
     padding: var(--s-1) var(--s-1_5);
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     box-shadow: var(--btn-shadow);
     transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
@@ -257,7 +257,7 @@
     font: inherit; font-size: var(--fs-base); color: var(--text-1);
     background: var(--input-bg); border: var(--input-border);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full); padding: var(--s-2) var(--s-2); width: 100%; min-width: 0;
+    border-radius: var(--r-control); padding: var(--s-2) var(--s-2); width: 100%; min-width: 0;
     transition: border-color var(--dur-fast) var(--ease-out);
   }
   .inp:focus { border-color: var(--study); }
@@ -271,18 +271,18 @@
     margin: 0; font-size: var(--fs-xs); color: var(--text-2);
     background: color-mix(in srgb, var(--study) 8%, transparent);
     border-left: 3px solid var(--study);
-    border-radius: var(--r-md); padding: var(--s-2) var(--s-2);
+    border-radius: var(--r-well); padding: var(--s-2) var(--s-2);
   }
   .ferr {
     margin: 0; font-size: var(--fs-sm); color: var(--danger);
-    background: var(--danger-bg); border-radius: var(--r-md); padding: var(--s-2) var(--s-2);
+    background: var(--danger-bg); border-radius: var(--r-well); padding: var(--s-2) var(--s-2);
   }
   footer { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-1); flex-wrap: wrap; }
   .grow { flex: 1; }
   .btn {
     font: inherit; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
     border: none; background: var(--surface); color: var(--text-1);
-    border-radius: var(--r-full); padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-control); padding: var(--s-2) var(--s-3);
     box-shadow: var(--btn-shadow);
     transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
@@ -306,7 +306,7 @@
   .btn.ghost-danger:hover { box-shadow: var(--btn-shadow-hover); }
   .delconfirm {
     width: 100%; display: flex; flex-direction: column; gap: var(--s-2);
-    background: var(--danger-bg); border-radius: var(--r-md); padding: var(--s-3);
+    background: var(--danger-bg); border-radius: var(--r-well); padding: var(--s-3);
     font-size: var(--fs-sm); color: var(--text-1);
   }
   .delbtns { display: flex; gap: var(--s-2); }

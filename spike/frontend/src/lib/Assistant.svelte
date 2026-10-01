@@ -355,7 +355,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -389,7 +389,7 @@
   }
   .msg {
     max-width: 88%;
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     padding: var(--s-3) var(--s-4);
     font-size: var(--fs-md);
     line-height: 1.5;
@@ -413,7 +413,7 @@
     align-self: center;
     margin: var(--s-2) auto 0;
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     background: var(--surface-2);
     color: var(--text-2);
     padding: var(--s-1_5) var(--s-3);
@@ -443,7 +443,7 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     padding: var(--s-1) var(--s-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     width: fit-content;
     box-shadow: var(--shadow-raised-sm);
   }
@@ -464,7 +464,7 @@
     align-items: center;
     gap: var(--s-2);
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     padding: var(--s-2) var(--s-3);
     background: var(--surface-2);
     transition: background var(--dur-fast) var(--ease-out);
@@ -515,7 +515,7 @@
     gap: var(--s-1_5);
     /* tarjeta de acción propuesta */
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
     padding: var(--s-4);
   }
@@ -530,7 +530,7 @@
     font-weight: 600;
     color: var(--primary);
     background: var(--primary-soft);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1) var(--s-2);
     box-shadow: var(--shadow-raised-sm);
   }
@@ -577,7 +577,7 @@
     font-size: var(--fs-base);
     font-weight: 600;
     padding: var(--s-2) var(--s-3);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     cursor: pointer;
     margin-top: var(--s-2);
     box-shadow: var(--btn-primary-shadow);
@@ -599,7 +599,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);
@@ -642,7 +642,7 @@
     border: var(--input-border);
     background: var(--input-bg);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-md);
     color: var(--text-1);

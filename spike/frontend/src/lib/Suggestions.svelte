@@ -299,7 +299,7 @@
   .action-err {
     margin: 0;
     padding: var(--s-2) var(--s-3);
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     background: color-mix(in srgb, #ef4444 12%, transparent);
     color: #b91c1c;
     font-size: var(--fs-base);
@@ -329,7 +329,7 @@
   }
   .empty {
     background: var(--surface-2);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     padding: var(--s-8);
     text-align: center;
   }
@@ -338,7 +338,7 @@
   }
   .card {
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
     /* tarjeta de sugerencia: padding y gap entre filas un escalón más (aire) */
     padding: var(--s-6);
@@ -361,9 +361,9 @@
     font-weight: 600;
     font-size: var(--fs-xs);
     padding: var(--s-1) var(--s-2);
-    border-radius: var(--r-full);
     background: var(--surface-3);
     color: var(--text-2);
+    border-radius: var(--r-chip);
     box-shadow: var(--shadow-raised-sm);
   }
   .kind {
@@ -373,7 +373,7 @@
     font-weight: 600;
     font-size: var(--fs-xs);
     padding: var(--s-1) var(--s-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: var(--primary-soft);
     color: var(--primary);
     box-shadow: var(--shadow-raised-sm);
@@ -409,7 +409,7 @@
   .settled-row {
     align-items: center;
     background: var(--surface-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-2) var(--s-2);
     margin-top: var(--s-0_5);
   }
@@ -456,7 +456,7 @@
     font-weight: 600;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1) var(--s-2);
     box-shadow: var(--shadow-raised-sm);
   }
@@ -486,7 +486,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);
@@ -520,7 +520,7 @@
     border: var(--input-border);
     background: var(--input-bg);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-md);
     color: var(--text-1);
@@ -552,7 +552,7 @@
     border: var(--input-border);
     background: var(--input-bg);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-2);
     color: var(--text-1);
     font-family: inherit;

@@ -282,7 +282,7 @@
     display: flex;
     flex-direction: column;
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     border: 1px solid var(--border);
     z-index: 91;
@@ -315,7 +315,7 @@
     place-items: center;
     width: 28px;
     height: 28px;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-icon);
     background: var(--primary-soft);
     color: var(--primary);
     flex-shrink: 0;
@@ -327,7 +327,7 @@
     font-size: var(--fs-md);
     cursor: pointer;
     padding: var(--s-1_5);
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     box-shadow: var(--btn-shadow);
     flex-shrink: 0;
     transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -368,7 +368,7 @@
     align-items: flex-start;
     gap: var(--s-2);
     padding: var(--s-2);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-well);
     background: var(--surface-2);
     box-shadow: var(--shadow-raised-sm);
     margin-bottom: var(--s-1_5);
@@ -403,7 +403,7 @@
     white-space: nowrap;
     color: color-mix(in srgb, var(--c, var(--primary)) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c, var(--primary)) 13%, var(--surface));
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1) var(--s-2);
     box-shadow: var(--shadow-raised-sm);
   }
@@ -413,7 +413,7 @@
   }
   .plan-item {
     border: none;
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     background: var(--surface-2);
     box-shadow: var(--shadow-raised);
     /* tarjeta de propuesta: padding y gap un escalón por encima (aire) */
@@ -451,7 +451,7 @@
     font-weight: 600;
     color: var(--success);
     background: color-mix(in srgb, var(--success) 14%, var(--surface));
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-0_5) var(--s-2);
     box-shadow: var(--shadow-raised-sm);
     flex-shrink: 0;
@@ -461,7 +461,7 @@
     font-weight: 600;
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 14%, var(--surface));
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-0_5) var(--s-2);
     box-shadow: var(--shadow-raised-sm);
     flex-shrink: 0;
@@ -471,7 +471,7 @@
     font-size: var(--fs-sm);
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 10%, var(--surface));
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-1_5) var(--s-2);
   }
   .sess {
@@ -505,7 +505,7 @@
     letter-spacing: 0.04em;
     color: var(--warning);
     background: var(--warning-bg);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: 1px var(--s-1_5);
     box-shadow: var(--shadow-raised-sm);
   }
@@ -518,7 +518,7 @@
     border: var(--input-border);
     background: var(--input-bg);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) var(--s-2);
     color: var(--text-1);
     font-family: inherit;
@@ -536,7 +536,7 @@
     background: var(--surface);
     color: var(--danger);
     box-shadow: var(--btn-shadow);
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     width: 26px;
     height: 26px;
     cursor: pointer;
@@ -563,7 +563,7 @@
   }
   .empty {
     background: var(--surface-2);
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     padding: var(--s-3);
     text-align: center;
   }
@@ -603,7 +603,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);

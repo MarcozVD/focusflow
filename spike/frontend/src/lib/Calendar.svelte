@@ -823,7 +823,7 @@
 <style>
   .cal {
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
@@ -865,7 +865,7 @@
   .cell {
     background: var(--surface-2);
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     box-shadow: var(--shadow-inset-sm);
     padding: var(--s-1) var(--s-1);
     text-align: left;
@@ -898,7 +898,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     flex-shrink: 0;
   }
   .cell.today .daynum {
@@ -920,7 +920,7 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: 1px var(--s-1_5);
     box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     white-space: nowrap;
@@ -943,7 +943,7 @@
     color: var(--primary);
     background: var(--primary-soft);
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: 1px var(--s-2);
     flex-shrink: 0;
     cursor: pointer;
@@ -964,7 +964,7 @@
     width: min(380px, calc(100% - 48px));
     max-height: 70%;
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--e3);
     border: 1px solid var(--border);
     /* contenedor: padding y gaps un escalón por encima (aire) */
@@ -987,7 +987,7 @@
     border: none;
     background: var(--surface-2);
     color: var(--text-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-icon);
     font-size: var(--fs-base);
     transition: all var(--dur-fast) var(--ease-out);
     flex-shrink: 0;
@@ -1034,7 +1034,7 @@
     align-items: center;
     gap: var(--s-2);
     background: var(--surface-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
@@ -1087,7 +1087,7 @@
     border: none;
     background: var(--primary);
     color: #fff;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
     padding: var(--s-2);
     font-size: var(--fs-base);
     font-weight: 600;
@@ -1112,7 +1112,7 @@
     flex: 1;
     border: none;
     background: transparent;
-    border-radius: var(--r-md);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
@@ -1145,7 +1145,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     color: var(--text-1);
   }
 
@@ -1192,7 +1192,7 @@
   .day-col {
     flex: 1;
     position: relative;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -1219,7 +1219,7 @@
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
     box-shadow: var(--shadow-inset-sm);
-    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    border-radius: var(--r-well) var(--r-well) 0 0;
     flex-shrink: 0;
     overflow: hidden;
   }
@@ -1242,7 +1242,7 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 14%, var(--surface));
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-0_5) var(--s-2);
     box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     white-space: nowrap;
@@ -1348,7 +1348,7 @@
     right: 2px;
     height: 2px;
     background: var(--primary);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     /* por encima de bloques (2) y del hover (4) */
     z-index: 5;
     pointer-events: none;
@@ -1360,7 +1360,7 @@
     right: 2px;
     background: var(--primary-soft);
     border-left: 2px solid var(--primary);
-    border-radius: var(--r-xs);
+    border-radius: var(--r-well);
     z-index: 0;
     pointer-events: none;
     overflow: hidden;
@@ -1430,7 +1430,7 @@
     background: var(--danger);
     color: #fff;
     padding: var(--s-2) var(--s-4);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-card);
     font-size: var(--fs-base);
     font-weight: 600;
     box-shadow: var(--e2);
@@ -1481,7 +1481,7 @@
     color: var(--text-2);
     font-size: var(--fs-2xs);
     font-weight: 600;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     padding: var(--s-1) 0;
     z-index: 4;
