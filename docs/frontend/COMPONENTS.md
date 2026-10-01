@@ -10,7 +10,8 @@
 
 - **Propósito:** orquesta toda la app: título, sidebar, topbar, vistas (calendario/agenda/sugerencias/asistente/ajustes), drawer, toast contextual, widget y manejo de errores fatales.
 - **Anatomía:** `TitleBar` → `div.body` → (`Sidebar` + `main.content` → `TopBar` + vista). Overlays: `TaskDrawer`, `ContextualToast`, `fatal error`.
-- **Estados:** `bootReady` (splash mínimo), `authUser()` (→ Login), `onboardingPending` (→ Onboarding), `taskDetail()` (drawer), `fatalError` (banner role=alert).
+- **Estados:** `bootReady` (splash mínimo), `authUser()` (→ Login), `onboardingPending` (→ Onboarding), `taskDetail()` (drawer), `fatalError` (banner role=alert), `nlToast()` (toast flotante).
+- **Toast `nlToast`:** `App` pinta el mensaje que guarda `setNlToast` en `data.svelte.ts` — errores de acciones rápidas ("No se pudo crear…", "No se pudo actualizar la tarea…") que hasta ahora no mostraba ningún componente. Va **abajo al centro**, fuera de la esquina de `ContextualToast`, con `--surface` + `--e2` + `--r-md`. Si `source === "error"` usa `role="alert"` y borde izquierdo `--danger`; el resto, `role="status"` con `aria-live="polite"`. Entra con `fly` respetando `prefers-reduced-motion`.
 - **Comportamiento:** enrutado por hash (`#/widget` → WidgetPage); atajos de teclado (Escape cierra drawer/widget); escucha eventos Tauri (`task:open`, `nav:agenda`, `nav:assistant`, `ui:prefs`).
 - **Responsive:** `flex column` 100vh; `cal-wrap` con scroll propio; min-width 0 para no desbordar.
 - **Accesibilidad:** landmark `main`; error fatal con `role="alert"`.
@@ -48,6 +49,10 @@
   - **Mes:** `month-head` (7 columnas) + grid 6×7 celdas (80 px alto) con chips de tareas + popup de día (`day-popup`).
   - **Semana/Día:** `week-head` (días clicables) + `week-body` con gutter de horas + columnas por día; cada columna = `allday-row` (chips todo-el-día) + `time-area` (slots, now-line, EventBlocks).
 - **Estados:** celda today (anillo `--primary-soft-2`), día fuera de mes (opacity 0.4), hover de celda (translateY(-1px) + e1), drag (`week-body.dragging` atenúa eventos y resalta allday-row).
+- **Tareas completadas:** **visibles en todas las vistas** (semana, día, mes y popup), con el estado hundido gris de DESIGN §3.4. Se dibujan en la cuadrícula horaria como cualquier otra tarea y **expanden la franja visible** si caen fuera del rango por defecto. Hay dos ajustes para que no compitan por el espacio:
+  - **Orden pendientes-primero:** el comparador puro `pendingFirst` (`taskDayLogic.ts`) ordena sin tocar el orden cronológico dentro de cada grupo; se aplica en `monthChipsOn` y `topChipsOn`.
+  - **Recorte de la semana a 8 visibles:** `visibleWeekPlaced` selecciona con `pendingFirst` **conservando las posiciones ya calculadas** (`top/left/width`); `lastShownBottom` usa esa misma selección para dibujar el botón "+N más".
+- **Estructura de los chips:** los chips de la fila superior y las filas del popup se envuelven en `<div class="chip-wrap">` (clase `done` cuando la tarea está completada) para poder contener el `TaskCheck` como botón hermano sin anidar botones.
 - **Comportamiento (lo más sofisticado del frontend):**
   - Grid horario dinámico: 6:00–22:00 por defecto, se expande si hay tareas fuera.
   - `pxH` dinámico vía ResizeObserver (el área siempre llena la ventana).
@@ -83,7 +88,8 @@
 - **Propósito:** entidad central.
 - **Campos:** id, title, categoryId, priority (alta/media/baja), status (pendiente/completada/en-curso/vencida), start/end, allDay, tags, progress, description, notes, links, reminderMinutes.
 - **Derivación de estado:** `status` se deriva en el frontend: `completed_at` → completada; pasada → vencida; else pendiente.
-- **Semántica visual:** vencida = dashed border + danger-bg; completada = tachado + 50 % opacidad; prioridad alta = punto/barra danger.
+- **Semántica visual:** vencida = dashed border + danger-bg; completada = superficie hundida gris + tachado + ✓ (en el calendario); prioridad alta = punto/barra danger.
+- **Cambio de estado:** `completeTask(id)` es **optimista** — aplica el estado antes del `invoke` y devuelve el nuevo `done` (o `null` si el backend falla, tras restaurar el estado previo y avisar con `nlToast`). El cálculo puro vive en `toggledState(t, now)`, que replica el `set_completed` del backend: al reabrir, `completed_at` a null, progreso 0 y el estado visible recalculado con `taskStatus` (puede quedar **vencida** si el fin ya pasó).
 
 ---
 
@@ -101,11 +107,26 @@
 ## EventBlock — `EventBlock.svelte` (bloque en calendario)
 
 - **Propósito:** bloque visual dentro del time-area de día/semana.
-- **Anatomía:** tiempo (10 px/700 tabular) + título (11.5 px/600, clamp 2) + descripción (si alto ≥ 62 px) + handle de resize top/bottom.
-- **Variantes:** `compact` (< 36 px: solo hora + título inline), `tall` (≥ 62: muestra descripción), `inicio`/`fin` (stubs multi-día), `overdue` (dashed), `done` (tachado), `ghost` (drag).
+- **Anatomía:** tiempo (`--fs-2xs`/600 tabular) + título (`--fs-xs`/600, clamp 2) + descripción (si alto ≥ 62 px) + handle de resize top/bottom.
+- **Variantes:** `compact` (< 36 px: solo hora + título inline), `tall` (≥ 62: muestra descripción), `inicio`/`fin` (stubs multi-día), `overdue` (dashed), `done` (completada), `ghost` (drag).
+- **Estado `done` (completada):** superficie **hundida gris** — `background: var(--surface-2)`, `box-shadow: var(--shadow-inset)`, borde izquierdo `--text-3`, `z-index: 0`, **sin `opacity` global** y sin hover-lift. Título tachado con animación izq→der (`--dur-slow`) en `--text-2`; hora y descripción en `--text-3`; `prio-dot`/`prio-bar` ocultos. En bloques compactos añade el ✓ (el `TaskCheck` de `EventBlock` no cabe: el título se limita a una línea para no perder ancho).
+  - Las reglas `.inicio`/`.fin` se declaran **antes** que `.done` a propósito: tienen la misma especificidad, y si no, un stub completado conservaría el tinte de categoría.
+- **Comportamiento en `done`:** **no se puede arrastrar ni redimensionar** (`onMove` no llama a `onPointerDown` y no se renderizan los handles `.resize`). El click sigue abriendo el drawer, que es la vía para reabrir.
 - **Estados:** hover translateY(-1px) scale(1.01) + e1 + z-index 3; resize handles aparecen en hover.
 - **Accesibilidad:** `role="button"` + Enter/Espacio; tooltip rico (`title`) con descripción/prioridad/estado; handles `role="separator"` con `aria-label`.
 - **Neumorfismo:** fondo = color de categoría al 13 % sobre surface + `--shadow-inset-sm` + borde izquierdo 3 px sólido del color. *Inset = "es parte del tiempo", no flota sobre él.*
+
+---
+
+## TaskCheck — `TaskCheck.svelte` (check rápido de completar/reabrir)
+
+- **Propósito:** completar o reabrir una tarea **sin abrir el drawer**, desde el propio calendario.
+- **Props:** `task: Task` (obligatoria) y `size = 16` (px; el calendario usa 14 en los chips de la fila superior).
+- **Anatomía:** `<button type="button">` circular con un SVG de check `aria-hidden`. Reposo: borde 1.5 px `--text-3` sobre `--surface` + `--shadow-inset-sm`. Hover: borde `--primary` y ✓ al 60 %. `done`: relleno `--text-3` con ✓ en `--surface`. `active`: `scale(0.92)`.
+- **Comportamiento:** `onclick` → `completeTask(task.id)`. **Detiene `pointerdown`, `keydown` y `click` con `stopPropagation()`** — es obligatorio: sin eso el gesto arrastraría el bloque o abriría el drawer, y Enter/Espacio lo activarían dos veces.
+- **Visibilidad:** el componente no se oculta a sí mismo; la controla el **padre** con el envoltorio `.check-slot` (`opacity: 0` → `1` con `:hover` / `:focus-within` del contenedor). En una completada el check queda **siempre visible** y hace de indicador ✓.
+- **Dónde se usa:** bloques no compactos de `EventBlock` (no en bloques compactos < 36 px ni en sesiones de estudio), chips de la fila superior y filas del popup del mes. **No** en los minichips del mes.
+- **Restricción de anidamiento:** los chips y las filas del popup ya son `<button>`, así que `Calendar` los envuelve en `<div class="chip-wrap">` con el check y el chip como **botones hermanos** (`<div>` no puede contener un `<button>` dentro de otro).
 
 ---
 
@@ -113,7 +134,7 @@
 
 - **Propósito:** tareas sin hora fija (all-day) y multi-día intermedias.
 - **Anatomía:** fila `allday-row` con label "Todo el día" + chips (`allday-chip`) con color de categoría; ghost de drop; "+N más".
-- **Variantes:** `cont` (multi-día continuo: borde dashed), `ghost` (durante drag).
+- **Variantes:** `cont` (multi-día continuo: borde dashed), `done` (completada: superficie hundida `--surface-2`, título tachado en `--text-2`, sin opacity), `ghost` (durante drag).
 - **Comportamiento:** arrastrar un evento a esta fila lo convierte en all-day.
 - **Accesibilidad:** botones con `title`; texto de rango en el tooltip.
 

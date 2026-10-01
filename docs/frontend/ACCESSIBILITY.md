@@ -94,6 +94,7 @@
 - `--text-2` (`#6B7280`) sobre `--surface` ≈ 4.8:1.
 - Dark: `--text-1` (`#F3F4F6`) ≈ 16:1; `--text-2` (`#A6ADBB`) ≈ 4.6:1.
 - `--text-3` (`#9CA3AF`) sobre `--surface` ≈ 2.7:1 → **solo para meta/placeholder** (uso correcto, pero nunca para contenido esencial).
+- **Título de una tarea completada:** `--text-2` (`#6B7280`) sobre `--surface-2` (`#F1F2F4`) ≈ 4.2:1. Es contenido esencial, así que no baja a `--text-3`; hora y descripción (meta) sí van en `--text-3`.
 - Blanco sobre `--primary` (`#2563EB`) ≈ 4.6:1; `--primary-hover` mantiene.
 - Chips de categoría: texto = color mezclado al 60 % con `--text-1` → conserva contraste sobre su fondo soft.
 
@@ -151,6 +152,7 @@
 
 - Toast de QuickAdd ("Tarea creada") — sin `role="status"`.
 - Toast de drag ("Movida con aviso…") — sin `role="status"`.
+- Toast `nlToast` de `App.svelte` — **resuelto**: `role="alert"` para errores, `role="status"` + `aria-live="polite"` en el resto.
 - Cambios de sección del widget (Ahora → Siguiente) — sin `aria-live`.
 - Contador "N pendientes" del sidebar — sin anuncio.
 - La propuesta de plan que aparece (modal) — no anuncia su apertura (el foco no se mueve al modal).
@@ -166,7 +168,7 @@
 | Estado | Color | + Otro canal |
 |--------|-------|--------------|
 | Vencida | `--danger` | Borde izquierdo **dashed** + badge de texto "Vencida" |
-| Completada | opacity/tachado | `text-decoration: line-through` |
+| Completada | superficie hundida `--surface-2` | `text-decoration: line-through` animado + ✓ del `TaskCheck` (relleno `--text-3`, siempre visible) |
 | Prioridad alta | `--danger` | Badge de texto "Alta" |
 | Hoy | círculo primary | Número en blanco dentro del círculo (forma + texto) |
 | Fuera de mes | opacity 0.4 | — (solo opacidad; aceptable como jerarquía secundaria) |
@@ -182,6 +184,7 @@
 - Celdas de mes: `role="button"` + teclado + popup accesible por botón.
 - EventBlocks: `role="button"` + teclado + tooltip.
 - Chips: botones reales con `title`.
+- `TaskCheck` (check rápido): botón real con `aria-label` ("Marcar como completada" / "Reabrir tarea") y `aria-pressed`, por lo que es **operable con teclado desde cualquier calendario**. Detiene `keydown` para que Enter/Espacio no abra además el drawer.
 - Línea "ahora": decorativa (aria-hidden implícito por ser div).
 
 **Deuda:**
