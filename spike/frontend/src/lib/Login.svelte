@@ -121,14 +121,19 @@
     gap: var(--s-2);
     background: #fff;
     color: #1f1f1f;
-    border: 1px solid rgba(0, 0, 0, 0.15);
+    border: none;
     padding: var(--s-3) var(--s-6);
     border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     font-weight: 600;
     cursor: pointer;
+    transition: box-shadow var(--dur-fast) var(--ease-out);
   }
   .btn.google:hover {
-    background: #f7f7f7;
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .btn.google:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.google:disabled {
     opacity: 0.6;

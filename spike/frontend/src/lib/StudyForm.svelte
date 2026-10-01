@@ -228,10 +228,18 @@
   header { display: flex; align-items: center; justify-content: space-between; }
   h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
   .x {
-    border: none; background: none; color: var(--text-3);
-    font-size: var(--fs-md); cursor: pointer; padding: var(--s-1) var(--s-1_5); border-radius: var(--r-sm);
+    border: none;
+    background: var(--surface);
+    color: var(--text-3);
+    font-size: var(--fs-md);
+    cursor: pointer;
+    padding: var(--s-1) var(--s-1_5);
+    border-radius: 50%;
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
-  .x:hover { background: var(--surface-2); color: var(--text-1); }
+  .x:hover { box-shadow: var(--btn-shadow-hover); color: var(--text-1); }
+  .x:active { box-shadow: var(--btn-shadow-active); }
 
   form { display: flex; flex-direction: column; gap: var(--s-3); }
   /* 2ª columna más ancha: los inputs de hora necesitan el texto completo
@@ -245,10 +253,12 @@
   .lab { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
   .inp {
     font: inherit; font-size: var(--fs-base); color: var(--text-1);
-    background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r-md); padding: var(--s-2) var(--s-2); width: 100%; min-width: 0;
+    background: var(--input-bg); border: var(--input-border);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-full); padding: var(--s-2) var(--s-2); width: 100%; min-width: 0;
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
-  .inp:focus { outline: 2px solid color-mix(in srgb, var(--study) 45%, transparent); border-color: var(--study); }
+  .inp:focus { border-color: var(--study); }
   .timerange { display: flex; align-items: center; gap: var(--s-1_5); }
   /* Ancho de control (no espaciado): cabe "12:59 p. m." + icono de reloj */
   .timerange .inp { min-width: 124px; }
@@ -269,18 +279,29 @@
   .grow { flex: 1; }
   .btn {
     font: inherit; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
-    border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-    border-radius: var(--r-md); padding: var(--s-2) var(--s-3);
+    border: none; background: var(--surface); color: var(--text-1);
+    border-radius: var(--r-full); padding: var(--s-2) var(--s-3);
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
-  .btn:hover { background: var(--surface-2); }
-  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-  .btn.primary:hover { background: var(--primary-hover); }
-  .btn.primary.study { background: var(--study); border-color: var(--study); }
-  .btn.primary.study:hover { background: color-mix(in srgb, var(--study) 85%, #000); }
+  .btn:hover { box-shadow: var(--btn-shadow-hover); }
+  .btn:active { box-shadow: var(--btn-shadow-active); }
+  .btn.primary {
+    background: var(--grad-accent);
+    color: #fff;
+    box-shadow: var(--btn-primary-shadow);
+  }
+  .btn.primary:active { box-shadow: var(--btn-shadow-active); }
+  /* Identidad teal de las sesiones de estudio: degradado derivado de --study */
+  .btn.primary.study {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--study) 78%, #fff), var(--study));
+    box-shadow: var(--btn-shadow), 0 6px 16px -4px color-mix(in srgb, var(--study) 45%, transparent);
+  }
+  .btn.primary.study:active { box-shadow: var(--btn-shadow-active); }
   .btn.primary:disabled { opacity: 0.6; cursor: default; }
-  .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-  .btn.ghost-danger { background: none; border-color: transparent; color: var(--danger); }
-  .btn.ghost-danger:hover { background: var(--danger-bg); }
+  .btn.danger { color: var(--danger); }
+  .btn.ghost-danger { color: var(--danger); }
+  .btn.ghost-danger:hover { box-shadow: var(--btn-shadow-hover); }
   .delconfirm {
     width: 100%; display: flex; flex-direction: column; gap: var(--s-2);
     background: var(--danger-bg); border-radius: var(--r-md); padding: var(--s-3);
