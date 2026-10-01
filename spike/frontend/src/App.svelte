@@ -35,6 +35,11 @@
 
   onMount(() => {
     const onErr = (e: ErrorEvent) => {
+      // Aviso benigno del navegador al redimensionar (ResizeObserver): no es fatal.
+      if (/ResizeObserver loop/.test(e.message)) {
+        console.debug("[ui] aviso benigno ignorado:", e.message);
+        return;
+      }
       fatalError = e.message || "Error inesperado de interfaz";
     };
     const onRej = (e: PromiseRejectionEvent) => {
@@ -49,6 +54,18 @@
   });
 
   const onboardingPending = $derived(showOnboarding || onboarding()?.completed === false);
+
+  // Vistas de lectura: columna más estrecha (~880px) centrada con la TopBar.
+  const reading = $derived(view === "sugerencias" || view === "asistente" || view === "ajustes");
+
+  // Scroll unificado: al cambiar de vista o de submodo (horario/sesiones) la
+  // columna vuelve arriba; las flechas de fecha dentro de la misma vista no.
+  let contentEl = $state<HTMLElement | null>(null);
+  $effect(() => {
+    void view;
+    void hmode;
+    if (contentEl) contentEl.scrollTop = 0;
+  });
 
   // Toast global de data.svelte (setNlToast): errores de acciones rápidas
   // (crear/actualizar tarea…) que antes no se pintaba en ningún sitio.
@@ -199,45 +216,47 @@
     <TitleBar />
     <div class="body">
       <Sidebar {view} {setView} {navigate} />
-      <main class="content">
-        <TopBar {date} {view} {navigate} {goToday} {hmode} {setHmode} />
-        {#if view === "sesiones"}
-          <div class="cal-wrap">
-            {#key "sesiones-" + hmode + date.toDateString()}
-              <div transition:fade={{ duration: 160 }}>
-                <StudySessions {date} smode={hmode} {setDate} setSmode={setHmode} />
-              </div>
-            {/key}
-          </div>
-        {:else if view === "horario"}
-          <div class="cal-wrap">
-            {#key "horario-" + hmode + date.toDateString()}
-              <div transition:fade={{ duration: 160 }}>
-                <Schedule {date} {hmode} {setDate} {setHmode} />
-              </div>
-            {/key}
-          </div>
-        {:else if view === "sugerencias"}
-          <div class="page-wrap">
-            <Suggestions />
-          </div>
-        {:else if view === "asistente"}
-          <div class="page-wrap assistant-wrap">
-            <Assistant />
-          </div>
-        {:else if view === "ajustes"}
-          <div class="page-wrap">
-            <Settings onReopenOnboarding={() => (showOnboarding = true)} />
-          </div>
-        {:else}
-          <div class="cal-wrap">
-            {#key view + date.toDateString()}
-              <div transition:fade={{ duration: 160 }}>
-                <Calendar {view} {date} onSelectDate={selectDate} />
-              </div>
-            {/key}
-          </div>
-        {/if}
+      <main class="content" bind:this={contentEl}>
+        <div class="content-inner" class:reading>
+          <TopBar {date} {view} {navigate} {goToday} {hmode} {setHmode} />
+          {#if view === "sesiones"}
+            <div class="cal-wrap">
+              {#key "sesiones-" + hmode + date.toDateString()}
+                <div class="view-fill" transition:fade={{ duration: 160 }}>
+                  <StudySessions {date} smode={hmode} {setDate} setSmode={setHmode} />
+                </div>
+              {/key}
+            </div>
+          {:else if view === "horario"}
+            <div class="cal-wrap">
+              {#key "horario-" + hmode + date.toDateString()}
+                <div class="view-fill" transition:fade={{ duration: 160 }}>
+                  <Schedule {date} {hmode} {setDate} {setHmode} />
+                </div>
+              {/key}
+            </div>
+          {:else if view === "sugerencias"}
+            <div class="page-wrap">
+              <Suggestions />
+            </div>
+          {:else if view === "asistente"}
+            <div class="page-wrap assistant-wrap">
+              <Assistant />
+            </div>
+          {:else if view === "ajustes"}
+            <div class="page-wrap">
+              <Settings onReopenOnboarding={() => (showOnboarding = true)} />
+            </div>
+          {:else}
+            <div class="cal-wrap">
+              {#key view + date.toDateString()}
+                <div class="view-fill" transition:fade={{ duration: 160 }}>
+                  <Calendar {view} {date} onSelectDate={selectDate} />
+                </div>
+              {/key}
+            </div>
+          {/if}
+        </div>
       </main>
     </div>
     {#if taskDetail()}
@@ -279,36 +298,62 @@
     flex: 1;
     min-height: 0;
   }
+  /* Scroll unificado: scrollea la columna de contenido entera (TopBar + vista) */
   .content {
     flex: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
+  /* Columna centrada (TopBar y página alineadas); colchón para la sombra */
+  .content-inner {
+    display: flex;
+    flex-direction: column;
+    flex: 1 0 auto;
+    width: 100%;
+    max-width: 1680px;
+    margin-inline: auto;
+    min-width: 0;
+    padding: 0 clamp(var(--s-10), 3vw, var(--s-16)) clamp(var(--s-6), 2.5vw, var(--s-12));
+  }
+  .content-inner.reading {
+    max-width: 880px;
+  }
+  /* La TopBar vive dentro de la columna: su padding horizontal lo pone el contenedor */
+  .content-inner :global(.top.top) {
+    padding-inline: 0;
+  }
+  /* Vistas que llenan el alto (semana, día, mes, horario, sesiones) */
   .cal-wrap {
-    flex: 1;
-    padding: 0 var(--s-8) var(--s-8);
+    flex: 1 0 auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    /* La vista mes tiene altura fija: si la resolución no alcanza, el scroll
-       aparece SOLO dentro del área del calendario (sidebar/header fijos). */
-    overflow-y: auto;
+  }
+  /* La transición {#key} no debe romper la cadena flex */
+  .view-fill {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
   .cal-wrap :global(.cal) {
     flex: 1;
   }
   .page-wrap {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0 var(--s-8) var(--s-8);
+    flex: 1 0 auto;
     min-height: 0;
   }
+  /* Asistente: llena el alto exacto; scrollea solo la conversación interna */
   .assistant-wrap {
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
   }
   .fatal {
     position: fixed;
@@ -323,8 +368,8 @@
     background: var(--surface);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
-    border-radius: var(--r-md);
-    box-shadow: var(--shadow-raised-lg, 0 12px 32px rgba(0, 0, 0, 0.18));
+    border-radius: var(--r-card);
+    box-shadow: var(--e3);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     font-weight: 600;
@@ -333,7 +378,7 @@
     border: none;
     background: var(--danger);
     color: #fff;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-control);
     padding: var(--s-1) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -355,7 +400,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-left: 3px solid var(--border);
-    border-radius: var(--r-md);
+    border-radius: var(--r-card);
     box-shadow: var(--e2);
     padding: var(--s-3) var(--s-4);
     color: var(--text-1);

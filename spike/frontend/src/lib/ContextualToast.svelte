@@ -59,9 +59,9 @@
     z-index: 60;
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: var(--r-xl);
-    padding: 16px;
-    box-shadow: var(--shadow-raised-lg);
+    border-radius: var(--r-card);
+    padding: var(--s-4);
+    box-shadow: var(--e2);
     animation: rise 0.25s var(--ease-out);
   }
   @keyframes rise {
@@ -78,48 +78,48 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: var(--s-2);
   }
   .badge {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--primary);
     background: var(--primary-soft);
-    padding: 3px 8px;
-    border-radius: var(--r-full);
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-chip);
   }
   .x {
     border: none;
     background: none;
     color: var(--text-3);
-    font-size: 16px;
+    font-size: var(--fs-lg);
     cursor: pointer;
-    padding: 2px 6px;
-    border-radius: var(--r-sm);
+    padding: var(--s-0_5) var(--s-1_5);
+    border-radius: var(--r-icon);
   }
   .x:hover {
     background: var(--surface-3);
     color: var(--text-1);
   }
   .body {
-    margin: 0 0 14px;
-    font-size: 14px;
+    margin: 0 0 var(--s-3);
+    font-size: var(--fs-md);
     line-height: 1.5;
     color: var(--text-1);
   }
   .actions {
     display: flex;
-    gap: 8px;
+    gap: var(--s-2);
   }
   .btn {
-    padding: 7px 12px;
-    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-control);
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-1);
-    font-size: 13px;
+    font-size: var(--fs-base);
     cursor: pointer;
   }
   .btn.primary {

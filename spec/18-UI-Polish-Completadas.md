@@ -1,6 +1,6 @@
 # 18 — UI Polish: tareas completadas visibles + tokens de tipografía y espaciado
 
-**Estado:** Plan aprobado · **Fecha:** 2026-09-30
+**Estado:** Fase 1 en PR #2 · Fase 2 completada · **Fecha:** 2026-09-30
 **Origen:** sesión de grilling (13 decisiones) sobre `spike/frontend`.
 **Alcance:** solo frontend. El backend (`list_range`) ya devuelve las completadas (filtra solo `deleted_at`).
 
@@ -158,15 +158,16 @@ En cada una: `font-size` → `--fs-*`, pesos según §2.1, `padding/gap/margin` 
 
 ## 4. Fase 2 — rama `feat/ui-polish-resto`
 
-Mismas reglas que T8, aplicadas al resto de pantallas, en grupos de 2–3 componentes por tarea:
+Mismas reglas que T8, aplicadas al resto de pantallas, en grupos de 2–3 componentes por tarea. Las capturas "antes" de la fase 2 (2026-09-30) destaparon defectos visuales previos que se corrigen en la tarea del componente afectado:
 
-- **T10** `Settings.svelte`
-- **T11** `Onboarding.svelte` (hero 38 → `--fs-2xl`, 800 → 700), `Login.svelte`
-- **T12** `Assistant.svelte`, `PlanProposal.svelte`
-- **T13** `Suggestions.svelte`, `ContextualToast.svelte`, `ClassConflictDialog.svelte`
-- **T14** `StudySessions.svelte`, `StudyForm.svelte`
-- **T15** `Schedule.svelte`, `ClassForm.svelte`, `WidgetPage.svelte`
-- **T16** Docs: marcar la migración como completa en DESIGN.md.
+- **T10** `Settings.svelte`: solo tokens.
+- **T11** `Onboarding.svelte` (hero 38 → `--fs-2xl`, 800 → 700), `Login.svelte`. Los enlaces del Login usan el azul por defecto del navegador (contraste pobre en dark) → `var(--primary)`.
+- **T12** `Assistant.svelte`, `PlanProposal.svelte`. Quitar el encabezado de página duplicado "Asistente" (el título vive en la TopBar, ver T12b); se conservan subtítulo y chips.
+- **T12b** `TopBar.svelte`: la vista `asistente` no está contemplada (muestra "Semana" y las flechas) → título "Asistente" sin navegación. `text-transform: capitalize` pone en mayúscula cada palabra ("Sesiones De Estudio", "30 De Septiembre") → quitarlo y poner mayúscula solo a la inicial en JS.
+- **T13** `Suggestions.svelte`, `ContextualToast.svelte`, `ClassConflictDialog.svelte`. Quitar el encabezado duplicado "Eventos detectados" (se conservan subtítulo y botón "Comprobar correo ahora"). Modal de conflicto: `--shadow-raised-lg` → `--e3` (la luz blanca del relieve deja un halo sobre el overlay).
+- **T14** `StudySessions.svelte`, `StudyForm.svelte`. Bloques de sesión con el texto recortado arriba/abajo; primera etiqueta del gutter ("6 a") cortada; en el formulario las horas se truncan ("10:01 |") y la etiqueta en dos líneas desalinea la fila; modal → `--e3`.
+- **T15** `Schedule.svelte`, `ClassForm.svelte`, `WidgetPage.svelte`. Primera etiqueta del gutter cortada; horas truncadas en el formulario ("10:00 :"); modal → `--e3`.
+- **T16** Docs: marcar la migración como completa en DESIGN.md y documentar los arreglos.
 
 **Aceptación de fase:** `grep -rE "font-size:\s*[0-9]" src/lib src/App.svelte` → 0. PR → `master`.
 

@@ -349,16 +349,23 @@
               {@const clash = clashesWithClass(it.s, it.dayMs)}
               <button
                 type="button"
-                class="stu-block {clash ? 'clash' : ''}"
+                class="stu-block {clash ? 'clash' : ''} {m.height < 36 ? 'compact' : ''}"
                 data-testid="study-block"
                 style="top: {m.top}px; height: {m.height}px; left: calc({(it.lane * 100) / it.lanes}% + 3px); width: calc({100 / it.lanes}% - 6px);"
                 title="Sesión de estudio · clic para editar/mover{clash ? '\n⚠ Coincide con una clase de tu horario' : ''}"
                 onclick={(e) => { e.stopPropagation(); openStudyDetail(it.s.id); }}
               >
-                <span class="sb-title">{it.s.title}</span>
-                <span class="sb-time">{fmtHM(it.s.start.getTime())} – {fmtHM(it.s.end.getTime())}</span>
-                {#if taskTitle(it.s.taskId)}
-                  <span class="sb-task">↳ {taskTitle(it.s.taskId)}</span>
+                {#if m.height < 36}
+                  <span class="sb-inline">
+                    <span class="sb-time">{fmtHM(it.s.start.getTime())}</span>
+                    <span class="sb-title">{it.s.title}</span>
+                  </span>
+                {:else}
+                  <span class="sb-title">{it.s.title}</span>
+                  <span class="sb-time">{fmtHM(it.s.start.getTime())} – {fmtHM(it.s.end.getTime())}</span>
+                  {#if m.height >= 62 && taskTitle(it.s.taskId)}
+                    <span class="sb-task">↳ {taskTitle(it.s.taskId)}</span>
+                  {/if}
                 {/if}
               </button>
             {/each}
@@ -418,8 +425,8 @@
      clases y mismos valores para que sesiones se vea igual que horario. */
   .cal {
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-raised);
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
     display: flex;
@@ -432,7 +439,8 @@
   .week-head {
     display: flex;
     padding: var(--s-4) var(--s-4) var(--s-2);
-    gap: 6px;
+    /* cabecera de la vista: gap un escalón por encima (aire) */
+    gap: var(--s-2);
     flex-shrink: 0;
   }
   .gutter-spacer {
@@ -443,12 +451,12 @@
     flex: 1;
     border: none;
     background: transparent;
-    border-radius: var(--r-md);
-    padding: 6px 0;
+    border-radius: var(--r-control);
+    padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: var(--s-0_5);
     transition: background var(--dur-fast) var(--ease-out);
     min-width: 0;
     cursor: pointer;
@@ -458,26 +466,27 @@
     background: var(--surface-2);
   }
   .day-head.today .num {
-    background: var(--study);
+    background: var(--grad-accent);
+    box-shadow: var(--glow-accent);
     color: #fff;
   }
   .dow {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
   }
   .num {
-    font-size: 15px;
-    font-weight: 700;
+    font-size: var(--fs-lg);
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
     width: 30px;
     height: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     color: var(--text-1);
   }
 
@@ -486,8 +495,8 @@
     display: flex;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0 var(--s-4) var(--s-4);
-    gap: 6px;
+    padding: var(--s-1_5) var(--s-4) var(--s-4);
+    gap: var(--s-2);
     min-height: 0;
   }
   .gutter {
@@ -505,7 +514,7 @@
   .hour {
     position: absolute;
     right: 10px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-3);
     transform: translateY(-6px);
@@ -516,20 +525,24 @@
   .day-col {
     flex: 1;
     position: relative;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     min-width: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
   .day-col.today {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--study) 25%, transparent);
+    /* resaltado sutil dentro del pozo, sin líneas duras */
+    background: color-mix(in srgb, var(--study) 6%, transparent);
   }
   .time-area {
     position: relative;
     flex: 1;
     min-height: 0;
     cursor: copy;
+    /* cuadrícula hundida (pozo) */
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
   }
   .slots {
     position: absolute;
@@ -541,8 +554,8 @@
     flex: 1 1 0;
     min-height: 28px;
     border-top: 1px solid var(--border);
-    margin-left: 2px;
-    margin-right: 2px;
+    margin-left: var(--s-0_5);
+    margin-right: var(--s-0_5);
   }
   .now-line {
     position: absolute;
@@ -550,26 +563,30 @@
     right: 2px;
     height: 2px;
     background: var(--study);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     z-index: 2;
     pointer-events: none;
   }
 
-  /* Bloque de sesión: misma silueta que .cls-block/.evt, en color propio. */
+  /* Bloque de sesión: misma silueta que .cls-block/.evt, en color propio.
+     Contenido arriba: si no cabe, solo se recorta por abajo. */
   .stu-block {
     position: absolute;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: var(--s-0_5);
     background: color-mix(in srgb, var(--study) 13%, var(--surface));
     border: none;
     border-left: 3px solid var(--study);
     border-radius: var(--r-sm);
-    padding: 4px 8px;
+    padding: var(--s-1) var(--s-2);
     text-align: left;
     overflow: hidden;
     z-index: 1;
-    box-shadow: var(--shadow-inset-sm);
+    /* sesión: relieve mínimo elevado sobre su tinte teal */
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     min-width: 0;
     cursor: pointer;
@@ -577,7 +594,7 @@
   }
   .stu-block:hover {
     transform: translateY(-1px) scale(1.01);
-    box-shadow: var(--e1);
+    box-shadow: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
     z-index: 3;
   }
   /* Conflicto con clase (regla 10): borde ámbar; el usuario decidió seguir. */
@@ -585,22 +602,42 @@
     outline: 1.5px solid var(--warning);
     outline-offset: -1.5px;
   }
+  .sb-inline {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    min-width: 0;
+  }
+  .sb-inline .sb-time {
+    flex-shrink: 0;
+  }
+  .sb-inline .sb-title {
+    min-width: 0;
+  }
   .sb-title {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-1);
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
+  }
+  /* Compacto (< 36px): hora + título en UNA línea */
+  .stu-block.compact .sb-title {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
   }
   .sb-time {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .sb-task {
-    font-size: 10.5px;
+    font-size: var(--fs-2xs);
     color: var(--text-3);
     white-space: nowrap;
     overflow: hidden;
@@ -618,18 +655,18 @@
     color: var(--text-2);
     flex: 1;
   }
-  .empty p { margin: 0; max-width: 420px; font-size: 13px; }
-  .empty strong { font-size: 15px; color: var(--text-1); }
+  .empty p { margin: 0; max-width: 420px; font-size: var(--fs-base); }
+  .empty strong { font-size: var(--fs-lg); color: var(--text-1); }
   .add {
     font: inherit;
-    font-size: 13px;
+    font-size: var(--fs-base);
     font-weight: 600;
     margin-top: var(--s-2);
     background: var(--study);
     color: #fff;
     border: none;
-    border-radius: var(--r-md);
-    padding: 8px 14px;
+    border-radius: var(--r-control);
+    padding: var(--s-2) var(--s-3);
     cursor: pointer;
     box-shadow: var(--e1);
     transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
@@ -639,49 +676,52 @@
   /* Diálogo de conflicto (mismo lenguaje visual que el resto). */
   .overlay {
     position: fixed; inset: 0; z-index: 70;
-    background: rgba(15, 23, 42, 0.42);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     display: grid; place-items: center; padding: var(--s-4);
   }
   .modal {
     width: min(420px, 100%);
     background: var(--surface);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised-lg);
-    padding: var(--s-5);
-    display: flex; flex-direction: column; gap: var(--s-2);
+    /* contenedor: padding y gap un escalón por encima (aire) */
+    padding: var(--s-6);
+    display: flex; flex-direction: column; gap: var(--s-3);
   }
   .modal header { display: flex; align-items: center; gap: var(--s-2); }
   .badge {
-    width: 30px; height: 30px; border-radius: 999px;
+    width: 30px; height: 30px; border-radius: var(--r-icon);
     background: var(--warning-bg); color: var(--warning);
-    display: grid; place-items: center; font-size: 15px; font-weight: 700;
+    display: grid; place-items: center; font-size: var(--fs-lg); font-weight: 600;
   }
-  h3 { margin: 0; font-size: 15.5px; font-weight: 700; }
-  .lead { margin: 0; font-size: 13px; color: var(--text-2); }
-  .tasks-note { font-size: 12.5px; }
-  .cl { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+  .lead { margin: 0; font-size: var(--fs-base); color: var(--text-2); }
+  .tasks-note { font-size: var(--fs-sm); }
+  .cl { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--s-1); }
   .cl li {
     display: flex; justify-content: space-between; gap: var(--s-3);
-    font-size: 13px;
+    font-size: var(--fs-base);
     background: color-mix(in srgb, var(--study) 10%, transparent);
     border-left: 3px solid var(--study);
-    border-radius: var(--r-md); padding: 6px 10px;
+    border-radius: var(--r-well); padding: var(--s-1_5) var(--s-2);
   }
-  .cl .tm { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 12px; }
+  .cl .tm { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: var(--fs-sm); }
   footer { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
   .btn {
-    flex: 1; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    flex: 1; font: inherit; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-    border-radius: var(--r-md); padding: 8px 10px;
+    border-radius: var(--r-control); padding: var(--s-2) var(--s-2);
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary.study { background: var(--study); border-color: var(--study); color: #fff; }
   .btn.primary.study:hover { background: color-mix(in srgb, var(--study) 85%, #000); }
-  .hint { margin: 0; font-size: 11.5px; color: var(--text-3); }
+  .hint { margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
 
   @media (max-width: 860px) {
-    .hour { font-size: 10px; }
-    .stu-block { padding: 3px 5px; }
+    .hour { font-size: var(--fs-2xs); }
+    .stu-block { padding: var(--s-0_5) var(--s-1); }
     .sb-time, .sb-task { display: none; }
   }
 </style>

@@ -46,7 +46,7 @@
     display: inline-grid;
     place-items: center;
     padding: 0;
-    border-radius: 50%;
+    border-radius: var(--r-check);
     border: 1.5px solid var(--text-3);
     background: var(--surface);
     box-shadow: var(--shadow-inset-sm);

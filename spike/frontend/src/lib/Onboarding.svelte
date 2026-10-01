@@ -461,16 +461,17 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--s-6);
+    /* contenedor del paso 1: gap un escalón por encima (aire) */
+    gap: var(--s-8);
   }
   .logo {
     width: 88px;
     height: 88px;
     display: grid;
     place-items: center;
-    border-radius: 24px;
+    border-radius: var(--r-icon);
     background: var(--surface);
-    box-shadow: var(--shadow-raised-lg);
+    box-shadow: var(--shadow-raised);
   }
   .logo img {
     width: 56px;
@@ -478,10 +479,10 @@
   }
   h1 {
     margin: 0;
-    font-size: 38px;
+    font-size: var(--fs-2xl);
     line-height: 1.14;
     letter-spacing: -0.03em;
-    font-weight: 800;
+    font-weight: 700;
     color: var(--text-1);
     text-wrap: balance;
   }
@@ -490,7 +491,7 @@
   }
   .lead {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--fs-lg);
     line-height: 1.65;
     color: var(--text-2);
     max-width: 54ch;
@@ -501,19 +502,19 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--s-3);
     width: 100%;
     max-width: 480px;
     text-align: left;
   }
   .values li {
     display: flex;
-    gap: 14px;
+    gap: var(--s-3);
     align-items: flex-start;
     background: var(--surface);
     border: none;
-    border-radius: var(--r-md);
-    padding: 16px 18px;
+    border-radius: var(--r-card);
+    padding: var(--s-4) var(--s-5);
     box-shadow: var(--shadow-raised);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
@@ -527,33 +528,33 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    border-radius: 10px;
+    border-radius: var(--r-icon);
     background: var(--primary-soft);
     color: var(--primary);
-    font-size: 16px;
+    font-size: var(--fs-lg);
   }
   .values strong {
-    font-size: 13.5px;
+    font-size: var(--fs-base);
     color: var(--text-1);
   }
   .values p {
-    margin: 3px 0 0;
-    font-size: 12.5px;
+    margin: var(--s-1) 0 0;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     line-height: 1.55;
   }
   .actions {
     display: flex;
-    gap: 12px;
+    gap: var(--s-3);
     align-items: center;
     margin-top: var(--s-3);
   }
   .arrow {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
   .est {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
 
@@ -568,40 +569,41 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--s-3);
   }
   .back {
     width: 38px;
     height: 38px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
-    font-size: 16px;
+    font-size: var(--fs-lg);
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .back:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .back:active {
-    transform: scale(0.96);
+    box-shadow: var(--btn-shadow-active);
   }
   .back:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
   .kicker {
-    margin: 0 0 2px;
-    font-size: 10.5px;
-    font-weight: 800;
+    margin: 0 0 var(--s-0_5);
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--primary);
   }
   .head h1 {
-    font-size: 26px;
+    font-size: var(--fs-xl);
   }
 
   .grid {
@@ -619,46 +621,47 @@
   .guide .g-card {
     background: var(--surface);
     border: none;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
-    padding: 24px 26px;
+    /* tarjeta: padding y gap interno un escalón por encima (aire) */
+    padding: var(--s-8);
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--s-5);
     /* altura mínima compartida CORREO/IA: sin salto al cargar la configuración */
     min-height: 300px;
   }
   .g-card h2 {
     margin: 0;
-    font-size: 18px;
+    font-size: var(--fs-lg);
     letter-spacing: -0.01em;
     color: var(--text-1);
   }
   .g-tip {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-base);
     line-height: 1.65;
     color: var(--text-2);
     background: var(--primary-soft);
-    border-radius: var(--r-sm);
-    padding: 12px 14px;
+    border-radius: var(--r-well);
+    padding: var(--s-3);
   }
   .g-steps {
-    margin: 2px 0 0;
-    padding-left: 22px;
+    margin: var(--s-0_5) 0 0;
+    padding-left: var(--s-6);
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    font-size: 13px;
+    gap: var(--s-3);
+    font-size: var(--fs-base);
     line-height: 1.6;
     color: var(--text-2);
   }
   .g-steps li {
-    padding-left: 4px;
+    padding-left: var(--s-1);
   }
   .g-steps li::marker {
     color: var(--primary);
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .form {
@@ -668,47 +671,47 @@
   }
   fieldset {
     border: none;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     background: var(--surface);
     box-shadow: var(--shadow-raised);
-    padding: var(--s-6);
+    /* tarjeta: padding y gap interno un escalón por encima (aire) */
+    padding: var(--s-8);
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--s-4);
     margin: 0;
   }
   legend {
-    padding: 0 10px;
-    font-size: 14.5px;
-    font-weight: 800;
+    padding: 0 var(--s-2);
+    font-size: var(--fs-md);
+    font-weight: 600;
     color: var(--text-1);
   }
   .fs-hint {
     margin: 0;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     line-height: 1.5;
   }
   .frow {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--s-1_5);
   }
   .lbl {
-    font-size: 12px;
-    font-weight: 700;
+    font-size: var(--fs-sm);
+    font-weight: 600;
     color: var(--text-2);
   }
   .inp {
-    border: 1px solid transparent;
-    background: var(--surface-3);
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-size: 13.5px;
+    border: var(--input-border);
+    background: var(--input-bg);
+    border-radius: var(--r-control);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    box-shadow: var(--shadow-inset-sm);
+    box-shadow: var(--input-shadow);
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .inp:focus {
@@ -739,34 +742,35 @@
   }
   .ferr {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--danger);
   }
   .pills {
     display: flex;
-    gap: 6px;
+    gap: var(--s-1_5);
     flex-wrap: wrap;
   }
   .pill {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-full);
-    padding: 6px 14px;
-    font-size: 12.5px;
+    border-radius: var(--r-chip);
+    padding: var(--s-1_5) var(--s-3);
+    font-size: var(--fs-sm);
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .pill:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .pill.on {
-    background: var(--primary-soft);
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
-    color: var(--primary);
+    background: var(--grad-accent);
+    color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
   .pill:focus-visible {
     outline: 2px solid var(--primary);
@@ -775,54 +779,54 @@
   .srv {
     display: grid;
     grid-template-columns: 1fr 96px auto;
-    gap: 10px;
+    gap: var(--s-2);
     align-items: end;
   }
   .srv-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--s-1_5);
     min-width: 0;
   }
   .check {
     display: flex;
     align-items: center;
-    gap: 7px;
-    font-size: 12.5px;
+    gap: var(--s-2);
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
-    padding-bottom: 11px;
+    padding-bottom: var(--s-3);
     user-select: none;
   }
 
   .fok {
     margin: 0;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: var(--fs-base);
+    font-weight: 600;
     color: var(--success);
     background: var(--success-bg);
-    border-radius: 10px;
-    padding: 9px 12px;
+    border-radius: var(--r-well);
+    padding: var(--s-2) var(--s-3);
   }
   .ferrbox {
     border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
     background: var(--danger-bg);
-    border-radius: 10px;
-    padding: 10px 12px;
+    border-radius: var(--r-well);
+    padding: var(--s-2) var(--s-3);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--s-1_5);
   }
   .ferrbox p {
     margin: 0;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--danger);
     line-height: 1.5;
   }
   .ferrbox details summary {
     cursor: pointer;
-    font-size: 11.5px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     color: var(--text-2);
     user-select: none;
   }
@@ -830,32 +834,32 @@
     color: var(--primary);
   }
   .ferrbox pre {
-    margin: 4px 0 0;
-    font-size: 11px;
+    margin: var(--s-1) 0 0;
+    font-size: var(--fs-xs);
     white-space: pre-wrap;
     word-break: break-all;
     color: var(--text-2);
     background: var(--surface);
-    border-radius: 8px;
-    padding: 8px 10px;
+    border-radius: var(--r-well);
+    padding: var(--s-2);
     max-height: 120px;
     overflow-y: auto;
   }
   .fskip {
     margin: 0;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     background: var(--surface-2);
-    border-radius: 10px;
-    padding: 9px 12px;
+    border-radius: var(--r-well);
+    padding: var(--s-2) var(--s-3);
   }
   .fwait {
     margin: 0;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--s-2);
   }
   .fwait::before {
     content: "";
@@ -873,46 +877,48 @@
   .foot {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: var(--s-4);
     flex-wrap: wrap;
   }
   .btn {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
-    padding: 9px 22px;
-    font-size: 13.5px;
-    font-weight: 700;
+    border-radius: var(--r-control);
+    box-shadow: var(--btn-shadow);
+    padding: var(--s-2) var(--s-6);
+    font-size: var(--fs-base);
+    font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
   .btn.primary:hover {
-    background: var(--primary-hover);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
+    filter: brightness(1.05);
   }
   .btn.primary:active {
-    background: var(--primary-active);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.ghost {
-    background: transparent;
-    box-shadow: none;
+    background: var(--surface);
   }
   .btn.big {
-    padding: 11px 30px;
-    font-size: 14.5px;
+    padding: var(--s-3) var(--s-8);
+    font-size: var(--fs-md);
   }
   .btn:disabled {
     opacity: 0.55;
@@ -924,7 +930,7 @@
   }
   .sec {
     margin: 0;
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     line-height: 1.5;
     max-width: 34ch;
@@ -938,7 +944,7 @@
       padding: var(--s-5);
     }
     h1 {
-      font-size: 27px;
+      font-size: var(--fs-xl);
     }
   }
 

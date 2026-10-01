@@ -1,173 +1,169 @@
 # DESIGN.md — Sistema visual de FocusFlow
 
-**Estado:** Documento vivo · **Última actualización:** 2026-09-30
-**Fuente:** código real (`spike/frontend/src/app.css` + componentes `.svelte`). Ningún valor es inventado: todos se extrajeron del código en producción.
+**Estado:** Documento vivo · **Última actualización:** 2026-10-01
+**Fuente:** código real (`spike/frontend/src/app.css` + componentes `.svelte`). Ningún valor es inventado: todos se extrajeron del código en producción. El cambio de sistema de esta fecha es el del spec 19 (neumorfismo real + layout responsivo); antes era un sistema de sombras plano sobre superficies blancas.
 
 ---
 
 ## 1. Visual identity
 
-FocusFlow utiliza **neumorfismo refinado/moderno** como lenguaje visual principal.
+FocusFlow utiliza **neumorfismo real** como lenguaje visual principal: un único gris como material y todo lo demás separado por relieve (sombra oscura + luz), nunca por color plano.
 
 ### 1.1 Qué es (y qué no es)
 
 | Es | No es |
 |----|-------|
-| Un **sistema de jerarquía visual** (base / raised / inset / floating) | Neumorfismo exagerado tipo Dribbble 2020 |
-| Profundidad **sutil y controlada**, con zonas planas | Soft UI genérico lleno de sombras por todas partes |
-| Luz coherente desde arriba-izquierda en todas las superficies | Interfaces completamente redondeadas |
-| Tactilidad física en micro-interacciones (press = hundirse) | Sombras gigantes u oscuras |
+| Profundidad por relieve en **superficies y controles** | Sombras gigantes u oscuras |
+| Una sola luz, arriba-izquierda, en toda la app | Invertir la luz en un mismo panel |
+| Superficie = fondo: el gris es el material | Blanco sobre blanco (la app se veía plana) |
+| Press = hundirse | Press = cambiar de color o escalar |
+| Contenido denso con relieve mínimo | Sombrear cada celda por igual |
 
-**Principio clave (del spec original, D-01):** *el relieve es de las superficies, no de los controles*. Si todo tiene relieve, nada es interactivo. La combinación **espacio plano + profundidad sutil** es lo que da el carácter.
+**Principio vigente (spec 19 · D3, reemplaza la antigua regla D-01):** *el relieve está en las superficies **y** en los controles* —botones elevados que se hunden al pulsar, inputs y selects hundidos, nav activo hundido con hover elevado, pills y chips elevados—. **Excepción:** el contenido denso del calendario (bloques y chips) conserva su tinte de categoría con relieve mínimo de 2 px, porque ahí la sombra fuerte compite con la información. Lo que separa relieve de elevación es la jerarquía, no la ausencia de sombra en los controles.
 
-La identidad en una frase: superficies blancas cálidas que flotan sobre una luz de mañana, un solo azul como voz del producto, y micro-movimientos que hacen que cada acción se sienta física pero suave.
+La identidad en una frase: gris niebla con relieve de dos luces y un acento que solo aparece degradado donde hay acción.
 
 ---
 
-## 2. La jerarquía de profundidad (Base / Raised / Inset / Floating)
+## 2. La jerarquía de profundidad
 
 ### Base
-La superficie principal. **Plana, sin sombras.** Es el fondo sobre el que viven las demás capas.
 
-| Token real | Light | Dark |
-|-----------|-------|------|
-| `--bg` | `#F8F8F8` | `#16181E` |
+`--bg` y `--surface` son **el mismo gris** (`#E9EDF2` en claro, `#262A32` en oscuro). No hay fondo "vacío" ni tarjetas blancas: el relieve lo hace todo (spec 19 · D2).
 
-- Se usa en: fondo de ventana, fondo del área de contenido, login/onboarding.
-- Regla: la base **nunca** lleva sombra ni relieve.
+| Token | Light | Dark | Uso |
+|-------|-------|------|-----|
+| `--bg` / `--surface` | `#E9EDF2` | `#262A32` | Superficie única: ventana, tarjetas, calendario, sidebar |
+| `--surface-2` | `#E3E8EF` | `#22252C` | Pozos: fila "todo el día", completadas, celdas del mes, statistics |
+| `--surface-3` | `#DDE3EB` | `#1F2228` | Fondo de campos hundidos (`--input-bg`) |
 
-### Raised
-Elementos ligeramente elevados sobre la base: tarjetas, calendario, agenda, paneles de ajustes, widget, mensajes del asistente.
+Regla: la base **nunca** lleva sombra. Lo que flota, la lleva.
 
-```css
---shadow-raised: inset 0 1px 0 rgba(255,255,255,0.85),  /* filo de luz superior */
-                 -6px -6px 14px rgba(255,255,255,0.95), /* luz arriba-izq */
-                  6px  6px 14px rgba(31,41,55,0.08);    /* sombra abajo-der */
---shadow-raised-lg: inset 0 1px 0 rgba(255,255,255,0.9),
-                    -12px -12px 24px rgba(255,255,255,0.9),
-                     12px  12px 24px rgba(31,41,55,0.10);
-```
+### Raised — tres niveles
 
-**Dark mode** — misma geometría, luz apagada:
-```css
---shadow-raised: inset 0 1px 0 rgba(255,255,255,0.04),
-                 -6px -6px 14px rgba(0,0,0,0.3),
-                  6px  6px 14px rgba(0,0,0,0.55);
---shadow-raised-lg: inset 0 1px 0 rgba(255,255,255,0.04),
-                    -12px -12px 24px rgba(0,0,0,0.35),
-                     12px  12px 24px rgba(0,0,0,0.6);
-```
+El relieve se define con dos colores —`--neu-dark` (sombra) y `--neu-light` (luz)—, así que el tema cambia la geometría en **una sola pareja de tokens**.
 
-### Inset
-Elementos hundidos: inputs, QuickAdd, campos de búsqueda, filtros, slots del calendario, zonas de drop.
-
-```css
---shadow-inset: inset 4px 4px 10px rgba(31,41,55,0.06),     /* sombra adentro */
-                inset -4px -4px 10px rgba(255,255,255,0.85); /* luz adentro */
---shadow-inset-sm: inset 2px 2px 5px rgba(31,41,55,0.05),
-                   inset -2px -2px 5px rgba(255,255,255,0.8);
-```
-
-**Dark:**
-```css
---shadow-inset: inset 4px 4px 10px rgba(0,0,0,0.4),
-                inset -4px -4px 10px rgba(255,255,255,0.03);
---shadow-inset-sm: inset 2px 2px 5px rgba(0,0,0,0.35),
-                   inset -2px -2px 5px rgba(255,255,255,0.03);
-```
-
-### Floating
-Elementos temporales que sobrevuelan: modales, popovers, menús, previsualización del QuickAdd, widget, toasts, drawers.
-
-| Nivel | Token | Uso |
+| Token | Valor | Uso |
 |-------|-------|-----|
-| e1 | `0 4px 8px -2px rgba(31,41,55,0.08), 0 2px 4px -2px rgba(31,41,55,0.06)` | Hover de cards, botones, kbd |
-| e2 | `0 10px 20px -4px rgba(31,41,55,0.12), 0 4px 8px -4px rgba(31,41,55,0.08)` | Toasts, slow-AI banner |
-| e3 | `0 18px 36px -6px rgba(31,41,55,0.18), 0 8px 16px -8px rgba(31,41,55,0.12)` | Modales, popup de día, drawer, preview QuickAdd |
+| `--shadow-raised-sm` | `4px 4px 8px var(--neu-dark), -4px -4px 8px var(--neu-light)` | Controles elevados: botones, pills, nav hover, riel del interruptor |
+| `--shadow-raised` | `8px 8px 16px var(--neu-dark), -8px -8px 16px var(--neu-light)` | Superficies: tarjetas de Ajustes/Sugerencias, panel del sidebar, widget, burbujas del asistente |
+| `--shadow-raised-lg` | `12px 12px 28px rgba(150,165,190,0.7), -12px -12px 28px #fff` (claro) · los mismos offsets con `neu-*` (oscuro) | Piezas marcadas: tarjeta del calendario, paneles de modal, TaskDrawer |
 
-Dark: mismas estructuras con `rgba(0,0,0,0.5–0.6)`.
+- **Claro:** `--neu-dark: rgba(163, 177, 198, 0.6)` · `--neu-light: rgba(255, 255, 255, 0.9)`.
+- **Oscuro:** `--neu-dark: rgba(0, 0, 0, 0.55)` · `--neu-light: rgba(255, 255, 255, 0.05)`. Misma geometría, luz casi nula.
 
-**Reglas del sistema de sombras (nunca romper):**
-1. Contraste bajo siempre: la sombra más fuerte es `rgba(31,41,55,0.18)` en light.
-2. Blur grande y difuso: mínimo 14 px para relieve, 20+ para elevación.
-3. Un solo origen de luz: arriba-izquierda. Prohibido invertir la luz en un mismo panel.
-4. Hover = subir un nivel (raised → e1/e2, translateY(-1px)).
-5. Active/pressed = **hundirse** (inset o scale 0.98). El press es un evento táctil, no un cambio de color.
+### Inset — el pozo
+
+| Token | Valor | Uso |
+|-------|-------|-----|
+| `--shadow-inset` | `inset 4px 4px 8px …, inset -4px -4px 8px …` | Cuadrícula horaria (`time-area`), fila "todo el día", completadas |
+| `--shadow-inset-sm` | `inset 2px 2px 5px …, inset -2px -2px 5px …` | Campos pequeños, celdas del mes, nav activo, chips completados, estado pulsado |
+
+En oscuro ambos derivan igual de `neu-*` (sin literales propios).
+
+### Elevación (`--e1`–`--e3`) — solo lo que flota SIN overlay
+
+Toasts, menús, banners y popups conservan la elevación clásica (`--e1` hover de tarjetas, `--e2` toasts, `--e3` popup del día y preview). **Los modales ya no usan elevación**: usan `--shadow-raised-lg` sobre el overlay claro desenfocado (§3.5), porque la luz blanca de `--e1`–`--e3` dejaba un halo sobre un overlay oscuro.
+
+### Reglas del sistema de sombras (nunca romper)
+
+1. **Una sola luz:** arriba-izquierda en todo. Prohibido invertir la luz en un mismo panel.
+2. **Superficie = fondo** (D2). No reintroducir superficies blancas.
+3. **Hover = un nivel más de relieve** (`--btn-shadow` → `--btn-shadow-hover`, de 4 a 6 px). Sin `translateY`.
+4. **Press = hundirse** (`--btn-shadow-active`, que es `--shadow-inset-sm`). Es un evento táctil, no un cambio de color.
+5. **Contenido denso = relieve mínimo** (2 px). Bloques y chips del calendario: el tinte de categoría manda, la sombra acompaña.
+6. **Intensidad:** media (8 px, luz 90 %) por defecto; marcada (12 px, luz 100 %) solo en piezas destacadas.
+7. **Con overlay:** panel con `--shadow-raised-lg` + `--overlay` claro desenfocado. Sin overlay: elevación (`--e1`–`--e3`).
+8. `--shadow-reach: 48px` es el alcance máximo de la sombra marcada: ningún contenedor con scroll recorta relieve.
 
 ---
 
 ## 3. Color system
 
-### 3.1 Light mode (default)
+### 3.1 Light (default)
 
 | Token | Valor | Uso |
 |-------|-------|-----|
-| `--bg` | `#F8F8F8` | Base de la ventana |
-| `--surface` | `#FFFFFF` | Raised: tarjetas, calendario, drawer, widget |
-| `--surface-2` | `#F1F2F4` | Hover de nav, slots, chips en reposo, pop-items |
-| `--surface-3` | `#EAECEF` | Inset: inputs, QuickAdd, botones secundarios |
-| `--accent` / `--primary` | `#2563EB` | Acción, selección, hoy, enlace, botón principal |
-| `--primary-hover` | color-mix 88% + #000 (`≈#1D4ED8`) | Hover de primario |
-| `--primary-active` | color-mix 76% + #000 (`≈#1E40AF`) | Press de primario |
-| `--primary-soft` | color-mix 14% accent + surface (`≈#DBEAFE`) | Nav activo, chips de estado, fondos de selección |
-| `--primary-soft-2` | color-mix 42% accent + #fff (`≈#BFDBFE`) | Anillo de foco, borde de hoy |
-| `--success` | `#059669` | Completado, éxito |
-| `--success-bg` | `#D1FAE5` | Fondo de completado, badges éxito |
-| `--warning` | `#B45309` | Próximo/urgente/aviso |
-| `--warning-bg` | `#FEF3C7` | Fondo de avisos |
-| `--danger` | `#DC2626` | Vencida, prioridad alta, borrar |
-| `--danger-bg` | `#FEE2E2` | Fondo de vencida/error |
-| `--text-1` | `#1F2937` | Texto primario |
-| `--text-2` | `#6B7280` | Texto secundario, horas, meta |
-| `--text-3` | `#9CA3AF` | Placeholder, deshabilitado, overlines |
-| `--border` | `#E7E9EC` | Divisores finos, bordes de inputs |
+| `--bg` = `--surface` | `#E9EDF2` | Superficie única |
+| `--surface-2` | `#E3E8EF` | Pozos, chips en reposo, nav hover |
+| `--surface-3` | `#DDE3EB` | Inputs hundidos |
+| `--accent` = `--primary` | `#2563eb` | Acción, selección, hoy, enlaces |
+| `--primary-hover` | color-mix 88 % + `#000` (≈`#1D4ED8`) | Hover de primario |
+| `--primary-active` | color-mix 76 % + `#000` (≈`#1E40AF`) | Press de primario |
+| `--primary-soft` | color-mix 14 % accent + surface | Nav activo, fondos de selección |
+| `--primary-soft-2` | color-mix 42 % accent + `#fff` | Anillo de `:focus-visible` |
+| `--success` / `--success-bg` | `#059669` / `#D1FAE5` | Completado, éxito |
+| `--warning` / `--warning-bg` | `#B45309` / `#FEF3C7` | Próximo, urgente, aviso |
+| `--danger` / `--danger-bg` | `#DC2626` / `#FEE2E2` | Vencida, prioridad alta, borrar |
+| `--study` / `--study-bg` | `#0D9488` / `#CCFBF1` | Sesiones de estudio (identidad propia, no es una categoría) |
+| `--text-1` | `#1F2937` | Texto primario — **12.5:1** sobre `--surface` |
+| `--text-2` | `#5B6472` | Texto secundario, horas, meta — **5.09:1** (AA) |
+| `--text-3` | `#7C8594` | Placeholder, meta, overlines — **3.17:1** (nunca contenido esencial) |
+| `--border` | `#D3DAE3` | Divisores finos |
+| `--line-input` | `rgba(91, 100, 114, 0.22)` | Línea sutil de inputs y selects (D14) |
+| `--overlay` | `color-mix(in srgb, var(--bg) 60%, transparent)` | Fondo de modales |
 
-### 3.2 Dark mode (misma identidad, luz apagada)
+### 3.2 Dark (misma identidad, luz apagada)
 
-| Token | Valor | Nota de luminancia |
-|-------|-------|--------------------|
-| `--bg` | `#16181E` | Base oscura cálida (no negro puro) |
-| `--surface` | `#1E2129` | Ligeramente más claro que base |
-| `--surface-2` | `#262A34` | Un paso más |
-| `--surface-3` | `#2C313C` | El más claro de las superficies (inset) |
-| `--accent` | `#3B82F6` | **Aclarado** para mantener contraste AA |
-| `--primary-soft` | color-mix 20% accent + transparent | Tinte translúcido (no blanco) |
-| `--success` | `#34D399` | Semánticos aclarados |
-| `--warning` | `#FBBF24` | |
-| `--danger` | `#F87171` | |
-| `--text-1` | `#F3F4F6` | |
-| `--text-2` | `#A6ADBB` | 4.6:1 sobre surface (AA) |
-| `--text-3` | `#6B7280` | Solo para meta/placeholder |
+| Token | Valor | Nota |
+|-------|-------|------|
+| `--bg` = `--surface` | `#262A32` | Gris oscuro, no negro puro |
+| `--surface-2` | `#22252C` | Un paso más oscuro (el pozo) |
+| `--surface-3` | `#1F2228` | El más oscuro (input) |
+| `--accent` | `#3b82f6` | Aclarado por defecto |
+| `--primary` | `color-mix(in srgb, var(--accent) 75%, #fff)` | **Derivado** del acento elegido (fix D7) |
+| `--primary-hover` / `--primary-active` | color-mix 62 % / 90 % + `#fff` | Derivados igual |
+| `--success` / `--warning` / `--danger` | `#34D399` / `#FBBF24` / `#F87171` | Semánticos aclarados (luminancia diseñada, no espejada) |
+| `--study` | `#2DD4BF` | Teal claro |
+| `--text-1` | `#F3F4F6` | **13.07:1** sobre `--surface` |
+| `--text-2` | `#A6ADBB` | **6.38:1** (AA) |
+| `--text-3` | `#6B7280` | **2.98:1** — solo meta |
 | `--border` | `#333845` | |
+| `--overlay` | `rgba(12, 14, 18, 0.55)` | Overlay oscuro, desenfocado |
 
-> **No es una inversión de colores.** Light usa sombras con luz blanca al 85–95 %; dark usa luces al 4 % (casi imperceptibles) y sombras negras profundas. Los semánticos se aclaran en dark (luminancia diseñada, no espejada). El azul es el ancla de identidad en ambos temas.
+> **No es una inversión de colores.** El relieve usa la misma fórmula en ambos temas; lo que cambia es la pareja `--neu-dark`/`--neu-light` y el gris del material. Los acentos de categoría siguen planos.
 
-### 3.3 Acentos de categoría (fijos en código)
+### 3.3 Acento: degradado, brillo y el arreglo del oscuro
 
-```ts
-Universidad #2563EB · Trabajo #7C3AED · Personal #EC4899
-Finanzas    #F59E0B · Salud    #10B981 · Otros    #0EA5E9
-```
+| Token | Valor | Dónde |
+|-------|-------|-------|
+| `--grad-accent` | `linear-gradient(135deg, color-mix(in srgb, var(--accent) 78%, #fff), var(--accent))` | Botón principal, opción activa de los switchers, badge de Sugerencias, número de "hoy", píldora activa |
+| `--glow-accent` | `0 6px 16px -4px color-mix(in srgb, var(--accent) 45%, transparent)` | Brillo del principal y del círculo de "hoy" |
+| `--btn-primary-shadow` | `var(--shadow-raised-sm), var(--glow-accent)` | Sombra + brillo del botón principal |
 
-Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0B, #10B981, #0EA5E9`. Se aplica a `--accent` vía CSS custom property y se difunde app + widget.
+- Los **6 acentos** funcionan porque todo se deriva con `color-mix` del acento elegido en Ajustes.
+- **Fix del oscuro (D7):** `applyUiPrefs` fija `--accent` como estilo **inline**, así que en oscuro `--primary` tiene que **derivarse**: `color-mix(in srgb, var(--accent) 75%, #fff)`. Con `--primary: var(--accent)` el azul aclarado del tema quedaba pisado y botones y enlaces perdían contraste.
+- «Añadir sesión» mantiene su identidad con un degradado propio derivado de `--study` (teal), no del acento.
+- Los colores de categoría **no** degradan: el degradado es para acción y estado activo, no para identidad.
 
 ### 3.4 Uso del color por estado (semántica)
 
 | Estado | Superficie | Indicador | Texto |
 |--------|-----------|-----------|-------|
-| Completada | `--surface-2` **hundida** (`--shadow-inset`; chips y minichips con `--shadow-inset-sm`) | ✓ (`TaskCheck` relleno `--text-3`, siempre visible) + borde izquierdo `--text-3` | Título tachado (animado izq→der) en `--text-2`, meta en `--text-3`. **Sin `opacity`** |
+| Completada | `--surface-2` **hundida** (`--shadow-inset`; chips con `--shadow-inset-sm`) | ✓ (`TaskCheck` relleno `--text-3`, siempre visible) + borde izquierdo `--text-3` | Título tachado (izq→der) en `--text-2`, meta en `--text-3`. **Sin `opacity`** |
 | Vencida | `--danger-bg` | Borde izquierdo **dashed** `--danger` | `--danger` |
 | Prioridad alta | — | Punto/barra `--danger`, badge `--danger-bg` | `--danger` |
 | Prioridad media | — | Badge `--primary-soft` | `--primary` |
-| Hoy | — | Círculo `--primary` con número blanco | — |
+| Hoy | — | Círculo `--grad-accent` con `--glow-accent` y número blanco; celda del mes con anillo de acento | — |
 | En curso (widget) | — | Etiqueta "Ahora" `--primary` | — |
 | Conflicto (drag) | toast `--danger` | — | blanco |
 
-**Regla de oro:** el color nunca es el único indicador de estado. Vencida = fondo tintado + borde punteado + texto; completada = tachado + superficie hundida gris + ✓; prioridad = badge + punto.
+**Regla de oro:** el color nunca es el único indicador de estado. Vencida = fondo tintado + borde punteado + texto; completada = tachado + pozo gris + ✓; prioridad = badge + punto.
 
-> Las completadas son **plenamente visibles en el calendario** (semana, día, mes y popup): hundidas en gris, nunca difuminadas con `opacity`. El título usa `--text-2` y no `--text-3` porque es contenido esencial (ver ACCESSIBILITY §5); `--text-3` queda para hora, descripción y punto de categoría.
+> Las completadas son **plenamente visibles** en el calendario (semana, día, mes y popup): hundidas en gris, nunca difuminadas con `opacity`. El título usa `--text-2` y no `--text-3` porque es contenido esencial (ver ACCESSIBILITY §5); `--text-3` queda para hora, descripción y punto de categoría.
 >
-> **Excepción multi-día:** una completada de varios días solo se ve en su día de inicio y en su día de fin; en los intermedios no aparece, para no repetir la misma tarea en gris cada día.
+> **Excepción multi-día:** una completada de varios días solo se ve en su día de inicio y en su día de fin.
+
+### 3.5 Modales: overlay claro desenfocado (por qué)
+
+| Token | Valor | Uso |
+|-------|-------|-----|
+| `--overlay` | ver §3.1/§3.2 | Fondo del overlay: gris translúcido **del propio tema** |
+| `--overlay-blur` | `8px` | `backdrop-filter: blur()` (con prefijo `-webkit-`) |
+
+Los paneles de modal (formularios de clase y sesión, conflictos, PlanProposal, diálogo de borrado, TaskDrawer) usan `--surface` + `--r-card` + `--shadow-raised-lg`.
+
+**Por qué overlay claro:** un overlay oscuro bajo una luz blanca fuerte produce el halo que obligaba antes a bajar los modales a `--e3`. Desenfocar el gris del tema mantiene el relieve sin halo; en oscuro el overlay es oscuro y la luz del relieve es casi imperceptible, así que el problema desaparece por construcción.
 
 ---
 
@@ -194,9 +190,9 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 
 | Rol | Token | Peso | Track | Uso real |
 |-----|-------|------|-------|----------|
-| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding — **objetivo, hoy sigue en 38 px/800** |
+| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding |
 | Título de pantalla | `--fs-xl` | 700 | -0.02em | TopBar |
-| Título de sección / card | `--fs-lg` | 600 | — | h3 de propuesta y drawer; el h2 de Ajustes es **objetivo** (hoy 17 px literal) |
+| Título de sección / card | `--fs-lg` | 600 | — | h2/h3 de sección (Ajustes, propuesta, drawer) |
 | Cuerpo | `--fs-base`–`--fs-md` | 400–500 | — | Base de la app, inputs |
 | Nombre de tarea | `--fs-xs`–`--fs-md` | 500–600 | — | EventBlock / TaskCard |
 | Meta/horas | `--fs-2xs`–`--fs-sm` | 600 | — | `tabular-nums` SIEMPRE |
@@ -204,11 +200,11 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 | Hora del calendario | `--fs-xs` | 600 | — | gutter, tabular-nums |
 | Placeholder | `--fs-base` | 400 | — | `--text-3` |
 
-> **Alcance de la migración:** la tabla describe el sistema **objetivo**. `Onboarding.svelte` (hero, pasos) y `Settings.svelte` (h2 de sección, 22 px/700 del título de pantalla) aún tienen tamaños y pesos literales: entran en la **fase 2** (spec 18 §4, T10–T15).
+> **Migración completa (spec 18):** la tabla describe el sistema real. Ningún componente de `spike/frontend/src/lib` ni `App.svelte` conserva un `font-size` literal.
 
 ### 4.3 Regla de pesos
 
-400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 queda **pendiente de eliminar** (hoy Onboarding y Settings aún lo usan; su conversión a 700 es objetivo de la fase 2, T11). Los overlines van en 600 manteniendo uppercase + tracking.
+400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 ya no existe en el código. Los overlines van en 600 manteniendo uppercase + tracking.
 
 ### 4.4 Reglas tipográficas
 
@@ -217,7 +213,8 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 3. Títulos cortos: 1 línea con ellipsis; descripciones máx. 2–3 líneas con `-webkit-line-clamp`.
 4. `text-wrap: balance` en titulares largos (onboarding).
 5. Texto nunca se difumina: color plano, peso ≥ 400.
-6. **Ningún `font-size` literal:** todo sale de `--fs-*`. Ya se cumple en el **núcleo diario** — `Calendar`, `EventBlock`, `TaskCheck`, `TopBar`, `Sidebar`, `TitleBar`, `App`, `TaskDrawer`, `QuickAdd` y `Widget` —; el resto de pantallas (Ajustes, Onboarding, Login, Asistente, Sugerencias, sesiones de estudio, agenda) se migra en la fase 2.
+6. **Ningún `font-size` literal:** todo sale de `--fs-*`.
+7. **Capitalización en español: solo la primera letra.** Nada de `text-transform: capitalize` (daría «Sesiones De Estudio»). La inicial la aplica el helper compartido `capitalizeFirst` (`dateUtils.ts`) — lo usan la TopBar y el encabezado del popup del día.
 
 ---
 
@@ -230,7 +227,7 @@ Escala real de tokens (grid de 4 px + micro-gaps):
 --s-6: 24px --s-8: 32px --s-10: 40px --s-12: 48px --s-16: 64px
 ```
 
-**Regla de aire:** en **contenedores** (cards, paneles, drawer, sidebar, topbar, popup) el padding y el gap suben **un escalón** respecto al contenido que alojan. En **contenido denso** (EventBlock, chips, minichips, celdas del mes) no se sube nada: se conserva la densidad para que quepa más información en el mismo espacio. `--s-0_5` y `--s-1_5` cubren los micro-gaps internos (gap de una lista de chips, separación label/valor).
+**Regla de aire:** en **contenedores** (cards, paneles, drawer, sidebar, topbar, popup) el padding y el gap suben **un escalón** respecto al contenido que alojan. En **contenido denso** (EventBlock, chips, minichips, celdas del mes) no se sube nada.
 
 Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son espaciado.
 
@@ -238,29 +235,57 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 - Padding de cards: `--s-5`/`--s-6` en contenedores grandes, `--s-4`/`--s-5` en medianos.
 - Gap entre tarjetas: `--s-4`–`--s-6` (16–24 px). Nunca apilar superficies sin aire.
 - Gap interno de filas: `--s-1_5`–`--s-2` (6–8 px).
-- Altura mínima de interacción: 44 px (QuickAdd 44, botones 36–44).
-- Sidebar: 232 px fija. Calendario contenido: padding 0 `--s-8`.
+- Altura mínima de interacción: 44 px (QuickAdd 44, botones 36–44, botones de icono 40 px).
+- **Sidebar:** panel de 232 px con margen `--s-4` (72 px en modo iconos, padding incluido).
+- **Columna de contenido:** `padding: 0 clamp(--s-10, 3vw, --s-16) clamp(--s-6, 2.5vw, --s-12)`; el colchón lateral cubre `--shadow-reach` (48 px) para que el relieve no se recorte al hacer scroll.
+- **Panel del TaskDrawer:** margen `--s-4` en los cuatro lados.
 
 ---
 
-## 6. Radius
+## 6. Radius — el sistema de forma
+
+**Hay una escala numérica y una forma.** La escala sigue viva para casos puntuales, pero **ningún componente elige radio directamente**: todos usan los seis tokens semánticos, que son los que cambian con la preferencia del usuario.
+
+### 6.1 Tokens de forma
+
+| Token | Qué envuelve | Rectangular (por defecto) | Redondeada (`data-shape="round"`) |
+|-------|-------------|---------------------------|-----------------------------------|
+| `--r-control` | Botones, inputs, selects, textareas, switchers, `.qa` de QuickAdd | **10 px** | 999 px (píldora) |
+| `--r-chip` | Chips, badges, `kbd`, píldoras pequeñas, franjas finas | **8 px** | 999 px |
+| `--r-card` | Tarjetas, paneles, modales, sidebar, drawer, calendario, franja de "todo el día" | **18 px** | 28 px |
+| `--r-well` | Pozos: columnas de semana, celdas del mes, fichas de estadística, cajas de error | **12 px** | 16 px |
+| `--r-icon` | Botones de icono, flechas, cerrar, añadir, tema, logo, day-head, `.today-box` del calendario | **10 px** | 50 % (círculo) |
+| `--r-check` | `TaskCheck` | **5 px** | 50 % (círculo) |
+
+```css
+:root                        { --r-control: 10px; --r-chip: 8px; --r-card: 18px;
+                              --r-well: 12px;   --r-icon: 10px;  --r-check: 5px; }
+:root[data-shape="round"]    { --r-control: 999px; --r-chip: 999px; --r-card: 28px;
+                              --r-well: 16px;     --r-icon: 50%;    --r-check: 50%; }
+```
+
+- **Por defecto es rectangular con esquinas suavizadas.** El redondeo extremo (píldoras y círculos por todas partes) hacía la interfaz menos sobria; la forma redondeada queda como **opción** en Ajustes → Apariencia.
+- El atributo vive en `<html>`: `data-shape="round"` o, en rectangular, **se elimina el atributo**. Lo aplica `applyShape()` (`data.svelte.ts`), que valida el valor y lo guarda en `localStorage` bajo `ff-ui` (`shape: "soft" | "round"`). No viaja al backend: el widget lo recibe por el evento `storage`, igual que el resto de ventanas.
+- Los valores en `data-shape="round"` son los radios del neumorfismo anterior, así que ese estilo es reconocible.
+
+### 6.2 Lo que se queda siempre circular
+
+`border-radius: 50%` literal, en ambos estilos, porque no es una forma de contenedor sino una **geometría inherente**:
+
+- **Puntos de categoría y prioridad:** `.cat-dot`, `.dot` (sidebar, widget, PlanProposal), `.pop-dot` (popup del mes), `.kdot`, `.prio-dot` de los bloques.
+- **Knob del interruptor** (`input[type="checkbox"]::before` del TaskDrawer).
+- **Anillo de pulso** del widget (`.pulse`) y **spinner** de Onboarding (`.fwait::before`).
+- **Círculos con icono dentro:** el ✓ del toast de QuickAdd y el icono del diálogo de borrado.
+
+### 6.3 Escala numérica (uso residual)
 
 ```css
 --r-xs: 6px   --r-sm: 10px  --r-md: 16px  --r-lg: 22px  --r-xl: 28px  --r-full: 999px
 ```
 
-| Token | Uso real |
-|-------|----------|
-| `--r-xs` (6 px) | Elementos pequeños y densos: minichips y chips del calendario, `.prio-dot`, `kbd`, checks, botones muy pequeños |
-| `--r-sm` (10 px) | EventBlocks, botones, filas del popup, notas de diálogo |
-| `--r-md` (16 px) | Celdas de mes, tarjetas de agenda, day-head, input del QuickAdd, icon-button |
-| `--r-lg` (22 px) | Contenedor del calendario, cards de sugerencias, modales, dialogs |
-| `--r-xl` (28 px) | Widget, toast contextual |
-| `--r-full` | Checkboxes, badges, pills, swatches, avatares, TaskCheck |
+Solo para casos que no son un componente (uniones de radios, anillos, `mask-image`). Cuando el valor sea el radio de una superficie, control o chip, usa el token de forma.
 
-**Mapeo de literales:** `≤ 9px → --r-xs` · `10–12px → --r-sm` · `14–18px → --r-md` · `22–24px → --r-lg` · `28px → --r-xl` · `999px → --r-full`. `50%` (círculos) se queda literal.
-
-**Regla:** sin esquinas rectas y **no todo es pill**: los pills se reservan para badges/chips/checkbox; el contenido denso del calendario baja a `--r-xs`/`--r-sm` y los contenedores usan `--r-md`/`--r-lg`.
+**Mapeo de literales a tokens:** `4–6px → --r-chip` · `8–10px → --r-control / --r-chip` · `10–12px → --r-well` · `14–18px → --r-card` · `28px → --r-card` · `999px → --r-control / --r-chip` · `50% → --r-icon / --r-check`, salvo los círculos de §6.2.
 
 ---
 
@@ -278,27 +303,27 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 
 | Interacción | Duración | Curva | Detalle real |
 |-------------|----------|-------|--------------|
-| Hover card/button | 150 | ease-out | translateY(-1px) + sombra e1 |
-| Press botón | 120–150 | ease-out | scale(0.92–0.98) o inset |
+| Hover de botón/pill | 150 | ease-out | `--btn-shadow` → `--btn-shadow-hover` (sin `translateY`) |
+| Press botón | 150 | ease-out | `--btn-shadow-active` (inset) o `brightness` en degradados |
+| Ancho de la sidebar (modo iconos) | 200 | ease-out | transición de `width` y `padding` (`--dur-base`) |
 | Cambio de vista calendario | 160 | fade | `transition:fade` de Svelte, `{#key view}` |
 | Apertura drawer | 200 | slide x | `transition:slide` |
-| Modal / overlay | 120–160 | fade | overlays + pop (scale 0.94→1 + translateY) |
-| Completar tarea | 250 | ease-out | hundir + tachar en el calendario (`--dur-slow`: sombra, fondo y color); el ✓ del `TaskCheck` hace scale(0.92) al pulsar |
-| Toast contextual | 250 | ease-out | rise (translateY 12px → 0) |
+| Modal / overlay | 120–160 | fade | overlay + pop |
+| Completar tarea | 250 | ease-out | hundir + tachar (`--dur-slow`); el ✓ del `TaskCheck` hace scale |
+| Toast contextual | 250 | ease-out | rise |
 | Preview QuickAdd | 200 | cubic ease | `transition:scale` |
 | Mensajes del asistente | 160 | fade | entrada de mensajes AI |
-| Cambios en widget | 140 | fade | secciones Ahora/Siguiente/Importante |
 | Transición de tema | 200 | ease-out | background/color del body |
 | Ghost de drag | instantáneo | — | sigue al cursor, `will-change: top, height` |
 | Scrollbar hover | 150 | ease-out | thumb se oscurece |
 
 ### 7.3 Reglas de motion
 
-1. **La animación comunica estado o continuidad.** El ghost del drag muestra adónde va la tarea; el fade del calendario suaviza el cambio de vista; el pop del check confirma la acción.
-2. Solo `transform`/`opacity` en transiciones CSS (nunca animar width/height/box-shadow masivamente).
+1. **La animación comunica estado o continuidad.**
+2. Solo `transform`/`opacity`/`box-shadow` en transiciones CSS (nunca animar `width`/`height` de forma masiva; la sidebar anima su `width`, excepción consciente y corta).
 3. Sin rebotes en elementos grandes (widget, modal): solo micro-elementos.
-4. **`prefers-reduced-motion` respetado globalmente** en `app.css`: toda animación/transición se reduce a 120 ms; el onboarding desactiva GSAP por completo si el usuario lo pide.
-5. Sin animación "porque se ve bonita". El único uso de GSAP es la entrada escalonada del onboarding, y se desactiva con reduced motion.
+4. **`prefers-reduced-motion` respetado globalmente** en `app.css`: toda animación/transición baja a 120 ms; el onboarding desactiva GSAP por completo si el usuario lo pide.
+5. Sin animación "porque se ve bonita". El único uso de GSAP es la entrada escalonada del onboarding.
 
 ---
 
@@ -308,38 +333,112 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 - **Tamaños:** 18 px sidebar, 16 px controles, 11–12 px dentro de botones pequeños, 20–22 px en dialogs.
 - **Color:** hereda `currentColor`; reposo `--text-2`/`--text-3` → hover `--text-1` o `--primary`.
 - **Categorías:** iconos Lucide-style (graduation-cap, briefcase, user, heart-pulse, wallet, sparkles).
-- Prohibido: iconos rellenos, con gradiente, o animados (salvo el check dibujado del checkbox).
+- **Botones de icono:** circulares de 40 px (`border-radius: 50%`) con `--btn-shadow`; en la sidebar en modo iconos son el único elemento visible del nav y llevan `title` + `aria-label`.
+- Prohibido: iconos rellenos, con gradiente, o animados (salvo el check del checkbox).
 
 ---
 
-## 9. Patrones repetidos (deuda visual y consistencia)
+## 9. Layout, scroll y ventanas
 
-### 9.1 Lo que se repite de forma consistente
-- Botón primario: `background: var(--primary); color: #fff; border-radius: 12px;` (definido ~5 veces pero con el mismo aspecto).
-- Chip de categoría: `color-mix(in srgb, var(--c) 60%, var(--text-1))` sobre `color-mix(in srgb, var(--c) 13%, var(--surface))`, `--r-full`.
-- Input inset: `background: var(--surface-3); box-shadow: var(--shadow-inset-sm); border-radius: 10–12px;` + focus con anillo `--primary-soft-2`.
-- Cards: `--surface` + `--shadow-raised` + `--r-lg`.
-- Hover universal: translateY(-1px) + sombra un nivel arriba, 150 ms.
+### 9.1 Estructura
 
-### 9.2 Inconsistencias detectadas (deuda visual — registrar, no "arreglar" sin plan)
-1. **Radios de botón inconsistentes:** el núcleo diario ya usa tokens (`--r-sm` en TaskDrawer, `--r-md` en QuickAdd), pero quedan literales en Suggestions, Settings, ContextualToast y los pills de Onboarding (fase 2).
-2. **`.btn` duplicado con variantes locales:** cada componente redefine su `.btn` (Suggestions, Settings, TaskDrawer, ContextualToast, PlanProposal) con diferencias sutiles (padding 8/16 vs 9/14 vs 7/12). No existe un `Button.svelte` global — el componente está **propuesto**.
-3. **Foco:** `:focus-visible` global define outline 2 px `--primary-soft-2`, pero TaskDrawer y Settings usan `box-shadow: 0 0 0 3px var(--primary-soft)` en inputs — dos idiomas de foco.
-4. **Overlines:** la mayoría usa `text-transform: uppercase` + `letter-spacing 0.06–0.1em`, pero algunas etiquetas (día del popup, título del drawer) usan `text-transform: capitalize` — mezcla de convenciones.
-5. ~~Sombras de drawer vs modal~~ **resuelto:** el drawer y su diálogo de borrado usan ya `--e3`, la misma elevación que los modales.
-6. **Drag toast vs toast contextual:** dos sistemas de toast distintos (`.drag-toast` en Calendar, `.toast` en ContextualToast, `.toast` en QuickAdd) con estilos diferentes.
-7. **`.ghost` (sin fondo)** y **`.danger`** como variantes de botón solo existen en algunos componentes.
+```
+.app (100vh, column)
+└── .body (row, flex: 1)
+    ├── Sidebar            (panel con margen)
+    └── main.content       ← único scroller
+        └── .content-inner (columna centrada, max-width)
+            ├── TopBar
+            └── vista
+```
+
+- **Scroll unificado (D9):** scrollea la columna de contenido **entera**; la TopBar sube con el contenido y nada pasa "por debajo" de una barra. Antes cada vista tenía su propio scroller con `padding-top: 0` y el contenido se cortaba en una línea invisible. Excepción: la conversación del Asistente conserva su scroll interno con el input fijo abajo y un fundido superior de 24 px.
+- **Reset al cambiar de vista:** un `$effect` sobre `view` y `hmode` pone `scrollTop = 0` en `.content`. Sin él, el desplazamiento de la vista anterior se heredaba al cambiar de vista o de submodo (horario/sesiones). Las flechas de fecha dentro de la misma vista no lo tocan.
+- **Anchos máximos (D10):** contenido ≤ **1680 px** centrado; vistas de lectura (Ajustes, Sugerencias, Asistente) ≤ **880 px** centradas (`class:reading`). Sin scrollbars horizontales a 960, 1440 y 2560 px.
+
+### 9.2 Calendario que llena el alto
+
+- La cadena flex se propaga con `.cal-wrap { flex: 1 0 auto; min-height: 0 }` y `.view-fill`, para que el wrapper de la transición `{#key}` no la rompa.
+- La grilla del mes usa `grid-template-rows: repeat(6, minmax(80px, 1fr))` + `flex: 1`: las filas **se estiran** para llenar la tarjeta (a 2560×1440 `.cal` medía 605 px y dejaba ~170 px vacíos) y, si la ventana no alcanza, el overflow cae en `.content` junto con la TopBar.
+- **Orden de apilado en semana/día** (`z-index`), para que nada tape lo que importa:
+
+  | z | Elemento | Razón |
+  |---|----------|-------|
+  | **0** | `.evt.study` (sesión de estudio) | Cede: las tareas van siempre por delante |
+  | **1** | `.evt.done` (completada) | Hundida y gris, pero por encima de la sesión |
+  | **2** | `.evt` pendiente y `.class-strip` | La franja de clase comparte escala con los bloques |
+  | **4** | `.evt:hover` / `.evt.done:hover` / `.evt.study:hover` | El hover sube al frente sin cambiar el orden base |
+  | **5** | `.evt.dragging` (fantasma del arrastre) y `.now-line` | Lo transitorio va por encima de todo lo estático |
+
+  Sin esa escala, las sesiones de estudio tapaban las tareas al solaparse. Al completar, el bloque pasa a `z-index: 1` (gana a la sesión) y al hacer hover sube a `4` para poder registrarse encima.
+- **`ResizeObserver` del calendario:** mide en `requestAnimationFrame` y **solo asigna `timeAreaH` si el valor cambió**, cancelando el frame en el cleanup. La asignación síncrona encadenaba otra medida y disparaba el aviso `ResizeObserver loop completed with undelivered notifications`; `App.svelte` además lo filtra del manejador de errores fatales (`console.debug`), porque es benigno.
+
+### 9.3 Barra lateral
+
+- **Panel:** margen `--s-4` a izquierda/alto/bajo, `--r-card`, `--shadow-raised`, `var(--surface)`. Ancho 232 px. Su zona scrolleable (`.side-scroll`) lleva fundido de 16 px arriba y abajo con `mask-image` y padding extra inferior (`--s-5`) para que el último elemento no toque el borde redondeado.
+- **Modo iconos (D11/D12):** automático por debajo de **1200 px** de ancho (`matchMedia("(max-width: 1199px)")`); botón manual que guarda la preferencia en `localStorage` (`ff.sidebar` → `auto | collapsed | expanded`) y **vuelve a `auto`** cuando la elección coincide con la automática. En modo iconos (72 px, padding incluido): tooltips + `aria-label` en cada icono, contador de Sugerencias como badge sobre su icono, botones de añadir circulares, botón de tema y de expandir circulares, y se ocultan categorías y caja de "hoy".
+- La caja de "hoy" es un **pozo** (`--surface-2` + `--shadow-inset-sm`).
+
+### 9.4 Barras de scroll: ocultas, con el scroll intacto
+
+**No se dibujan, pero se desplazan.** El riel visible rompía la superficie continua del neumorfismo (y en oscuro quedaba más marcado aún), así que `app.css` las oculta de forma global:
+
+```css
+*                    { scrollbar-width: none; }   /* Firefox */
+*::-webkit-scrollbar  { width: 0; height: 0; display: none; }  /* Chromium/WebKit */
+*::-webkit-scrollbar-corner { display: none; }
+```
+
+- **Solo es pintura:** el `overflow` de cada scroller no cambia, así que **rueda, trackpad, teclado (espacio, Inicio/Fin, RePág/AvPág), arrastre de scrollbar y gestos táctiles siguen funcionando**. `scrollbar-width: none` no desactiva el scroll; solo evita que se dibuje la barra.
+- **La posición en la lista se comunica con los fundidos:** al no haber riel, el contenido desplazable se señala con las máscaras de `mask-image` de **16 px** en `.side-scroll` (sidebar) y en el body del `TaskDrawer`, y de **24 px** arriba en el `.body` del Asistente. Son la única pista de que hay más contenido, así que **no se quitan**.
+- Ámbito: `*`, así que el widget (`.body` con `overflow-y: auto` y `max-height: 320px`) y los popups heredan el comportamiento sin código propio.
+
+### 9.5 Ventana
+
+- **Mínimo 960×640** (`tauri.conf.json`), antes 800×600: a 1024×640 la sidebar de 232 px se comía un cuarto del ancho, "Añadir sesión de estudio" partía en dos líneas y los 7 días quedan de ~90 px.
 
 ---
 
-## 10. Checklist de identidad (aplicar siempre)
+## 10. Patrones repetidos
 
-1. ¿Un solo azul de acción visible? ¿Semánticos solo para estados?
+### 10.1 Lo que se repite de forma consistente
+
+- **Botón primario:** `--grad-accent` + `--btn-primary-shadow` + `#fff`, `--r-control`; hover `filter: brightness(1.05)`; active `--btn-shadow-active`.
+- **Botón secundario/pill:** `--surface` + `--btn-shadow` en `--r-control`; hover `--btn-shadow-hover`; active hundido.
+- **Botón de icono:** 40 px con `--r-icon` y `--btn-shadow` (círculo en forma redondeada).
+- **Botón peligroso:** texto `--danger` sobre la superficie en relieve (dejó de pintarse en rojo sólido).
+- **Chip de categoría:** texto `color-mix(var(--c) 60%, var(--text-1))` sobre `color-mix(var(--c) 13%, var(--surface))`, `--r-chip` y relieve mínimo de 2 px.
+- **Input:** `--input-bg` + `--input-shadow` + `--input-border` en `--r-control` (los textarea en `--r-card`); el foco **solo cambia el borde** a `--primary` y el anillo lo da el `:focus-visible` global.
+- **Interruptor:** riel 40×22 **siempre en `--r-full`** (es píldora en ambos estilos) con knob circular elevado (`--btn-shadow`); activo con `--grad-accent`.
+- **Tarjetas:** `--surface` + `--r-card` + `--shadow-raised`; calendario, modales y TaskDrawer usan `--shadow-raised-lg`.
+
+### 10.2 Deuda visual (registrar, no "arreglar" sin plan)
+
+1. **`.btn` duplicado con variantes locales:** cada componente redefine su `.btn` (padding 8/16 vs 9/14 vs 7/12). No existe un `Button.svelte` global — **propuesto**. Los tokens ya convergen el aspecto.
+2. **Drag toast vs toast contextual:** tres sistemas de toast distintos (`.drag-toast` en Calendar, `.toast` en ContextualToast, `.toast` en QuickAdd).
+3. **`.ghost` (sin fondo)** y **`.danger`** como variantes solo en algunos componentes.
+4. **Widget con relieve a propósito:** conserva `--shadow-raised` (no elevación) porque es la tarjeta de su propia ventana sobre el escritorio, no una capa sobre un overlay; además lleva `margin: var(--s-4)` para que la sombra no se recorte contra el borde.
+
+### 10.3 Resuelto en el spec 19
+
+- **Foco:** `TaskDrawer` ya no usa anillo propio; todo el repo usa el `:focus-visible` global.
+- **Superficie = fondo:** ya no hay superficies blancas.
+- **Radios literales:** todo sale de los tokens de forma `--r-*` (o `50%` en los círculos de §6.2).
+- **Pesos:** 700 solo en título de pantalla y hero.
+- **Barras de scroll:** ocultas globalmente sin tocar el `overflow` (§9.4).
+
+---
+
+## 11. Checklist de identidad (aplicar siempre)
+
+1. ¿Un solo acento, y solo degradado donde hay acción o estado activo?
 2. ¿La luz viene de arriba-izquierda en TODAS las superficies?
-3. ¿Espacio plano + profundidad sutil, sin saturar de relieves?
-4. ¿Controles con UNA sombra y contenedores con relieve doble?
-5. ¿Radios ≥ 10 px, sin esquinas rectas, sin pills abusivos?
-6. ¿Números tabulares, overlines uppercase con tracking?
-7. ¿Animaciones 120–250 ms, solo transform/opacity, con reduced-motion?
-8. ¿Dark mode = misma identidad con luz apagada (no inversión)?
-9. ¿El estado nunca depende solo del color?
+3. ¿Superficie = fondo (nunca blanco sobre blanco)?
+4. ¿Hover = un nivel más de relieve y press = hundido?
+5. ¿El radio sale del token de forma (`--r-control`, `--r-chip`, `--r-card`, `--r-well`, `--r-icon`, `--r-check`), nunca de un literal?
+6. ¿Contenido denso con relieve mínimo de 2 px?
+7. ¿Overlay claro desenfocado bajo los modales (nunca halo)?
+8. ¿Números tabulares, overlines uppercase con tracking?
+9. ¿Animaciones 120–250 ms con reduced-motion respetado?
+10. ¿Dark = misma identidad con luz apagada (no inversión)?
+11. ¿El estado nunca depende solo del color?

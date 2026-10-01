@@ -111,7 +111,7 @@
     {#if tall && isStudy && study!.notes}
       <span class="evt-desc">{study!.notes}</span>
     {/if}
-    {#if !tall && !isStudy && task.priority === "alta"}
+    {#if !tall && height >= 50 && !isStudy && task.priority === "alta"}
       <span class="evt-title" aria-hidden="true">
         <span class="prio-bar"></span>
       </span>
@@ -166,8 +166,10 @@
     flex-direction: column;
     gap: var(--s-0_5);
     overflow: hidden;
-    z-index: 1;
-    box-shadow: var(--shadow-inset-sm);
+    /* Orden de apilado: sesión 0 · completada 1 · pendiente 2 · hover 4 */
+    z-index: 2;
+    /* pendientes: relieve mínimo elevado sobre el tinte de categoría */
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     transition:
       transform var(--dur-fast) var(--ease-out),
       box-shadow var(--dur-fast) var(--ease-out),
@@ -181,11 +183,20 @@
   }
   .evt:hover {
     transform: translateY(-1px) scale(1.01);
-    box-shadow: var(--e1);
-    z-index: 3;
+    box-shadow: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
+    z-index: 4;
   }
   .evt:active {
     cursor: grabbing;
+  }
+  /* Sesión de estudio: por debajo de las tareas */
+  .evt.study {
+    z-index: 0;
+  }
+  /* El hover de la sesión NO sube z-index: si lo hiciera taparía la tarea
+     que la solapa (el efecto visual de hover se mantiene en .evt:hover). */
+  .evt.study:hover {
+    z-index: 0;
   }
   .evt.overdue {
     border-left-style: dashed;
@@ -200,19 +211,20 @@
   .evt.fin {
     background: color-mix(in srgb, var(--c) 18%, var(--surface));
   }
-  /* Completada: hundida gris, sin hover-lift, por debajo de las pendientes.
-     Va DESPUÉS de .inicio/.fin (misma especificidad): el gris debe ganar. */
+  /* Completada: hundida gris, sin hover-lift, por debajo de las pendientes
+     (pero por encima de las sesiones). Va DESPUÉS de .inicio/.fin (misma
+     especificidad): el gris debe ganar. */
   .evt.done {
     background: var(--surface-2);
     border-left-color: var(--text-3);
     box-shadow: var(--shadow-inset);
-    z-index: 0;
+    z-index: 1;
     cursor: pointer;
   }
   .evt.done:hover {
     transform: none;
     box-shadow: var(--shadow-inset);
-    z-index: 0;
+    z-index: 4;
   }
   .evt.done:active {
     cursor: pointer;
@@ -248,7 +260,7 @@
     place-items: center;
     width: 13px;
     height: 13px;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-icon);
     background: color-mix(in srgb, var(--c) 20%, transparent);
     color: var(--c);
     flex-shrink: 0;
@@ -298,7 +310,7 @@
     display: inline-block;
     width: 100%;
     height: 2px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: var(--danger);
   }
   .evt-inline {
@@ -374,7 +386,7 @@
     transform: translateX(-50%);
     width: 28px;
     height: 3px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: color-mix(in srgb, var(--c) 70%, var(--text-1));
     box-shadow: var(--shadow-inset-sm);
   }

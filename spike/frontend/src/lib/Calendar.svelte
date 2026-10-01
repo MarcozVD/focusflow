@@ -14,6 +14,7 @@
     type Task,
   } from "./data.svelte";
   import { classConflictsIn, DAY_MS } from "./classLogic";
+  import { capitalizeFirst } from "./dateUtils";
   import EventBlock from "./EventBlock.svelte";
   import {
     sameDay,
@@ -145,12 +146,22 @@
   $effect(() => {
     const el = dayEls[0];
     if (!el) return;
+    // rAF + solo asignar si cambió: evita el "ResizeObserver loop" al
+    // redimensionar (la asignación síncrona encadenaba otra medida).
+    let raf = 0;
     const ro = new ResizeObserver(() => {
-      timeAreaH = el.clientHeight;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const h = el.clientHeight;
+        if (h !== timeAreaH) timeAreaH = h;
+      });
     });
     ro.observe(el);
     timeAreaH = el.clientHeight;
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   });
 
   /**
@@ -653,7 +664,7 @@
     {#if popupDay}
         <div class="day-popup">
         <div class="pop-head">
-          <strong>{popupDay.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</strong>
+          <strong>{capitalizeFirst(popupDay.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" }))}</strong>
           <button class="pop-close" onclick={() => (popupDay = null)} aria-label="Cerrar">✕</button>
         </div>
         <div class="pop-list">
@@ -812,8 +823,8 @@
 <style>
   .cal {
     background: var(--surface);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-raised);
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow-raised-lg);
     overflow: hidden;
     min-width: 0;
     display: flex;
@@ -839,11 +850,13 @@
     flex-shrink: 0;
   }
   .month-grid {
-    /* 6 filas de altura FIJA: todos los meses se ven idénticos, con o sin
-       tareas. Si la ventana no alcanza, el scroll aparece en .cal-wrap. */
+    /* 6 filas de altura flexible (mínimo 80px por celda): llenan el alto de
+       la tarjeta si sobra y, si la ventana no alcanza, scrollea .content
+       junto con la TopBar. */
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    grid-template-rows: repeat(6, 80px);
+    grid-template-rows: repeat(6, minmax(80px, 1fr));
+    flex: 1;
     min-height: 0;
     /* contenedor: un escalón por encima del gap base (aire) */
     gap: var(--s-2);
@@ -852,7 +865,8 @@
   .cell {
     background: var(--surface-2);
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
+    box-shadow: var(--shadow-inset-sm);
     padding: var(--s-1) var(--s-1);
     text-align: left;
     display: flex;
@@ -865,13 +879,15 @@
   }
   .cell:hover {
     transform: translateY(-1px);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-inset-sm);
   }
   .cell.outside {
     opacity: 0.4;
   }
   .cell.today {
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
+    /* anillo de acento, sin relleno duro */
+    outline: 1.5px solid var(--primary);
+    outline-offset: -1.5px;
   }
   .daynum {
     font-size: var(--fs-xs);
@@ -882,12 +898,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     flex-shrink: 0;
   }
   .cell.today .daynum {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--glow-accent);
   }
   .chips {
     display: flex;
@@ -903,8 +920,9 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border: none;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-chip);
     padding: 1px var(--s-1_5);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -925,7 +943,7 @@
     color: var(--primary);
     background: var(--primary-soft);
     border: none;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: 1px var(--s-2);
     flex-shrink: 0;
     cursor: pointer;
@@ -946,7 +964,7 @@
     width: min(380px, calc(100% - 48px));
     max-height: 70%;
     background: var(--surface);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     box-shadow: var(--e3);
     border: 1px solid var(--border);
     /* contenedor: padding y gaps un escalón por encima (aire) */
@@ -962,7 +980,6 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--s-4);
-    text-transform: capitalize;
   }
   .pop-close {
     width: 30px;
@@ -970,7 +987,7 @@
     border: none;
     background: var(--surface-2);
     color: var(--text-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-icon);
     font-size: var(--fs-base);
     transition: all var(--dur-fast) var(--ease-out);
     flex-shrink: 0;
@@ -1017,7 +1034,8 @@
     align-items: center;
     gap: var(--s-2);
     background: var(--surface-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     border: none;
@@ -1026,10 +1044,13 @@
     color: inherit;
     text-align: left;
     cursor: pointer;
-    transition: background var(--dur-fast) var(--ease-out);
+    transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .pop-item:hover {
     background: var(--surface-3);
+  }
+  .pop-list .chip-wrap.done .pop-item {
+    box-shadow: var(--shadow-inset-sm);
   }
   .pop-dot {
     width: 8px;
@@ -1066,7 +1087,7 @@
     border: none;
     background: var(--primary);
     color: #fff;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
     padding: var(--s-2);
     font-size: var(--fs-base);
     font-weight: 600;
@@ -1091,7 +1112,7 @@
     flex: 1;
     border: none;
     background: transparent;
-    border-radius: var(--r-md);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
@@ -1104,7 +1125,8 @@
     background: var(--surface-2);
   }
   .day-head.today .num {
-    background: var(--primary);
+    background: var(--grad-accent);
+    box-shadow: var(--glow-accent);
     color: #fff;
   }
   .dow {
@@ -1123,7 +1145,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-icon);
     color: var(--text-1);
   }
 
@@ -1170,19 +1192,23 @@
   .day-col {
     flex: 1;
     position: relative;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     min-width: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
   .day-col.today {
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
+    /* resaltado sutil dentro del pozo, sin líneas duras */
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
   .time-area {
     position: relative;
     flex: 1;
     min-height: 0;
+    /* cuadrícula hundida (pozo) */
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
   }
   .allday-row {
     display: flex;
@@ -1191,8 +1217,9 @@
     padding: var(--s-1) var(--s-1);
     min-height: 30px;
     border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface-2) 55%, transparent);
-    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    background: var(--surface-2);
+    box-shadow: var(--shadow-inset-sm);
+    border-radius: var(--r-well) var(--r-well) 0 0;
     flex-shrink: 0;
     overflow: hidden;
   }
@@ -1215,8 +1242,9 @@
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 14%, var(--surface));
     border: none;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-chip);
     padding: var(--s-0_5) var(--s-2);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1320,8 +1348,9 @@
     right: 2px;
     height: 2px;
     background: var(--primary);
-    border-radius: var(--r-full);
-    z-index: 2;
+    border-radius: var(--r-chip);
+    /* por encima de bloques (2) y del hover (4) */
+    z-index: 5;
     pointer-events: none;
   }
   /* Regla 8: franja tenue de clase bajo las tareas (día/semana) */
@@ -1331,7 +1360,7 @@
     right: 2px;
     background: var(--primary-soft);
     border-left: 2px solid var(--primary);
-    border-radius: var(--r-xs);
+    border-radius: var(--r-well);
     z-index: 0;
     pointer-events: none;
     overflow: hidden;
@@ -1367,7 +1396,8 @@
     flex-direction: column;
     gap: 1px;
     overflow: hidden;
-    z-index: 1;
+    /* misma escala de apilado que EventBlock (fantasma: 5) */
+    z-index: 2;
     box-shadow: var(--shadow-inset-sm);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     min-width: 0;
@@ -1377,7 +1407,7 @@
   .evt:hover {
     transform: translateY(-1px) scale(1.01);
     box-shadow: var(--e1);
-    z-index: 3;
+    z-index: 4;
   }
   .evt.overdue {
     border-left-style: dashed;
@@ -1387,7 +1417,8 @@
     pointer-events: none;
     opacity: 0.55;
     border-left-style: dashed;
-    z-index: 4;
+    /* el fantasma del arrastre va por encima de todo lo del día */
+    z-index: 5;
     transition: none;
     will-change: top, height;
   }
@@ -1399,7 +1430,7 @@
     background: var(--danger);
     color: #fff;
     padding: var(--s-2) var(--s-4);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-card);
     font-size: var(--fs-base);
     font-weight: 600;
     box-shadow: var(--e2);
@@ -1446,17 +1477,18 @@
     left: 6px;
     right: 6px;
     border: none;
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--text-2);
     font-size: var(--fs-2xs);
     font-weight: 600;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-chip);
+    box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     padding: var(--s-1) 0;
     z-index: 4;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .more-evts:hover {
     color: var(--primary);
-    background: var(--primary-soft);
+    box-shadow: var(--btn-shadow-hover);
   }
 </style>

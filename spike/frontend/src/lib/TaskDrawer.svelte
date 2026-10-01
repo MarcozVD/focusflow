@@ -276,22 +276,25 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 18, 24, 0.32);
-    backdrop-filter: blur(2px);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     z-index: 90;
   }
+  /* Panel flotante separado de los bordes de la ventana */
   .drawer {
     position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(400px, 100vw);
+    top: var(--s-4);
+    right: var(--s-4);
+    bottom: var(--s-4);
+    width: min(400px, calc(100vw - 2 * var(--s-4)));
     background: var(--surface);
-    box-shadow: var(--e3);
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow-raised-lg);
     z-index: 95;
     display: flex;
     flex-direction: column;
-    border-left: 1px solid var(--border);
+    overflow: hidden;
   }
   .head {
     display: flex;
@@ -321,15 +324,19 @@
     width: 32px;
     height: 32px;
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-icon);
+    box-shadow: var(--btn-shadow);
     font-size: var(--fs-base);
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .x:hover {
     color: var(--danger);
-    background: var(--danger-bg);
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .x:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .body {
     flex: 1;
@@ -339,6 +346,21 @@
     /* contenedor: gap entre campos y padding un escalón por encima (aire) */
     gap: var(--s-4);
     padding: var(--s-5) var(--s-6);
+    /* fundido arriba/abajo de la zona scrolleable (16px) */
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
   }
   label {
     display: flex;
@@ -362,36 +384,72 @@
     cursor: pointer;
     padding: var(--s-0_5) 0;
   }
-  label.check input {
-    width: auto;
+  /* Checkbox 'Todo el día' → interruptor visual (misma lógica y accesible) */
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+    margin: 0;
+    border: var(--input-border);
+   /* El riel del interruptor es píldora en ambos estilos */
+    border-radius: var(--r-full);
+    background: var(--surface);
+    box-shadow: var(--shadow-inset-sm);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
+  input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  input[type="checkbox"]:checked {
+    background: var(--grad-accent);
+    border-color: transparent;
+  }
+  input[type="checkbox"]:checked::before {
+    transform: translateX(18px);
   }
   input:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
-  input,
+  input:not([type="checkbox"]),
   select,
   textarea {
-    border: 1px solid var(--border);
-    background: var(--surface-3);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
     width: 100%;
     text-transform: none;
     letter-spacing: normal;
     font-weight: 400;
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
-  input:focus,
+  /* El foco usa el :focus-visible global (outline); sin anillo propio que
+     choque con el inset del campo (pendiente de DESIGN.md). */
+  input:not([type="checkbox"]):focus,
   select:focus,
   textarea:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px var(--primary-soft);
   }
   textarea {
+    border-radius: var(--r-card);
     resize: vertical;
     font-weight: 400;
     text-transform: none;
@@ -422,26 +480,32 @@
   }
   .btn {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     font-weight: 600;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
     flex: 1;
   }
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--e1);
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .btn:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
+  }
+  .btn.primary:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.ghost {
-    background: transparent;
-    border: 1px solid var(--border);
+    background: var(--surface);
   }
   .btn.danger {
     color: var(--danger);
@@ -453,8 +517,9 @@
   .dlg-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 18, 24, 0.4);
-    backdrop-filter: blur(3px);
+    background: var(--overlay);
+    -webkit-backdrop-filter: blur(var(--overlay-blur));
+    backdrop-filter: blur(var(--overlay-blur));
     z-index: 120;
     display: flex;
     align-items: center;
@@ -464,8 +529,8 @@
   .dlg {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    box-shadow: var(--e3);
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow-raised-lg);
     padding: var(--s-6);
     width: min(320px, 100%);
     text-align: center;

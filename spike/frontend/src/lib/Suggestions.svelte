@@ -159,12 +159,9 @@
 
 <div class="sug">
   <div class="head">
-    <div class="head-left">
-      <h2>Eventos detectados</h2>
-      <p class="hint">
-        Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.
-      </p>
-    </div>
+    <p class="hint">
+      Eventos extraídos de tus correos por la IA. Revisa antes de añadirlos al calendario.
+    </p>
     <button class="btn check-now" onclick={syncNow} disabled={syncRunning()}>
       {syncRunning() ? "Comprobando…" : "Comprobar correo ahora"}
     </button>
@@ -301,32 +298,25 @@
 <style>
   .action-err {
     margin: 0;
-    padding: 8px 12px;
-    border-radius: var(--r-md, 8px);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-well);
     background: color-mix(in srgb, #ef4444 12%, transparent);
     color: #b91c1c;
-    font-size: 13px;
+    font-size: var(--fs-base);
   }
   .sug {
-    max-width: 760px;
     display: flex;
     flex-direction: column;
     gap: var(--s-4);
     padding-bottom: var(--s-8);
   }
-  .head h2 {
-    font-size: 20px;
-    margin: 0 0 4px;
-  }
   .head {
     display: flex;
-    align-items: flex-start;
+    /* sin h2 encima: subtítulo y botón comparten fila → centrados */
+    align-items: center;
     justify-content: space-between;
     gap: var(--s-4);
     flex-wrap: wrap;
-  }
-  .head-left {
-    min-width: 0;
   }
   .check-now {
     flex-shrink: 0;
@@ -334,12 +324,12 @@
   .hint,
   .sub {
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-base);
     margin: 0;
   }
   .empty {
     background: var(--surface-2);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     padding: var(--s-8);
     text-align: center;
   }
@@ -348,12 +338,13 @@
   }
   .card {
     background: var(--surface);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
-    padding: var(--s-5);
+    /* tarjeta de sugerencia: padding y gap entre filas un escalón más (aire) */
+    padding: var(--s-6);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--s-3);
   }
   .card.edit {
     box-shadow: var(--shadow-raised), inset 0 0 0 2px var(--primary-soft-2);
@@ -362,28 +353,30 @@
   .top {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 12px;
+    gap: var(--s-2);
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .status {
-    font-weight: 700;
-    font-size: 11px;
-    padding: 3px 10px;
-    border-radius: var(--r-full);
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    padding: var(--s-1) var(--s-2);
     background: var(--surface-3);
     color: var(--text-2);
+    border-radius: var(--r-chip);
+    box-shadow: var(--shadow-raised-sm);
   }
   .kind {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-weight: 700;
-    font-size: 11px;
-    padding: 3px 10px;
-    border-radius: var(--r-full);
+    gap: var(--s-1_5);
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-chip);
     background: var(--primary-soft);
     color: var(--primary);
+    box-shadow: var(--shadow-raised-sm);
   }
   .kind .kdot {
     width: 7px;
@@ -416,37 +409,36 @@
   .settled-row {
     align-items: center;
     background: var(--surface-2);
-    border-radius: 12px;
-    padding: 8px 10px;
-    margin-top: 2px;
+    border-radius: var(--r-well);
+    padding: var(--s-2) var(--s-2);
+    margin-top: var(--s-0_5);
   }
   .settled-note {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .spacer {
     flex: 1;
   }
   .btn.ghost {
-    background: transparent;
-    box-shadow: none;
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
     border: none;
   }
   .btn.ghost:hover {
-    background: var(--surface-2);
-    transform: none;
+    box-shadow: var(--btn-shadow-hover);
   }
   .conf {
     margin-left: auto;
   }
   h3 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
   .desc,
   .reason {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-base);
     color: var(--text-2);
   }
   .reason {
@@ -455,8 +447,8 @@
   .meta {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 12.5px;
+    gap: var(--s-2);
+    font-size: var(--fs-sm);
     color: var(--text-2);
     flex-wrap: wrap;
   }
@@ -464,8 +456,9 @@
     font-weight: 600;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
-    border-radius: var(--r-full);
-    padding: 3px 10px;
+    border-radius: var(--r-chip);
+    padding: var(--s-1) var(--s-2);
+    box-shadow: var(--shadow-raised-sm);
   }
   .prio {
     color: var(--danger);
@@ -480,44 +473,43 @@
   }
   .dupe {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--warning);
   }
   .row {
     display: flex;
-    gap: 8px;
+    gap: var(--s-2);
     flex-wrap: wrap;
-    margin-top: 4px;
+    margin-top: var(--s-1);
   }
   .btn {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: 12px;
-    padding: 8px 16px;
-    font-size: 13px;
+    border-radius: var(--r-control);
+    box-shadow: var(--btn-shadow);
+    padding: var(--s-2) var(--s-4);
+    font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
-  .btn.primary:hover {
-    background: var(--primary-hover);
+  .btn.primary:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.danger {
     color: var(--danger);
-  }
-  .btn.danger:hover {
-    background: var(--danger-bg);
   }
   .btn:disabled {
     opacity: 0.5;
@@ -525,19 +517,18 @@
   }
   .t {
     width: 100%;
-    border: none;
-    background: var(--surface-3);
-    box-shadow: var(--shadow-inset-sm);
-    border-radius: 12px;
-    padding: 10px 14px;
-    font-size: 14px;
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-control);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-md);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    transition: box-shadow var(--dur-fast) var(--ease-out);
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
   .t:focus {
-    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
+    border-color: var(--primary);
   }
   textarea {
     resize: vertical;
@@ -546,35 +537,34 @@
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 10px;
+    gap: var(--s-2);
   }
   .grid label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
+    gap: var(--s-1);
+    font-size: var(--fs-sm);
     color: var(--text-3);
     font-weight: 600;
   }
   .grid input,
   .grid select {
-    border: none;
-    background: var(--surface-3);
-    box-shadow: var(--shadow-inset-sm);
-    border-radius: 10px;
-    padding: 8px 10px;
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-control);
+    padding: var(--s-2) var(--s-2);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    transition: box-shadow var(--dur-fast) var(--ease-out);
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
   .grid input:focus,
   .grid select:focus {
-    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
+    border-color: var(--primary);
   }
   .mt {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-base);
     color: var(--text-2);
   }
 </style>

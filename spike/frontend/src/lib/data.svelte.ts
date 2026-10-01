@@ -225,6 +225,8 @@ const store = $state({
   nextSyncAt: null as number | null,
   theme: "" as "" | "light" | "dark",
   accent: "#2563EB",
+  // Forma de los componentes: 'soft' = rectangular suave, 'round' = redondeado.
+  shape: "soft" as "soft" | "round",
   planProposal: null as PlanProposalView | null,
   // Resultado persistente por propuesta de plan: sobrevive al re-montaje de
   // pestañas. El Asistente lo lee para no volver a mostrar los botones de
@@ -276,6 +278,7 @@ export const lastSyncAt = () => store.lastSyncAt;
 export const nextSyncAt = () => store.nextSyncAt;
 export const uiTheme = () => store.theme;
 export const uiAccent = () => store.accent;
+export const uiShape = () => store.shape;
 export const planProposal = () => store.planProposal;
 /** Resultado persistente de una propuesta de plan (aceptada/rechazada/error). */
 export const planResult = (id: number) => store.planResults[id];
@@ -1252,6 +1255,7 @@ export async function completeTask(id: number): Promise<boolean | null> {
 let listenersReady = false;
 
 export async function init() {
+  initUiPrefsSync();
   await initTasks();
   if (!inTauri()) return;
   if (listenersReady) return;
@@ -1975,8 +1979,17 @@ export interface UiPrefs {
   accent: string;
 }
 
-/** Aplica tema + acento al documento y los guarda en localStorage (puente entre ventanas). */
-export function applyUiPrefs(p: { theme?: string; accent?: string }) {
+/** Forma de los componentes: aplica/retira `data-shape` (soft = por defecto). */
+function applyShape(shape: unknown) {
+  if (shape !== "soft" && shape !== "round") return;
+  if (shape === "round") document.documentElement.dataset.shape = "round";
+  else delete document.documentElement.dataset.shape;
+  store.shape = shape;
+}
+
+/** Aplica tema + acento + forma al documento y los guarda en localStorage
+ *  (puente entre ventanas). La forma no viaja al backend. */
+export function applyUiPrefs(p: { theme?: string; accent?: string; shape?: string }) {
   if (p.theme === "dark" || p.theme === "light") {
     document.documentElement.dataset.theme = p.theme;
     store.theme = p.theme;
@@ -1985,12 +1998,14 @@ export function applyUiPrefs(p: { theme?: string; accent?: string }) {
     document.documentElement.style.setProperty("--accent", p.accent);
     store.accent = p.accent;
   }
+  applyShape(p.shape);
   try {
     localStorage.setItem(
       "ff-ui",
       JSON.stringify({
         theme: p.theme ?? (store.theme || "light"),
         accent: p.accent ?? store.accent,
+        shape: p.shape ?? store.shape,
       }),
     );
   } catch {
@@ -1998,8 +2013,31 @@ export function applyUiPrefs(p: { theme?: string; accent?: string }) {
   }
 }
 
-/** Carga prefs persistidas (backend como fuente de verdad; localStorage como fast path). */
+let uiSyncReady = false;
+/** Sincroniza la forma (y el resto del ff-ui) cuando otra ventana la cambia. */
+export function initUiPrefsSync() {
+  if (uiSyncReady || typeof window === "undefined") return;
+  uiSyncReady = true;
+  window.addEventListener("storage", (e) => {
+    if (e.key !== "ff-ui") return;
+    try {
+      applyUiPrefs(JSON.parse(e.newValue || "{}"));
+    } catch {
+      // ignorar valores corruptos
+    }
+  });
+}
+
+/** Carga prefs persistidas (backend como fuente de verdad de tema/acento;
+ *  localStorage como fast path y única fuente de la forma). */
 export async function loadUiPrefs() {
+  // Fast path local: aplica la forma (el backend no la guarda)
+  try {
+    const raw = localStorage.getItem("ff-ui");
+    if (raw) applyUiPrefs(JSON.parse(raw));
+  } catch {
+    // ignorar
+  }
   if (inTauri()) {
     try {
       const v = await invoke<{ theme: string; accent: string }>("ui_prefs_get");
@@ -2009,22 +2047,15 @@ export async function loadUiPrefs() {
       console.error("loadUiPrefs", e);
     }
   }
-  try {
-    const raw = localStorage.getItem("ff-ui");
-    if (raw) {
-      const p = JSON.parse(raw);
-      applyUiPrefs(p);
-    }
-  } catch {
-    // ignorar
-  }
 }
 
-/** Persiste tema/acento en backend y lo difunde a todas las ventanas (widget incluido). */
-export async function setUiPrefs(p: { theme?: string; accent?: string }) {
+/** Persiste tema/acento en backend y lo difunde a todas las ventanas (widget
+ *  incluido). La forma se guarda solo en localStorage. */
+export async function setUiPrefs(p: { theme?: string; accent?: string; shape?: "soft" | "round" }) {
   const theme = p.theme ?? store.theme;
   const accent = p.accent ?? store.accent;
-  applyUiPrefs({ theme, accent });
+  const shape = p.shape ?? store.shape;
+  applyUiPrefs({ theme, accent, shape });
   if (!inTauri()) return;
   try {
     await invoke("ui_prefs_set", { theme, accent });
@@ -2051,6 +2082,7 @@ export function applySavedTheme(): "" | "light" | "dark" {
         document.documentElement.style.setProperty("--accent", p.accent);
         store.accent = p.accent;
       }
+      applyShape(p.shape);
     }
   } catch {
     // ignorar

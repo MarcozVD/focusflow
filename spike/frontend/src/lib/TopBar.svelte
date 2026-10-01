@@ -1,5 +1,6 @@
 <script lang="ts">
   import { MONTHS_ES } from "./data.svelte";
+  import { capitalizeFirst } from "./dateUtils";
   import QuickAdd from "./QuickAdd.svelte";
 
   let {
@@ -18,7 +19,7 @@
     setHmode?: (m: "semana" | "dia") => void;
   } = $props();
 
-  const title = $derived(
+  const title = $derived(capitalizeFirst(
     view === "mes"
       ? `${MONTHS_ES[date.getMonth()]} ${date.getFullYear()}`
       : view === "dia"
@@ -35,14 +36,16 @@
             ? "Eventos detectados"
             : view === "ajustes"
               ? "Ajustes"
-              : "Semana",
-  );
+              : view === "asistente"
+                ? "Asistente"
+                : "Semana",
+  ));
 </script>
 
 <div class="top">
   <div class="left">
     <div class="title">{title}</div>
-    {#if view !== "sugerencias" && view !== "ajustes"}
+    {#if view !== "sugerencias" && view !== "ajustes" && view !== "asistente"}
       <div class="nav">
         <button class="arrow" onclick={() => navigate(-1)} aria-label="Anterior">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -82,7 +85,6 @@
     font-size: var(--fs-xl);
     font-weight: 700;
     letter-spacing: -0.02em;
-    text-transform: capitalize;
   }
   .nav {
     display: flex;
@@ -94,42 +96,44 @@
     height: 34px;
     border: none;
     background: var(--surface);
-    border-radius: var(--r-sm);
-    box-shadow: var(--e1);
+    border-radius: var(--r-icon);
+    box-shadow: var(--btn-shadow);
     color: var(--text-2);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .arrow:hover {
     color: var(--primary);
-    transform: translateY(-1px);
-    box-shadow: var(--e2);
+    box-shadow: var(--btn-shadow-hover);
   }
   .arrow:active {
-    transform: translateY(0);
-    box-shadow: var(--shadow-inset-sm);
+    box-shadow: var(--btn-shadow-active);
   }
   .today {
     border: none;
     background: var(--surface);
-    border-radius: var(--r-sm);
-    box-shadow: var(--e1);
+    border-radius: var(--r-control);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     font-weight: 600;
     color: var(--text-1);
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .today:hover {
     color: var(--primary);
-    box-shadow: var(--e2);
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .today:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .switcher {
     display: inline-flex;
     background: var(--surface);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-control);
+    /* riel hundido; la opción activa va elevada */
     box-shadow: var(--shadow-inset-sm);
     padding: var(--s-1);
     gap: var(--s-0_5);
@@ -137,20 +141,20 @@
   .sw {
     border: none;
     background: transparent;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-3);
     font-family: inherit;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .sw:hover {
     color: var(--text-1);
   }
   .sw.on {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
-    box-shadow: var(--e1);
+    box-shadow: var(--btn-shadow);
   }
 </style>
