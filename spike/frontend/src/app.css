@@ -1,8 +1,8 @@
 :root {
-  --bg: #f8f8f8;
-  --surface: #ffffff;
-  --surface-2: #f1f2f4;
-  --surface-3: #eaecef;
+  --bg: #E9EDF2;
+  --surface: #E9EDF2; /* superficie = fondo (D2): el relieve lo hace la sombra */
+  --surface-2: #E3E8EF;
+  --surface-3: #DDE3EB;
   --accent: #2563eb;
   --primary: var(--accent);
   --primary-hover: color-mix(in srgb, var(--accent) 88%, #000);
@@ -19,9 +19,9 @@
   --study: #0d9488;
   --study-bg: #ccfbf1;
   --text-1: #1f2937;
-  --text-2: #6b7280;
-  --text-3: #9ca3af;
-  --border: #e7e9ec;
+  --text-2: #5B6472;
+  --text-3: #7C8594;
+  --border: #D3DAE3;
 
   --font: "Inter", "Segoe UI", system-ui, sans-serif;
 
@@ -43,14 +43,31 @@
   --r-xl: 28px;
   --r-full: 999px;
 
-  --shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    -6px -6px 14px rgba(255, 255, 255, 0.95), 6px 6px 14px rgba(31, 41, 55, 0.08);
-  --shadow-raised-lg: inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    -12px -12px 24px rgba(255, 255, 255, 0.9), 12px 12px 24px rgba(31, 41, 55, 0.1);
-  --shadow-inset: inset 4px 4px 10px rgba(31, 41, 55, 0.06),
-    inset -4px -4px 10px rgba(255, 255, 255, 0.85);
-  --shadow-inset-sm: inset 2px 2px 5px rgba(31, 41, 55, 0.05),
+  /* Neumorfismo (claro): sombra oscura + luz; el modo oscuro solo cambia los dos neu-* */
+  --neu-dark: rgba(163, 177, 198, 0.6);
+  --neu-light: rgba(255, 255, 255, 0.9);
+  --shadow-raised-sm: 4px 4px 8px var(--neu-dark), -4px -4px 8px var(--neu-light);
+  --shadow-raised: 8px 8px 16px var(--neu-dark), -8px -8px 16px var(--neu-light);
+  --shadow-raised-lg: 12px 12px 28px rgba(150, 165, 190, 0.7), -12px -12px 28px #fff;
+  --shadow-inset: inset 4px 4px 8px rgba(163, 177, 198, 0.55),
+    inset -4px -4px 8px rgba(255, 255, 255, 0.85);
+  --shadow-inset-sm: inset 2px 2px 5px rgba(163, 177, 198, 0.5),
     inset -2px -2px 5px rgba(255, 255, 255, 0.8);
+  --grad-accent: linear-gradient(135deg, color-mix(in srgb, var(--accent) 78%, #fff), var(--accent));
+  --glow-accent: 0 6px 16px -4px color-mix(in srgb, var(--accent) 45%, transparent);
+  --line-input: rgba(91, 100, 114, 0.22);
+  --shadow-reach: 48px;
+
+  /* Controles (D3/D4): relieve que se hunde al pulsar; derivan de neu-* */
+  --btn-shadow: var(--shadow-raised-sm);
+  --btn-shadow-hover: 6px 6px 12px var(--neu-dark), -6px -6px 12px var(--neu-light);
+  --btn-shadow-active: var(--shadow-inset-sm);
+  --btn-primary-shadow: var(--shadow-raised-sm), var(--glow-accent);
+  --input-bg: var(--surface-3);
+  --input-shadow: var(--shadow-inset-sm);
+  --input-border: 1px solid var(--line-input);
+
+  /* Elevación: solo lo que flota sobre contenido SIN overlay (menús, popovers, toasts) */
   --e1: 0 4px 8px -2px rgba(31, 41, 55, 0.08), 0 2px 4px -2px rgba(31, 41, 55, 0.06);
   --e2: 0 10px 20px -4px rgba(31, 41, 55, 0.12), 0 4px 8px -4px rgba(31, 41, 55, 0.08);
   --e3: 0 18px 36px -6px rgba(31, 41, 55, 0.18), 0 8px 16px -8px rgba(31, 41, 55, 0.12);
@@ -67,14 +84,16 @@
 }
 
 [data-theme="dark"] {
-  --bg: #16181e;
-  --surface: #1e2129;
-  --surface-2: #262a34;
-  --surface-3: #2c313c;
+  --bg: #262A32;
+  --surface: #262A32; /* superficie = fondo (D2) */
+  --surface-2: #22252C;
+  --surface-3: #1F2228;
   --accent: #3b82f6;
-  --primary: var(--accent);
-  --primary-hover: color-mix(in srgb, var(--accent) 78%, #fff);
-  --primary-active: color-mix(in srgb, var(--accent) 70%, #000);
+  /* El acento elegido en Ajustes se aplica inline (pisa --accent): --primary
+     se DERIVA del acento para que en oscuro no quede sin contraste (D7). */
+  --primary: color-mix(in srgb, var(--accent) 75%, #fff);
+  --primary-hover: color-mix(in srgb, var(--accent) 62%, #fff);
+  --primary-active: color-mix(in srgb, var(--accent) 90%, #fff);
   --primary-soft: color-mix(in srgb, var(--accent) 20%, transparent);
   --primary-soft-2: color-mix(in srgb, var(--accent) 55%, transparent);
   --success: #34d399;
@@ -91,14 +110,15 @@
   --text-3: #6b7280;
   --border: #333845;
 
-  --shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    -6px -6px 14px rgba(0, 0, 0, 0.3), 6px 6px 14px rgba(0, 0, 0, 0.55);
-  --shadow-raised-lg: inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    -12px -12px 24px rgba(0, 0, 0, 0.35), 12px 12px 24px rgba(0, 0, 0, 0.6);
-  --shadow-inset: inset 4px 4px 10px rgba(0, 0, 0, 0.4),
-    inset -4px -4px 10px rgba(255, 255, 255, 0.03);
-  --shadow-inset-sm: inset 2px 2px 5px rgba(0, 0, 0, 0.35),
-    inset -2px -2px 5px rgba(255, 255, 255, 0.03);
+  /* Neumorfismo oscuro: solo cambian neu-dark/neu-light */
+  --neu-dark: rgba(0, 0, 0, 0.55);
+  --neu-light: rgba(255, 255, 255, 0.05);
+  --shadow-raised-sm: 4px 4px 8px var(--neu-dark), -4px -4px 8px var(--neu-light);
+  --shadow-raised: 8px 8px 16px var(--neu-dark), -8px -8px 16px var(--neu-light);
+  --shadow-raised-lg: 12px 12px 28px var(--neu-dark), -12px -12px 28px var(--neu-light);
+  --shadow-inset: inset 4px 4px 8px var(--neu-dark), inset -4px -4px 8px var(--neu-light);
+  --shadow-inset-sm: inset 2px 2px 5px var(--neu-dark), inset -2px -2px 5px var(--neu-light);
+
   --e1: 0 4px 8px -2px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
   --e2: 0 10px 20px -4px rgba(0, 0, 0, 0.55), 0 4px 8px -4px rgba(0, 0, 0, 0.45);
   --e3: 0 18px 36px -6px rgba(0, 0, 0, 0.6), 0 8px 16px -8px rgba(0, 0, 0, 0.5);
