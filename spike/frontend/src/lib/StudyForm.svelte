@@ -143,7 +143,7 @@
         <input class="inp" type="text" maxlength="120" placeholder="Ej. Estudiar cálculo" bind:value={title} required />
       </label>
 
-      <div class="grid2">
+      <div class="grid2 date-time">
         <label class="row">
           <span class="lab">Fecha *</span>
           <input class="inp" type="date" bind:value={dateV} required />
@@ -220,48 +220,57 @@
     width: min(440px, 100%);
     background: var(--surface);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-raised-lg);
-    padding: var(--s-5);
-    display: flex; flex-direction: column; gap: var(--s-3);
+    box-shadow: var(--e3);
+    /* contenedor: padding y gap un escalón por encima (aire) */
+    padding: var(--s-6);
+    display: flex; flex-direction: column; gap: var(--s-4);
   }
   header { display: flex; align-items: center; justify-content: space-between; }
-  h3 { margin: 0; font-size: 16px; font-weight: 700; }
+  h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
   .x {
     border: none; background: none; color: var(--text-3);
-    font-size: 14px; cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm);
+    font-size: var(--fs-md); cursor: pointer; padding: var(--s-1) var(--s-1_5); border-radius: var(--r-sm);
   }
   .x:hover { background: var(--surface-2); color: var(--text-1); }
 
   form { display: flex; flex-direction: column; gap: var(--s-3); }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
-  .row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .lab { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+  /* 2ª columna más ancha: los inputs de hora necesitan el texto completo
+     ("10:01 a. m.") más el icono de reloj; align-items:end alinea los
+     controles aunque una etiqueta ocupe 2 líneas (Tarea relacionada). */
+  .grid2 { display: grid; grid-template-columns: 1fr 1.6fr; gap: var(--s-3); align-items: end; }
+  /* Fila fecha+horario: la columna del horario toma su ancho natural (dos
+     campos de hora + "a") y la fecha el resto; nunca desborda el modal. */
+  .grid2.date-time { grid-template-columns: minmax(0, 1fr) auto; }
+  .row { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+  .lab { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
   .inp {
-    font: inherit; font-size: 13px; color: var(--text-1);
+    font: inherit; font-size: var(--fs-base); color: var(--text-1);
     background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r-md); padding: 7px 9px; width: 100%; min-width: 0;
+    border-radius: var(--r-md); padding: var(--s-2) var(--s-2); width: 100%; min-width: 0;
   }
   .inp:focus { outline: 2px solid color-mix(in srgb, var(--study) 45%, transparent); border-color: var(--study); }
-  .timerange { display: flex; align-items: center; gap: 6px; }
-  .to { font-size: 12px; color: var(--text-3); }
-  .hint { margin: 0; font-size: 11.5px; color: var(--text-3); }
-  .hint strong { color: var(--study); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .timerange { display: flex; align-items: center; gap: var(--s-1_5); }
+  /* Ancho de control (no espaciado): cabe "12:59 p. m." + icono de reloj */
+  .timerange .inp { min-width: 124px; }
+  .to { font-size: var(--fs-sm); color: var(--text-3); }
+  .hint { margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
+  .hint strong { color: var(--study); font-weight: 600; font-variant-numeric: tabular-nums; }
   .note {
-    margin: 0; font-size: 11.5px; color: var(--text-2);
+    margin: 0; font-size: var(--fs-xs); color: var(--text-2);
     background: color-mix(in srgb, var(--study) 8%, transparent);
     border-left: 3px solid var(--study);
-    border-radius: var(--r-md); padding: 7px 10px;
+    border-radius: var(--r-md); padding: var(--s-2) var(--s-2);
   }
   .ferr {
-    margin: 0; font-size: 12.5px; color: var(--danger);
-    background: var(--danger-bg); border-radius: var(--r-md); padding: 8px 10px;
+    margin: 0; font-size: var(--fs-sm); color: var(--danger);
+    background: var(--danger-bg); border-radius: var(--r-md); padding: var(--s-2) var(--s-2);
   }
   footer { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-1); flex-wrap: wrap; }
   .grow { flex: 1; }
   .btn {
-    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    font: inherit; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-    border-radius: var(--r-md); padding: 7px 14px;
+    border-radius: var(--r-md); padding: var(--s-2) var(--s-3);
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
@@ -275,7 +284,7 @@
   .delconfirm {
     width: 100%; display: flex; flex-direction: column; gap: var(--s-2);
     background: var(--danger-bg); border-radius: var(--r-md); padding: var(--s-3);
-    font-size: 12.5px; color: var(--text-1);
+    font-size: var(--fs-sm); color: var(--text-1);
   }
   .delbtns { display: flex; gap: var(--s-2); }
 
