@@ -382,6 +382,9 @@
     /* panel de conversación: gap y padding un escalón por encima (aire) */
     gap: var(--s-4);
     padding: var(--s-3) var(--s-3) var(--s-5);
+    /* fundido superior: el mensaje se desvanece bajo la cabecera */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
   }
   .msg {
     max-width: 88%;

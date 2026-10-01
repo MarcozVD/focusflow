@@ -827,7 +827,6 @@
 
 <style>
   .set {
-    max-width: 760px;
     display: flex;
     flex-direction: column;
     gap: var(--s-6);
