@@ -1,6 +1,7 @@
 # COMPONENTS.md — Componentes de FocusFlow
 
 **Fuente:** código real de `spike/frontend/src/lib/`. Cada componente documenta: propósito, anatomía, variantes, estados, comportamiento, responsive, accesibilidad y relación con el neumorfismo.
+**Última actualización:** 2026-10-01 (spec 19: layout responsivo, tokens de relieve en controles, panel del sidebar, modales sobre overlay desenfocado).
 
 > **Convención:** los componentes marcados **[PROPUESTO]** NO existen aún como abstracción global (hay lógica duplicada entre componentes) y son candidatos a extracción. No son inventos: son consolidaciones de código que ya existe repetido.
 
@@ -9,38 +10,42 @@
 ## AppShell — `App.svelte`
 
 - **Propósito:** orquesta toda la app: título, sidebar, topbar, vistas (calendario/agenda/sugerencias/asistente/ajustes), drawer, toast contextual, widget y manejo de errores fatales.
-- **Anatomía:** `TitleBar` → `div.body` → (`Sidebar` + `main.content` → `TopBar` + vista). Overlays: `TaskDrawer`, `ContextualToast`, `fatal error`.
+- **Anatomía:** `TitleBar` → `div.body` → (`Sidebar` + `main.content` → `.content-inner` → `TopBar` + vista). Overlays: `TaskDrawer`, `ContextualToast`, `fatal error`.
+- **Scroll unificado (spec 19):** `main.content` es **el único scroller** (`overflow-y: auto; overflow-x: hidden`), así que la TopBar sube con el contenido y nada pasa por debajo de una barra. Dentro, `.content-inner` es la columna centrada (`max-width: 1680px`; `class:reading` → `880px` en Ajustes/Sugerencias/Asistente) con `padding: 0 clamp(var(--s-10), 3vw, var(--s-16)) clamp(var(--s-6), 2.5vw, var(--s-12))`. `.cal-wrap` + `.view-fill` propagan la cadena flex para que las vistas de calendario llenen el alto.
+- **Reset de scroll:** un `$effect` dependent de `view` y `hmode` pone `contentEl.scrollTop = 0`. Sin él, el scroll unificado arrastraba el desplazamiento de la vista anterior al cambiar de vista o de submodo (horario/sesiones); las flechas de fecha dentro de la misma vista no lo disparan.
 - **Estados:** `bootReady` (splash mínimo), `authUser()` (→ Login), `onboardingPending` (→ Onboarding), `taskDetail()` (drawer), `fatalError` (banner role=alert), `nlToast()` (toast flotante).
-- **Toast `nlToast`:** `App` pinta el mensaje que guarda `setNlToast` en `data.svelte.ts` — errores de acciones rápidas ("No se pudo crear…", "No se pudo actualizar la tarea…") que hasta ahora no mostraba ningún componente. Va **abajo al centro**, fuera de la esquina de `ContextualToast`, con `--surface` + `--e2` + `--r-md`. Si `source === "error"` usa `role="alert"` y borde izquierdo `--danger`; el resto, `role="status"` con `aria-live="polite"`. Entra con `fly` respetando `prefers-reduced-motion`.
+- **Toast `nlToast`:** `App` pinta el mensaje que guarda `setNlToast` en `data.svelte.ts` — errores de acciones rápidos ("No se pudo crear…", "No se pudo actualizar la tarea…"). Va **abajo al centro**, con `--surface` + `--e2` + `--r-md`. Si `source === "error"` usa `role="alert"` y borde izquierdo `--danger`; el resto, `role="status"` con `aria-live="polite"`.
+- **Manejo de errores:** el handler global filtra el aviso benigno `ResizeObserver loop…` del navegador (`console.debug`, no `fatalError`); venía del `ResizeObserver` del calendario al redimensionar y congelaba la app con un error que no lo era.
 - **Comportamiento:** enrutado por hash (`#/widget` → WidgetPage); atajos de teclado (Escape cierra drawer/widget); escucha eventos Tauri (`task:open`, `nav:agenda`, `nav:assistant`, `ui:prefs`).
-- **Responsive:** `flex column` 100vh; `cal-wrap` con scroll propio; min-width 0 para no desbordar.
+- **Responsive:** `flex column` 100vh; `min-width: 0` en la columna para no desbordar; mínimo de ventana 960×640 (`tauri.conf.json`).
 - **Accesibilidad:** landmark `main`; error fatal con `role="alert"`.
-- **Neumorfismo:** el shell es base (`--bg`); solo los contenedores de contenido tienen raised.
+- **Neumorfismo:** el shell es la superficie única (`--bg` = `--surface`); el relieve lo llevan el panel del sidebar y las tarjetas de cada vista.
 
 ---
 
 ## Sidebar — `Sidebar.svelte`
 
 - **Propósito:** navegación principal + resumen del día + categorías + tema.
-- **Anatomía:** logo (F en cuadrado `--primary`), nav (Semana/Mes/Día/Agenda/Asistente/Sugerencias/Ajustes con iconos SVG), sección Categorías (punto de color + count), caja "hoy" (día + número + pendientes), botón Tema.
-- **Variantes:** item activo (`--primary-soft` + `--primary` + weight 600), badge de sugerencias pendientes.
-- **Estados:** hover `--surface-2`; activo `--primary-soft`.
-- **Comportamiento:** llama `setView`/`navigate`; el nav no usa `<a>` (SPA por estado).
-- **Responsive:** 232 px fijos; colapsable conceptualmente (64 px en spec), no implementado en v0.1.2.
-- **Accesibilidad:** botones reales; iconos `aria-hidden` por defecto (no lo tienen explícito — deuda). El badge de pendientes no anuncia cambios (mejora propuesta).
-- **Neumorfismo:** sidebar flota sobre base (sin tarjeta); solo la caja "hoy" lleva `--shadow-raised`. *Buena aplicación del "no saturar de relieves".*
+- **Anatomía:** panel `div.side` → `div.side-scroll` (logo, nav, categorías, caja "hoy", botón Tema). Nav con iconos SVG y etiquetas; sección Categorías (punto de color + count); caja "hoy" (día + número + pendientes); botón Tema y botón de contraer/expandir.
+- **Panel (spec 19):** margen `--s-4` a izquierda/alto/bajo, `--r-xl`, `--shadow-raised` sobre `--surface`; 232 px de ancho. La zona scrolleable (`.side-scroll`) lleva fundido de 16 px arriba y abajo con `mask-image` y `padding: var(--s-4) 0 var(--s-5)` para que el último elemento no toque el borde redondeado.
+- **Modo iconos:** `type SidebarMode = "auto" | "collapsed" | "expanded"`, con la preferencia en `localStorage` (`ff.sidebar`, lectura con try/catch). En `auto` se contrae sola con `matchMedia("(max-width: 1199px)")`; el botón manual guarda la preferencia y **vuelve a `auto`** cuando lo elegido coincide con lo automático. Colapsado = 72 px **con el padding dentro**.
+- **Contenido en modo iconos (D12):** se ocultan la marca, las etiquetas del nav, las categorías y la caja de "hoy" (quedan fuera de flujo, no `display: none`, para no perder el texto accesible). Cada item lleva `title` + `aria-label`, el contador de Sugerencias se posa **sobre** su icono, y los botones de añadir horario, añadir sesión, tema y expandir son circulares.
+- **Estados:** nav activo hundido (`--primary-soft` + `--shadow-inset-sm` + `--primary` + peso 600); nav hover elevado (`--btn-shadow`); botón de añadir en píldora con relieve.
+- **Comportamiento:** llama `setView`/`navigate`; el nav no usa `<a>` (SPA por estado). La transición de ancho usa `--dur-base` y respeta `prefers-reduced-motion` (global, 120 ms).
+- **Accesibilidad:** botones reales con `aria-expanded` + `aria-label` en el botón de contraer/expandir; los labels fuera de flujo siguen leyéndose.
+- **Neumorfismo:** panel elevado y caja de "hoy" como pozo (`--surface-2` + `--shadow-inset-sm`).
 
 ---
 
 ## TopBar — `TopBar.svelte`
 
 - **Propósito:** título de la vista + navegación temporal (anterior/siguiente/hoy) + QuickAdd.
-- **Anatomía:** título (`--fs-xl`/700, `letter-spacing -0.02em`) + botones arrow (raised e1) + "Hoy" + `<QuickAdd/>`. En Horario y Sesiones añade el conmutador Semana/Día.
-- **Título por vista:** `Semana`, `Mes`, `Día`, `Mi horario`, `Sesiones de estudio`, `Eventos detectados`, `Ajustes`, `Asistente`. La vista `asistente` muestra su título **sin** el bloque de navegación (las flechas no tienen sentido ahí), igual que Sugerencias y Ajustes, que ya lo ocultaban.
-- **Capitalización:** la mayúscula inicial la aplica el helper `cap()` (`charAt(0).toUpperCase() + slice(1)`) sobre el texto de la vista. **No** hay `text-transform: capitalize`: en español capitalizaría cada palabra («Sesiones De Estudio», «30 De Septiembre»).
-- **Estados:** hover: translateY(-1px) + e2; active: `--shadow-inset-sm` (se hunde — *press táctil correcto*).
-- **Accesibilidad:** `aria-label` en arrows; el título es texto plano (semántica de h1 real propuesta).
-- **Neumorfismo:** botones raised individuales sobre base plana — jerarquía clara.
+- **Anatomía:** título (`--fs-xl`/700, `letter-spacing -0.02em`) + flechas circulares de 34 px + "Hoy" en píldora + `<QuickAdd/>`. En Horario y Sesiones añade el conmutador Semana/Día.
+- **Título por vista:** `Semana`, `Mes`, `Día`, `Mi horario`, `Sesiones de estudio`, `Eventos detectados`, `Ajustes`, `Asistente`. La vista `asistente` muestra su título **sin** el bloque de navegación, igual que Sugerencias y Ajustes.
+- **Capitalización:** la mayúscula inicial la aplica el helper compartido `capitalizeFirst` (`dateUtils.ts`). **No** hay `text-transform: capitalize`.
+- **Estados:** flechas y "Hoy" con `--btn-shadow`, hover `--btn-shadow-hover`, active `--btn-shadow-active` (el press hunde). El switcher es un **riel hundido** (`--shadow-inset-sm`) y la opción activa va elevada con `--grad-accent`.
+- **Accesibilidad:** `aria-label` en flechas y en el switcher (`role="group"` en Ajustes); el título es texto plano (semántica de h1 real propuesta).
+- **Neumorfismo:** controles elevados sobre la superficie; el switcher invierte la jerarquía (riel hundido + opción elevada).
 
 ---
 
@@ -48,9 +53,9 @@
 
 - **Propósito:** renderiza mes, semana y día como **espacio visual del tiempo**.
 - **Anatomía:**
-  - **Mes:** `month-head` (7 columnas) + grid 6×7 celdas (80 px alto) con chips de tareas + popup de día (`day-popup`).
-  - **Semana/Día:** `week-head` (días clicables) + `week-body` con gutter de horas + columnas por día; cada columna = `allday-row` (chips todo-el-día) + `time-area` (slots, now-line, EventBlocks).
-- **Estados:** celda today (anillo `--primary-soft-2`), día fuera de mes (opacity 0.4), hover de celda (translateY(-1px) + e1), drag (`week-body.dragging` atenúa eventos y resalta allday-row).
+  - **Mes:** `month-head` (7 columnas) + grid 6×7 celdas con chips de tareas + popup de día (`day-popup`). La grilla usa `grid-template-rows: repeat(6, minmax(80px, 1fr))` + `flex: 1`: **las filas se estiran** para llenar el alto de la tarjeta (antes eran 80 px fijos y a 2560×1440 quedaban ~170 px vacíos).
+  - **Semana/Día:** `week-head` (días clicables) + `week-body` con gutter de horas + columnas por día; cada columna = `allday-row` (chips todo-el-día) + `time-area` (pozo con slots, now-line, EventBlocks).
+- **Estados:** celda today (anillo de acento `outline: 1.5px solid var(--primary)` con `outline-offset: -1.5px`, sin relleno duro), día fuera de mes (opacity 0.4), hover de celda, drag (`week-body.dragging` atenúa eventos y resalta allday-row).
 - **Tareas completadas:** **visibles en todas las vistas** (semana, día, mes y popup), con el estado hundido gris de DESIGN §3.4. Se dibujan en la cuadrícula horaria como cualquier otra tarea y **expanden la franja visible** si caen fuera del rango por defecto. Hay dos ajustes para que no compitan por el espacio:
   - **Excepción multi-día:** una completada de varios días **solo aparece en su día de inicio y en su día de fin**; en los intermedios no se pinta. Lo resuelve `isMiddleDay(t, d)` (`taskDayLogic.ts`), que además usa `multiDayChipsOn` para el chip "cont". Sin esto el calendario se llenaba de la misma tarea repetida en gris en cada día intermedio. Las pendientes multi-día no cambian.
   - **Orden pendientes-primero:** el comparador puro `pendingFirst` (`taskDayLogic.ts`) ordena sin tocar el orden cronológico dentro de cada grupo; se aplica en `monthChipsOn` y `topChipsOn`.
@@ -58,14 +63,14 @@
 - **Estructura de los chips:** los chips de la fila superior y las filas del popup se envuelven en `<div class="chip-wrap">` (clase `done` cuando la tarea está completada) para poder contener el `TaskCheck` como botón hermano sin anidar botones.
 - **Comportamiento (lo más sofisticado del frontend):**
   - Grid horario dinámico: 6:00–22:00 por defecto, se expande si hay tareas fuera.
-  - `pxH` dinámico vía ResizeObserver (el área siempre llena la ventana).
+  - `pxH` dinámico vía ResizeObserver (el área siempre llena la ventana). La medida se hace en `requestAnimationFrame` y **solo asigna `timeAreaH` si cambió** (cancelando el frame en el cleanup): la asignación síncrona encadenaba otra medida y disparaba el aviso benigno `ResizeObserver loop`, que `App.svelte` filtra además del banner fatal.
   - **Layout de columnas:** clústeres de eventos encadenados → se reparten en columnas proporcionales (algoritmo tipo "calendario clásico").
   - **Drag & drop:** mover (con grabY en px para precisión), resize inicio/fin, drop a "Todo el día"; snap a 5 min SOLO al soltar; ghost que sigue al cursor; auto-scroll en bordes.
   - Multi-día: stubs de 2 h "Inicio ·"/"Fin ·" + chips continuos intermedios.
   - Mes: chips con `chipTextFor` (Inicio/Fin/continuo), "+N más", popup con "Ver día completo".
-- **Responsive:** semana limita a 8 eventos + "+N más"; el mes mantiene 6 filas fijas con scroll propio.
+- **Responsive:** semana limita a 8 eventos + "+N más"; el mes estira sus filas y, si no cabe, scrollea `.content` junto con la TopBar.
 - **Accesibilidad:** celdas de mes `role="button"` + Enter/Espacio; EventBlocks `role="button"` + Enter; resizes con `role="separator"` + `aria-label`. **Deuda:** drag & drop no tiene alternativa de teclado (mejora propuesta).
-- **Neumorfismo:** contenedor raised (`--r-lg` + `--shadow-raised`); slots del time-area con línea `--border` (inset sutil); EventBlocks inset-sm con borde izquierdo de categoría — *el calendario es la pieza que mejor expresa el sistema*.
+- **Neumorfismo:** tarjeta del calendario `--r-xl` + `--shadow-raised-lg`; `.time-area`, `.allday-row` y cada celda del mes son pozos (`--shadow-inset-sm`); los bloques y chips llevan **relieve mínimo** de 2 px sobre su tinte de categoría y las completadas siguen hundidas; chips y "+N más" en píldora.
 
 ---
 
@@ -115,9 +120,9 @@
 - **Estado `done` (completada):** superficie **hundida gris** — `background: var(--surface-2)`, `box-shadow: var(--shadow-inset)`, borde izquierdo `--text-3`, `z-index: 0`, **sin `opacity` global** y sin hover-lift. Título tachado con animación izq→der (`--dur-slow`) en `--text-2`; hora y descripción en `--text-3`; `prio-dot`/`prio-bar` ocultos. En bloques compactos añade el ✓ (el `TaskCheck` de `EventBlock` no cabe: el título se limita a una línea para no perder ancho).
   - Las reglas `.inicio`/`.fin` se declaran **antes** que `.done` a propósito: tienen la misma especificidad, y si no, un stub completado conservaría el tinte de categoría.
 - **Comportamiento en `done`:** **no se puede arrastrar ni redimensionar** (`onMove` no llama a `onPointerDown` y no se renderizan los handles `.resize`). El click sigue abriendo el drawer, que es la vía para reabrir.
-- **Estados:** hover translateY(-1px) scale(1.01) + e1 + z-index 3; resize handles aparecen en hover.
+- **Estados:** hover translateY(-1px) scale(1.01) + relieve ampliado (4 px) + z-index 3; resize handles aparecen en hover.
 - **Accesibilidad:** `role="button"` + Enter/Espacio; tooltip rico (`title`) con descripción/prioridad/estado; handles `role="separator"` con `aria-label`.
-- **Neumorfismo:** fondo = color de categoría al 13 % sobre surface + `--shadow-inset-sm` + borde izquierdo 3 px sólido del color. *Inset = "es parte del tiempo", no flota sobre él.*
+- **Neumorfismo:** fondo = color de categoría al 13 % sobre surface + **relieve mínimo** (`2px 2px 5px` con `neu-dark`/`neu-light`, 4 px en hover) + borde izquierdo 3 px sólido del color. Las **completadas se quedan hundidas** (`--shadow-inset-sm`): el relieve es lo que las distingue.
 
 ---
 
@@ -146,15 +151,15 @@
 ## QuickAdd — `QuickAdd.svelte`
 
 - **Propósito:** captura por lenguaje natural — la entrada principal del producto.
-- **Anatomía:** input inset (44 px, `--surface-3`, `--shadow-inset`, radio `--r-md` (16 px)) con icono rayo `--primary`, placeholder con ejemplo, `kbd` "Ctrl⇧Espacio"; preview flotante con chips de entidades detectadas + botón Planificar; banner "IA lenta" con fallback local; toast de confirmación.
-- **Estados:** `:focus-within` = borde `--primary` + anillo inset; `expanded` cuando hay preview; `disabled` durante procesado (anti doble-envío).
+- **Anatomía:** campo hundido en **píldora** (44 px, `--input-bg` + `--input-shadow` + `--input-border`, `--r-full`) con icono rayo `--primary`, placeholder con ejemplo, `kbd` "Ctrl⇧Espacio"; preview flotante con chips de entidades **elevados** + botón «Planificar» (píldora con `--grad-accent` + `--btn-primary-shadow`); banner "IA lenta" con fallback local; toast de confirmación.
+- **Estados:** `:focus-within` = borde `--primary` (el anillo lo aporta el `:focus-visible` global); `expanded` mantiene la píldora arriba (`--r-full --r-full --r-sm --r-sm`); `disabled` durante procesado (anti doble-envío).
 - **Comportamiento:**
   - Detección local de entidades (mañana/el N/próximo lunes/horario/urgente/recordatorio/categoría) → chips de color.
   - Enter → `planFromText` (IA) → propuesta; evento único se **auto-acepta**; plan multi-item requiere revisión.
   - Si IA tarda > 8 s → "Usar interpretación rápida" (parser local).
   - Enter repetido bloqueado (guardia anti-duplicado).
 - **Accesibilidad:** input real con placeholder; kbd como hint visual; chips de preview decorativos (deuda: sin `aria-live` — el estado "detectado" no se anuncia).
-- **Neumorfismo:** **inset puro** — es el elemento hundido más representativo de la app. El preview flota con e3.
+- **Neumorfismo:** **pozo puro** (es el campo hundido más representativo de la app) y píldora; chips del preview elevados y «Planificar» con degradado + brillo. El preview flota con `--e2`/`--e3`.
 
 ---
 
@@ -172,7 +177,7 @@ No existe como componente único. El concepto se implementa en: `PlanProposal.sv
 - **Estados:** `pending` (botones de acción), `settled` (aceptada/rechazada/fusionada/auto-aprobada → revertir/editar/borrar, con cuenta atrás de 1 h), edición inline (card con formulario), fusión (select de tarea).
 - **Comportamiento:** botón "Comprobar correo ahora"; estados con semántica de color (pending=primary, accepted=success, rejected=danger, merged=primary).
 - **Responsive:** cards apiladas, max-width 760 px.
-- **Neumorfismo:** cards raised; formularios de edición inset.
+- **Neumorfismo:** cards `--r-xl` + `--shadow-raised`; formularios de edición con campos hundidos en píldora; botones de acción en píldora y el principal con degradado; chips de categoría con relieve mínimo.
 - **Deuda:** no usa `<dialog>`; los formularios son `<div class="card edit">`.
 
 ---
@@ -182,7 +187,7 @@ No existe como componente único. El concepto se implementa en: `PlanProposal.sv
 - **Propósito:** chat con el asistente IA sobre el calendario (respuestas y acciones propuestas).
 - **Encabezado:** **sin h1/h2 propio** — el título «Asistente» lo pone la TopBar (y sin navegación temporal). La vista conserva subtítulo y chips; el encabezado duplicado se retiró en la fase 2.
 - **Estados:** mensajes que entran con fade; `task-ref-level` (chip de nivel); errores con "Reintentar"; indicador "Analizando tu calendario…".
-- **Neumorfismo:** mensajes del asistente como superficies raised; migrado a tokens (`--fs-*`, `--s-*`, `--r-*`).
+- **Neumorfismo:** burbujas de la IA con relieve suave (`--shadow-raised-sm`), las del usuario con `--grad-accent`, chips de nivel y de tarea elevada (`--shadow-raised-sm`) y la tarjeta de acción propuesta como tarjeta elevada (`--r-xl` + `--shadow-raised`).
 
 ---
 
@@ -199,7 +204,7 @@ La lógica de email vive en el backend Rust (detección) y se presenta en `Sugge
 - **Estados:** sección `now` (label `--primary`), task con dot de categoría, remaining badge (primary), due badge (text-2 / danger si importante), empty state ("Todo claro por ahora"), acciones rápidas (✓ ⟳ ▶) aparecen en hover.
 - **Comportamiento:** reloj local cada 30 s; prioridad de secciones: current → relevant → next → important; `widgetAction` (complete/postpone/start) vía IPC; abre app/agenda/asistente.
 - **Accesibilidad:** botones con `title`; focus-visible en qa-btns; el estado "todo claro" es texto. Deuda: sin `aria-live` para cambios de sección.
-- **Neumorfismo:** contenedor `--r-xl` + `--shadow-raised-lg` + borde `--border` — *la pieza flotante por excelencia*.
+- **Neumorfismo:** contenedor `--r-xl` + `--shadow-raised` + borde `--border` + `margin: var(--s-4)`. Baja de `--raised-lg` porque la ventana es fija y transparente: la sombra larga se recortaba contra el borde de la pantalla, y el margen la deja respirar. Los botones del pie son píldoras elevadas (el primero, «Abrir», con `--grad-accent` + brillo), las acciones rápidas son circulares y los chips llevan relieve mínimo conservando su color semántico.
 
 ---
 
@@ -208,45 +213,58 @@ La lógica de email vive en el backend Rust (detección) y se presenta en `Sugge
 - **Propósito:** `StudySessions.svelte` (bloques de sesión de estudio) y `Schedule.svelte` (bloques de clase) dibujan la cuadrícula semanal/diaria con la misma silueta que `EventBlock`.
 - **Bloques:** contenido **alineado arriba** (`justify-content: flex-start`): si no cabe, solo se recorta por abajo, sin comerse el texto. En **compacto (< 36 px)** pasan a una línea (hora + título inline, `-webkit-line-clamp: 1`); el título no compacto es clamp a 2 líneas. En sesiones, la tarea vinculada ("↳ …") solo se muestra a partir de 62 px.
 - **Gutter:** la franja superior cede aire (`padding-top` `--s-1_5`) para que la primera etiqueta de hora («6 a») no salga cortada por el `translateY(-6px)`.
-- **Modales (`StudyForm` / `ClassForm`):** `--e3` (sin el halo que dejaba `--shadow-raised-lg`) y `width: min(480px, 100%)` para que las etiquetas no partan («Día de la semana *»). La fila usa `align-items: end`, de modo que fecha, horas, tarea relacionada y notas quedan alineadas aunque una etiqueta ocupe dos líneas; la columna del horario es de ancho natural y los inputs de hora reservan `min-width: 124px` para mostrar la hora completa («11:01 p. m.») junto al icono de reloj.
+- **Modales (`StudyForm` / `ClassForm`):** overlay `--overlay` con `blur(8px)` y panel `--r-xl` + `--shadow-raised-lg` (antes `--e3`, para esquivar el halo) con `width: min(480px, 100%)` para que las etiquetas no partan («Día de la semana *»). La fila usa `align-items: end`, de modo que fecha, horas, tarea relacionada y notas quedan alineadas aunque una etiqueta ocupe dos líneas; la columna del horario es de ancho natural y los inputs de hora reservan `min-width: 124px` para mostrar la hora completa («11:01 p. m.») junto al icono de reloj.
 
 ---
 
-## Button — [PROPUESTO como `Button.svelte`]
+## Button — patrón real (propuesto como `Button.svelte`)
 
-**No existe como componente global.** El patrón real está duplicado:
-- Primario: `--primary` / `#fff` / radio 12 / padding 8–9px 14–18px / 600 / hover `--primary-hover` / active scale(0.98).
-- Secundario: `--surface-2`→hover `--surface-3` (o `--surface-3` base en TaskDrawer).
-- Ghost: transparente / hover `--surface-2` / (en TaskDrawer: borde `--border`).
-- Danger: `--danger` texto / hover `--danger-bg`.
+**No existe como componente global.** El patrón real (spec 19) está duplicado en cada componente, pero ya sale de los mismos tokens:
+- Primario: `--grad-accent` + `--btn-primary-shadow` + `#fff`, píldora (`--r-full`) / hover `filter: brightness(1.05)` / active `--btn-shadow-active`.
+- Secundario: `--surface` + `--btn-shadow` / hover `--btn-shadow-hover` / active hundido.
+- Ghost: `--surface` + relieve (dejó de ser transparente para no romper el lenguaje).
+- Danger: texto `--danger` sobre la superficie en relieve (dejó de pintarse en rojo sólido).
 
-**Propuesta:** consolidar en `Button.svelte` con variantes `primary | secondary | ghost | danger`, tamaños `sm | md | lg`, y estados estándar (hover translateY(-1px), active inset/scale, focus ring). La landing NO depende de esto (es standalone), pero la doc lo registra como deuda a pagar.
+**Propuesta:** consolidar en `Button.svelte` con variantes `primary | secondary | ghost | danger`, tamaños `sm | md | lg`, y estados estándar (hover de relieve, active inset, foco global).
 
 ---
 
 ## IconButton — patrón real (no componente)
 
-Usado en: TitleBar (controles), TopBar (arrows), Popups (close), TaskDrawer (✕). Anatomía: cuadrado 30–46 px, `--surface-2` hover, radio 10–14, icono SVG 12–16 px. Consistente en comportamiento, inconsistente en tamaño.
+Usado en: TitleBar (controles), TopBar (flechas), Popups (close), TaskDrawer (✕), ClassForm/StudyForm (✕), Sidebar (colapsar, tema, añadir). Anatomía: **círculo** de 28–40 px (`border-radius: 50%`) sobre `--surface` con `--btn-shadow`, icono SVG 12–16 px, hover `--btn-shadow-hover`, active `--btn-shadow-active`. `title` + `aria-label` en todos.
 
 ---
 
-## Input — patrón inset (no componente)
+## Input — patrón hundido (no componente)
 
-Real: `input/select/textarea` con `background: var(--surface-3)`, `box-shadow: var(--shadow-inset-sm)`, radio 10–12, focus = anillo `--primary-soft-2`. En TaskDrawer usa además `border: 1px solid var(--border)` y focus con `0 0 0 3px var(--primary-soft)`. **Dos idiomas de foco detectados** (ver DESIGN §9.2).
+`input/select/textarea` con `--input-bg` (`--surface-3`), `--input-shadow` (`--shadow-inset-sm`), `--input-border` (`1px solid var(--line-input)`, D14) y `--r-full` (los textarea en `--r-lg`). El foco **solo cambia el borde** a `--primary`; el anillo lo aporta el `:focus-visible` global de `app.css` — TaskDrawer ya no añade su `box-shadow` propio, así que **hay un solo idioma de foco** (resuelto en el spec 19; ver DESIGN §10.3).
+
+---
+
+## TaskDrawer — `TaskDrawer.svelte`
+
+- **Propósito:** ficha de una tarea con edición completa, propuesta de fecha/hora y confirmación de borrado.
+- **Anatomía:** overlay (`--overlay` + `backdrop-filter: blur(--overlay-blur)`) + panel `.drawer` **flotante**: margen `--s-4` en los cuatro lados, `--r-xl`, `--shadow-raised-lg`, `overflow: hidden`, `width: min(400px, calc(100vw - 2 * var(--s-4)))`. Antes iba pegado al borde derecho con borde izquierdo sólido.
+- **Head:** título + botón de cierre **circular** (`border-radius: 50%`, `--btn-shadow`).
+- **Cuerpo:** campos en píldora hundida (`--input-bg`/`--input-shadow`/`--input-border`; los textarea en `--r-lg`); el foco **solo cambia el borde** a `--primary` y el anillo lo da el `:focus-visible` global (se retiró su `box-shadow` propio, que era el segundo idioma de foco del repo). La zona scrolleable lleva fundido de 16 px arriba y abajo con `mask-image`.
+- **Interruptor «Todo el día»:** sigue siendo un `<input type="checkbox">` nativo (sin `Switch.svelte`) estilizado como interruptor: riel 40×22 hundido con knob circular elevado y estado activo con `--grad-accent`.
+- **Pie:** botones en píldora con `--btn-shadow` (hover `--btn-shadow-hover`, active hundido); «Guardar» con `--grad-accent` + `--btn-primary-shadow`; los peligrosos en texto `--danger`.
+- **Diálogo de borrado:** overlay propio + panel `--r-xl` + `--shadow-raised-lg`, con `role="dialog"` + `aria-modal="true"` + `aria-labelledby` (sin focus trap: deuda).
+- **Accesibilidad:** overlay con click handler sin role ni teclado (deuda pendiente de `<dialog>` nativo).
 
 ---
 
 ## Modal — `PlanProposal.svelte` (el más completo)
 
 - **Propósito:** revisión y aprobación de propuestas de plan.
-- **Anatomía:** overlay (fondo `--bg` 55 % + blur 3px) + modal centered (560 px, `--r-lg`, e3, borde): head (logo rayo + "Plan sugerido" + sub + chip fuente IA/Local + ✕), body ("Entendí" intents + "Plan propuesto" items con sesiones y edición de bloques), footer (total de bloques + Editar/Cancelar/Aceptar plan).
+- **Anatomía:** overlay (`--overlay` + `backdrop-filter: blur(8px)`; antes `color-mix(--bg 55%)` + blur 3 px) + modal centrado (`--r-xl`, `--shadow-raised-lg`, borde `--border`): head (logo rayo + "Plan sugerido" + sub + chip fuente IA/Local + ✕ circular), body ("Entendí" intents + items de plan con sesiones y edición de bloques, cada propuesta como tarjeta elevada), footer (total de bloques + Editar/Cancelar/Aceptar plan).
 - **Estados:** edición de bloques (fecha/hora por sesión, añadir/quitar), errores inline, busying.
 - **Accesibilidad:** `aria-label` en overlay; Escape cancela; botones con texto claro. Deuda: no es un `<dialog>` nativo (sin focus trap/aria-modal).
-- **Neumorfismo:** floating e3 sobre overlay blur — jerarquía de profundidad correcta.
+- **Neumorfismo:** panel marcado sobre overlay claro desenfocado — el halo que obligaba antes a bajar a `--e3` desaparece porque el overlay es del propio gris del tema (ver DESIGN §3.5).
 
 ---
 
-## Toast — patrón múltiple (ver deuda DESIGN §9.2)
+## Toast — patrón múltiple (ver deuda DESIGN §10.2)
 
 - QuickAdd toast: fixed bottom-center, `--surface`, borde-izq success, e2.
 - Drag toast (Calendar): fixed bottom-center, `--danger` sólido, e2.
@@ -260,9 +278,14 @@ Se usan `<select>` nativos (TaskDrawer, Suggestions, Settings, Onboarding) con e
 
 ---
 
-## Toggle — patrón real
+## Switch / Toggle — patrón real (propuesto como `Switch.svelte`)
 
-Checkbox estilizado para all-day (TaskDrawer) y switches de ajustes (`label.check > input`). No hay `Switch.svelte` global — **propuesto**.
+**Siguen siendo `<input type="checkbox">` nativos** con `appearance: none`; no hay componente global — **propuesto**.
+
+- **Anatomía:** riel 40×22 px con `--input-border` y `--shadow-inset-sm` sobre `--surface` + knob circular de 16 px elevado con `--btn-shadow`, desplazado 18 px al activarse.
+- **Activo:** riel con `--grad-accent` y borde transparente.
+- **Dónde:** «Todo el día» del `TaskDrawer` y los interruptores de Ajustes (correo, Google Calendar: al abrir/minimizar/cerrar, conflictos estrictos). Las píldoras de proveedor y el switcher de tema (`role="group"` + `aria-label="Tema"`) son otros patrones: las píldoras activas usan `--grad-accent` + `--btn-primary-shadow`.
+- **Accesibilidad:** se conserva el input real, así que teclado, `aria-checked` implícito y label envolvente siguen funcionando; el interruptor es puramente visual.
 
 ---
 
@@ -277,11 +300,11 @@ Checkbox estilizado para all-day (TaskDrawer) y switches de ajustes (`label.chec
 
 ## Plan de consolidación (priorizado)
 
-1. **`Button.svelte`** — elimina 5 duplicaciones (mayor impacto/riesgo bajo).
-2. **Unificar foco**: un solo idioma (`:focus-visible` global + ring en inputs).
+1. **`Button.svelte`** — elimina las duplicaciones (mayor impacto/riesgo bajo); los tokens ya unifican el aspecto.
+2. ~~**Unificar foco**~~ **hecho (spec 19):** un solo idioma, el `:focus-visible` global; los campos solo cambian el borde.
 3. **Unificar toasts** en un `Toast.svelte` con variantes (success/error/info).
 4. **`Modal.svelte`** con `<dialog>` nativo (focus trap + aria-modal + Escape).
 5. **Switch/Toggle** y **EmptyState/Loading/Error** como componentes.
 6. `IconButton` con tamaños fijos.
 
-> Ninguna de estas consolidaciones se hace "porque sí": se documentan como deuda real detectada en el código (ver DESIGN §9.2). La landing se construye de forma standalone y no las bloquea.
+> Ninguna de estas consolidaciones se hace "porque sí": se documentan como deuda real detectada en el código (ver DESIGN §10.2). La landing se construye de forma standalone y no las bloquea.

@@ -1,6 +1,7 @@
 # ACCESSIBILITY.md — Accesibilidad de FocusFlow
 
 **Método:** auditoría sobre el código real (`spike/frontend/src/`) + warnings de `svelte-check`/`vite-plugin-svelte` observados en el arranque del dev server. Cada hallazgo indica: estado actual, evidencia y mejora propuesta.
+**Última actualización:** 2026-10-01 (spec 19: superficie = fondo gris, relieve en controles, línea sutil en campos, interruptores accesibles).
 
 > **Principio rector:** el neumorfismo no debe destruir la accesibilidad. La profundidad visual nunca es el único indicador de estado. El producto ya cumple varios principios clave; esta auditoría separa lo que está bien de lo que es deuda.
 
@@ -11,7 +12,7 @@
 | Área | Estado |
 |------|--------|
 | Keyboard navigation | 🟡 Bueno con deudas (drag & drop sin alternativa) |
-| Focus-visible | 🟢 Global bien definido; inputs con segundo idioma |
+| Focus-visible | 🟢 Global y único (los campos ya no añaden un anillo propio) |
 | Semantic HTML | 🟡 Landmarks OK; diálogos no nativos |
 | Contrast | 🟢 Cumple AA en tokens principales |
 | Icon labels | 🟡 Mayormente OK (SVG aria-hidden + botones con label/title) |
@@ -44,7 +45,7 @@
 
 ## 3. Focus-visible
 
-**Bien:** `app.css:113-117` define globalmente:
+**Bien:** `app.css:157-161` define globalmente:
 
 ```css
 :focus-visible {
@@ -55,12 +56,14 @@
 ```
 
 - Visible siempre (ratón y teclado) con anillo de contraste alto (`--primary-soft-2`).
-- QuickAdd tiene doble indicación: borde primario + anillo inset (`:focus-within`).
+- **Un solo idioma de foco (spec 19):** los campos de todo el repo (incluidos los del `TaskDrawer`) solo cambian `border-color` a `--primary` al enfocar y **no añaden `box-shadow` propio**, para que el anillo global no choque con el pozo del campo. Se retiró el `box-shadow: 0 0 0 3px var(--primary-soft)` del drawer, que era el segundo idioma.
+- QuickAdd mantiene doble indicación: borde primario en `:focus-within` + anillo global.
+- La sidebar en modo iconos conserva el texto de las etiquetas fuera de flujo (no `display: none`), así que el botón sigue teniendo nombre accesible aunque solo se vea el icono.
 
 **Deuda detectada:**
 
-1. **Dos idiomas de foco:** los inputs de TaskDrawer (`TaskDrawer.svelte:365-367`) usan `box-shadow: 0 0 0 3px var(--primary-soft)`, mientras que el resto usa el anillo `--primary-soft-2`. Inconsistente.
-2. En widgets con muchos elementos, el outline de 2 px puede quedar oculto por transform de hover; se recomienda verificar con `:focus-visible` que el anillo no se recorte por `overflow: hidden` de las cards (EventBlocks tienen `overflow: hidden`).
+1. En widgets con muchos elementos, el outline de 2 px puede quedar oculto por transform de hover; se recomienda verificar con `:focus-visible` que el anillo no se recorte por `overflow: hidden` de las cards (EventBlocks tienen `overflow: hidden`).
+2. La línea de los campos es muy sutil (`--line-input: rgba(91, 100, 114, 0.22)`, D14) a propósito: el borde no es el indicador de foco, el anillo global lo es. En fondos de alto contraste forzados puede perderse el contorno del campo, aunque el foco siga siendo visible.
 
 ---
 
@@ -73,7 +76,8 @@
 - Formularios con `<label for>` / label envolvente.
 - `role="alert"` en error fatal y errores de formulario (Onboarding `ferrbox`, Login `err`).
 - `role="status"` en confirmaciones de conexión (Onboarding: `fok`).
-- `aria-modal="true"` + `aria-labelledby` en el diálogo de confirmación de borrado (TaskDrawer:230).
+- `aria-modal="true"` + `aria-labelledby` en el diálogo de confirmación de borrado (TaskDrawer:253).
+- **Interruptores = `<input type="checkbox">` reales** (spec 19): «Todo el día» del drawer y los ajustes de correo/Google Calendar se estilizan con `appearance: none` como riel 40×22 con knob, pero el elemento, su estado y su teclado son los nativos (`bind:checked`, label envolvente). El switcher de tema usa `role="group"` + `aria-label="Tema"`. Ningún estado se comunica solo con el color del degradado.
 
 **Deuda detectada (warnings reales del dev server):**
 
@@ -88,21 +92,39 @@
 
 ## 5. Contrast
 
-**Cumple AA (4.5:1):**
+**Superficie = fondo (spec 19):** todo se calcula sobre el gris, no sobre blanco. Ratios verificados con la fórmula WCAG 2.1 sobre los valores reales de `app.css`.
 
-- `--text-1` (`#1F2937`) sobre `--surface` (`#FFFFFF`) ≈ 15:1.
-- `--text-2` (`#6B7280`) sobre `--surface` ≈ 4.8:1.
-- Dark: `--text-1` (`#F3F4F6`) ≈ 16:1; `--text-2` (`#A6ADBB`) ≈ 4.6:1.
-- `--text-3` (`#9CA3AF`) sobre `--surface` ≈ 2.7:1 → **solo para meta/placeholder** (uso correcto, pero nunca para contenido esencial).
-- **Título de una tarea completada:** `--text-2` (`#6B7280`) sobre `--surface-2` (`#F1F2F4`) ≈ 4.2:1. Es contenido esencial, así que no baja a `--text-3`; hora y descripción (meta) sí van en `--text-3`.
-- Blanco sobre `--primary` (`#2563EB`) ≈ 4.6:1; `--primary-hover` mantiene.
-- Chips de categoría: texto = color mezclado al 60 % con `--text-1` → conserva contraste sobre su fondo soft.
+**Claro (`--surface` `#E9EDF2`)**
+
+| Par | Ratio | Veredicto |
+|-----|-------|-----------|
+| `--text-1` `#1F2937` | **12.48:1** | AAA |
+| `--text-2` `#5B6472` | **5.09:1** | AA (se oscureció desde `#6B7280`, que daba 4.4:1) |
+| `--text-3` `#7C8594` | **3.17:1** | Solo meta/placeholder, nunca contenido esencial |
+| Blanco sobre `--primary` `#2563EB` | **5.17:1** | AA |
+| `--text-2` sobre `--surface-2` `#E3E8EF` (completadas) | **4.86:1** | AA — el título tachado sigue siendo legible |
+
+**Oscuro (`--surface` `#262A32`)**
+
+| Par | Ratio | Veredicto |
+|-----|-------|-----------|
+| `--text-1` `#F3F4F6` | **13.07:1** | AAA |
+| `--text-2` `#A6ADBB` | **6.38:1** | AA |
+| `--text-3` `#6B7280` | **2.98:1** | Solo meta/placeholder |
+
+**Otras comprobaciones**
+
+- **Acento en oscuro (fix D7):** `--primary` se deriva del acento elegido con `color-mix(... 75%, #fff)`; al dejar de pisar el azul aclarado del tema, botones y enlaces vuelven a tener contraste con cualquiera de los 6 acentos.
+- Chips de categoría: texto = `color-mix(var(--c) 60%, var(--text-1))` sobre `color-mix(var(--c) 13%, var(--surface))` → conserva contraste sobre su fondo soft.
+- Línea de campos (D14): `--line-input: rgba(91, 100, 114, 0.22)` es deliberadamente tenue. No es el indicador de foco (lo es el anillo global) y no es texto, así que no se mide contra 4.5:1; aun así sirve de contorno visible para el pozo del campo.
+- Relieve: la sombra oscura bajo texto nunca es el único indicador — el texto mantiene su color plano (`--text-1/2/3`), que es donde se apoya el contraste.
 
 **Deuda / vigilancia:**
 
-1. `--text-3` en botones secundarios o kbd hints: OK como decorativo, pero si un botón usa `--text-3` como único label, falla AA (no detectado actualmente).
+1. `--text-3` en botones secundarios o `kbd` hints: correcto como decorativo, pero si un botón lo usa como único label falla AA (no detectado actualmente).
 2. `color-mix` con alpha en dark (`--primary-soft: 20% transparent`) sobre fondo varía según contexto — verificar por superficie.
-3. Semánticos en dark (`--success #34D399`, `--warning #FBBF24`, `--danger #F87171`) cumplen AA sobre surfaces oscuras (≈ 4.5:1+).
+3. Semánticos en dark (`--success #34D399`, `--warning #FBBF24`, `--danger #F87171`) cumplen AA sobre superficies oscuras (≈ 4.5:1+).
+4. Al ser el relieve puramente decorativo, conviene comprobar que en modo alto contraste (fuerza colores) los campos siguen delimiting su área: `--line-input` y `--shadow-inset-sm` no sobreviven a un `forced-colors`.
 
 ---
 
@@ -128,7 +150,7 @@
 
 ## 7. Button sizes
 
-**Bien:** los targets de acción superan 44 px de alto de interacción (QuickAdd 44 px; botones principales 36–44 px con padding generoso; checkbox 22 px pero dentro de card de 44+ px; icon buttons 30–46 px).
+**Bien:** los targets de acción superan 44 px de alto de interacción (QuickAdd 44 px; botones principales 36–44 px con padding generoso; checkbox 22 px pero dentro de card de 44+ px; icon buttons circulares 28–40 px). Los interruptores miden 40×22 px con label envolvente, así que el área clicable incluye el texto.
 
 **Vigilancia:** chips del calendario (`minichip` ~20 px) son targets pequeños — mitigado porque el área clicable del día/popup es mayor y el "más" abre el popup.
 
@@ -138,7 +160,7 @@
 
 **Excelente — es el más maduro:**
 
-- `app.css:159-166`: `@media (prefers-reduced-motion: reduce)` fuerza 120 ms en TODAS las animaciones/transiciones.
+- `app.css:203-209`: `@media (prefers-reduced-motion: reduce)` fuerza 120 ms en TODAS las animaciones/transiciones (incluidas las del neumorfismo: el press de los botones no se anima si el usuario lo pide).
 - Onboarding (`Onboarding.svelte`): detecta `matchMedia("(prefers-reduced-motion: reduce)")` y **desactiva GSAP por completo** (solo fade CSS de 0 ms).
 - Svelte transitions (`fade`, `slide`, `scale`) se reducen vía la media query global.
 
@@ -203,7 +225,7 @@
 | 1 | `role="status"`/`aria-live` en toasts y widget | Alto (anuncios) |
 | 2 | `<dialog>` nativo en confirmación de borrado + focus trap en modales | Alto (foco) |
 | 3 | Foco al abrir popup de día y propuesta de plan | Alto (navegación) |
-| 4 | Unificar idioma de foco en inputs (TaskDrawer) | Medio (consistencia) |
+| 4 | ~~Unificar idioma de foco en inputs (TaskDrawer)~~ **hecho (spec 19)** | — |
 | 5 | `aria-label` con estado en EventBlocks vencidos | Medio (screen readers) |
 | 6 | `aria-hidden` explícito en iconos decorativos del sidebar | Bajo |
 | 7 | Alternativa de teclado para drag & drop (largo plazo) | Medio (requiere diseño) |
