@@ -24,6 +24,7 @@
     topChipsOn,
     monthChipsOn,
     layoutMetrics,
+    pendingFirst,
     type Segment,
   } from "./taskDayLogic";
   import { studiesOnDay, studySegment, type StudySession } from "./studyLogic";
@@ -160,7 +161,7 @@
     let hi = DEFAULT_END;
     for (const d of days) {
       for (const t of tasks) {
-        if (t.allDay || t.status === "completada") continue;
+        if (t.allDay) continue;
         const seg = segmentFor(t, d);
         if (!seg) continue;
         lo = Math.min(lo, seg.start.getHours());
@@ -210,7 +211,7 @@
   function layoutDay(d: Date, maxCount = 999): Placed[] {
     const items: { t: Task; seg: Segment; s: number; e: number }[] = [];
     for (const t of tasks) {
-      if (t.status === "completada" || t.allDay) continue;
+      if (t.allDay) continue;
       const seg = segmentFor(t, d);
       if (!seg) continue;
       // minutos relativos al día del inicio del segmento (mismo criterio que
@@ -272,10 +273,16 @@
     return m;
   });
 
-  /** Layout visible (día → todos; semana → primeros 8 + botón "+N más"). */
+  /** Recorte a 8 visibles en semana: pendientes primero, conservando el
+   *  orden y las posiciones (top/left/width) ya calculados en layoutDay. */
+  function visibleWeekPlaced(all: Placed[]): Placed[] {
+    return [...all].sort((a, b) => pendingFirst(a.t, b.t)).slice(0, 8);
+  }
+
+  /** Layout visible (día → todos; semana → primeros 8 pendientes-primero + botón "+N más"). */
   function placedOf(d: Date): Placed[] {
     const all = fullLayouts.get(d.toDateString()) ?? [];
-    return view === "dia" ? all : all.slice(0, 8);
+    return view === "dia" ? all : visibleWeekPlaced(all);
   }
 
   /**
@@ -348,7 +355,7 @@
 
   /** Borde inferior del último evento visible (para el botón "+N más"). */
   function lastShownBottom(d: Date): number {
-    const placed = (fullLayouts.get(d.toDateString()) ?? []).slice(0, 8);
+    const placed = visibleWeekPlaced(fullLayouts.get(d.toDateString()) ?? []);
     if (placed.length === 0) return (grid.hi - grid.lo) * pxH;
     const last = Math.max(...placed.map((p) => p.top + p.height));
     return Math.min(last + 4, (grid.hi - grid.lo) * pxH);
