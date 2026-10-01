@@ -93,6 +93,7 @@ Dark: mismas estructuras con `rgba(0,0,0,0.5–0.6)`.
 3. Un solo origen de luz: arriba-izquierda. Prohibido invertir la luz en un mismo panel.
 4. Hover = subir un nivel (raised → e1/e2, translateY(-1px)).
 5. Active/pressed = **hundirse** (inset o scale 0.98). El press es un evento táctil, no un cambio de color.
+6. **Elementos flotantes = elevación, no relieve.** Modales, popovers, menús, toasts, drawers y el preview del QuickAdd usan `--e1`/`--e2`/`--e3`; **nunca `--shadow-raised*`**, cuya luz blanca deja un halo claro sobre el overlay oscuro.
 
 ---
 
@@ -194,9 +195,9 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 
 | Rol | Token | Peso | Track | Uso real |
 |-----|-------|------|-------|----------|
-| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding — **objetivo, hoy sigue en 38 px/800** |
+| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding |
 | Título de pantalla | `--fs-xl` | 700 | -0.02em | TopBar |
-| Título de sección / card | `--fs-lg` | 600 | — | h3 de propuesta y drawer; el h2 de Ajustes es **objetivo** (hoy 17 px literal) |
+| Título de sección / card | `--fs-lg` | 600 | — | h2/h3 de sección (Ajustes, propuesta, drawer) |
 | Cuerpo | `--fs-base`–`--fs-md` | 400–500 | — | Base de la app, inputs |
 | Nombre de tarea | `--fs-xs`–`--fs-md` | 500–600 | — | EventBlock / TaskCard |
 | Meta/horas | `--fs-2xs`–`--fs-sm` | 600 | — | `tabular-nums` SIEMPRE |
@@ -204,11 +205,11 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 | Hora del calendario | `--fs-xs` | 600 | — | gutter, tabular-nums |
 | Placeholder | `--fs-base` | 400 | — | `--text-3` |
 
-> **Alcance de la migración:** la tabla describe el sistema **objetivo**. `Onboarding.svelte` (hero, pasos) y `Settings.svelte` (h2 de sección, 22 px/700 del título de pantalla) aún tienen tamaños y pesos literales: entran en la **fase 2** (spec 18 §4, T10–T15).
+> **Migración completa (spec 18):** la tabla describe el sistema real. Ningún componente de `spike/frontend/src/lib` ni `App.svelte` conserva un `font-size` literal; el hero de `Onboarding.svelte` ya es `--fs-2xl`/700 y `Settings.svelte` sale de tokens.
 
 ### 4.3 Regla de pesos
 
-400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 queda **pendiente de eliminar** (hoy Onboarding y Settings aún lo usan; su conversión a 700 es objetivo de la fase 2, T11). Los overlines van en 600 manteniendo uppercase + tracking.
+400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 ya no existe en el código (se eliminó en la fase 2). Los overlines van en 600 manteniendo uppercase + tracking.
 
 ### 4.4 Reglas tipográficas
 
@@ -217,7 +218,8 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 3. Títulos cortos: 1 línea con ellipsis; descripciones máx. 2–3 líneas con `-webkit-line-clamp`.
 4. `text-wrap: balance` en titulares largos (onboarding).
 5. Texto nunca se difumina: color plano, peso ≥ 400.
-6. **Ningún `font-size` literal:** todo sale de `--fs-*`. Ya se cumple en el **núcleo diario** — `Calendar`, `EventBlock`, `TaskCheck`, `TopBar`, `Sidebar`, `TitleBar`, `App`, `TaskDrawer`, `QuickAdd` y `Widget` —; el resto de pantallas (Ajustes, Onboarding, Login, Asistente, Sugerencias, sesiones de estudio, agenda) se migra en la fase 2.
+6. **Ningún `font-size` literal:** todo sale de `--fs-*`. Cumplido en toda la app: núcleo diario (`Calendar`, `EventBlock`, `TaskCheck`, `TopBar`, `Sidebar`, `TitleBar`, `App`, `TaskDrawer`, `QuickAdd`, `Widget`) y fase 2 (`Settings`, `Onboarding`, `Login`, `Assistant`, `PlanProposal`, `Suggestions`, `ContextualToast`, `ClassConflictDialog`, `StudySessions`, `StudyForm`, `Schedule`, `ClassForm`).
+7. **Capitalización en español: solo la primera letra.** Nada de `text-transform: capitalize` (daría «Sesiones De Estudio», «30 De Septiembre»). La inicial la aplica el helper `cap()` de `TopBar.svelte` al título de la vista.
 
 ---
 
@@ -322,13 +324,15 @@ Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son esp
 - Hover universal: translateY(-1px) + sombra un nivel arriba, 150 ms.
 
 ### 9.2 Inconsistencias detectadas (deuda visual — registrar, no "arreglar" sin plan)
-1. **Radios de botón inconsistentes:** el núcleo diario ya usa tokens (`--r-sm` en TaskDrawer, `--r-md` en QuickAdd), pero quedan literales en Suggestions, Settings, ContextualToast y los pills de Onboarding (fase 2).
+1. ~~**Radios de botón inconsistentes**~~ **resuelto:** todos los `border-radius` salen ya de `--r-*` (núcleo diario y fase 2); no quedan literales en px.
 2. **`.btn` duplicado con variantes locales:** cada componente redefine su `.btn` (Suggestions, Settings, TaskDrawer, ContextualToast, PlanProposal) con diferencias sutiles (padding 8/16 vs 9/14 vs 7/12). No existe un `Button.svelte` global — el componente está **propuesto**.
-3. **Foco:** `:focus-visible` global define outline 2 px `--primary-soft-2`, pero TaskDrawer y Settings usan `box-shadow: 0 0 0 3px var(--primary-soft)` en inputs — dos idiomas de foco.
-4. **Overlines:** la mayoría usa `text-transform: uppercase` + `letter-spacing 0.06–0.1em`, pero algunas etiquetas (día del popup, título del drawer) usan `text-transform: capitalize` — mezcla de convenciones.
+3. **Foco:** `:focus-visible` global define outline 2 px `--primary-soft-2`, pero `TaskDrawer` sigue usando `box-shadow: 0 0 0 3px var(--primary-soft)` en inputs (`Settings` ya usa el foco global) — dos idiomas de foco.
+4. **Overlines/capitalización:** la mayoría usa `text-transform: uppercase` + `letter-spacing 0.06–0.1em` (lo correcto en español). El `capitalize` se quitó de la TopBar (helper `cap()`), pero el encabezado del popup de día (`.pop-head`, `Calendar.svelte:965`) sigue con `text-transform: capitalize`.
 5. ~~Sombras de drawer vs modal~~ **resuelto:** el drawer y su diálogo de borrado usan ya `--e3`, la misma elevación que los modales.
 6. **Drag toast vs toast contextual:** dos sistemas de toast distintos (`.drag-toast` en Calendar, `.toast` en ContextualToast, `.toast` en QuickAdd) con estilos diferentes.
 7. **`.ghost` (sin fondo)** y **`.danger`** como variantes de botón solo existen en algunos componentes.
+8. **Relieve en elementos flotantes:** `.fatal` (`App.svelte`, banner fijo) y `.widget` (`Widget.svelte`) todavía usan `--shadow-raised-lg`; la regla del §2.6 pide elevación (`--e2`/`--e3`) en lo que flota, no relieve.
+9. **Pesos 700 fuera de rol:** `Assistant.svelte:439` (`.task-ref-level`) y `Settings.svelte:1213` (`.vdot`) siguen en 700; según §4.3 solo el título de pantalla y el hero lo usan.
 
 ---
 
