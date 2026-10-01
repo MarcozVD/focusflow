@@ -4,6 +4,7 @@
   // redimensionar, click), color propio (--study) y rótulo distinto.
   import { cat, openTaskDetail, type Task } from "./data.svelte";
   import type { StudySession } from "./studyLogic";
+  import TaskCheck from "./TaskCheck.svelte";
 
   interface Seg {
     start: Date;
@@ -130,6 +131,9 @@
       <span class="evt-time-mini">{fmt(seg.start)}</span>
       <span class="evt-title"><span class="strike">{label}</span></span>
     </span>
+  {/if}
+  {#if !compact && !isStudy}
+    <span class="check-slot"><TaskCheck {task} /></span>
   {/if}
   {#if !done}
     <span
@@ -322,6 +326,23 @@
     place-items: center;
     color: var(--text-3);
     flex-shrink: 0;
+  }
+  /* Check rápido: solo en bloques no compactos de tareas (oculto hasta
+     hover/focus; siempre visible en completadas) */
+  .check-slot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 3;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .evt:hover .check-slot,
+  .evt:focus-within .check-slot {
+    opacity: 1;
+  }
+  .evt.done .check-slot {
+    opacity: 1;
   }
   .resize {
     position: absolute;

@@ -28,6 +28,7 @@
     type Segment,
   } from "./taskDayLogic";
   import { studiesOnDay, studySegment, type StudySession } from "./studyLogic";
+  import TaskCheck from "./TaskCheck.svelte";
 
   let {
     view,
@@ -660,13 +661,16 @@
             <p class="pop-empty">Sin tareas este día.</p>
           {/if}
           {#each monthChipsOf(popupDay) as t (t.id)}
-            <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
-              <span class="pop-dot"></span>
-              <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipTextFor(t, popupDay)}</span>
-              <span class="pop-time">
-                {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
-              </span>
-            </button>
+            <div class="chip-wrap" class:done={t.status === "completada"}>
+              <span class="check-slot"><TaskCheck task={t} /></span>
+              <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
+                <span class="pop-dot"></span>
+                <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipTextFor(t, popupDay)}</span>
+                <span class="pop-time">
+                  {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
+                </span>
+              </button>
+            </div>
           {/each}
         </div>
         <button class="pop-go" onclick={() => { if (popupDay) onSelectDate(popupDay); popupDay = null; }}>
@@ -698,15 +702,18 @@
           <div class="allday-row" bind:this={alldayEls[di]}>
             {#if view !== "semana"}<span class="allday-label">Todo el día</span>{/if}
             {#each visibleTopChipsOf(d) as t (t.id)}
-              <button
-                type="button"
-                class="allday-chip {!t.allDay ? 'cont' : ''}"
-                style="--c: {cat(t.categoryId).color}"
-                title={sameDay(t.start, t.end)
-                  ? t.title
-                  : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
-                onclick={() => openTaskDetail(t)}
-              >{chipTextFor(t, d)}</button>
+              <div class="chip-wrap" class:done={t.status === "completada"}>
+                <button
+                  type="button"
+                  class="allday-chip {!t.allDay ? 'cont' : ''}"
+                  style="--c: {cat(t.categoryId).color}"
+                  title={sameDay(t.start, t.end)
+                    ? t.title
+                    : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
+                  onclick={() => openTaskDetail(t)}
+                >{chipTextFor(t, d)}</button>
+                <span class="check-slot"><TaskCheck task={t} size={14} /></span>
+              </div>
             {/each}
             {#if restTopChipsOf(d) > 0}
               <span class="allday-more">+{restTopChipsOf(d)}</span>
@@ -979,6 +986,26 @@
     text-align: center;
     margin: var(--s-3) 0;
   }
+  /* Wrap del popup: check a la izquierda EN FLUJO (reserva su espacio aunque
+     esté oculto) y la fila ocupa el resto */
+  .pop-list .chip-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .pop-list .check-slot {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .pop-list .chip-wrap:hover .check-slot,
+  .pop-list .chip-wrap:focus-within .check-slot,
+  .pop-list .chip-wrap.done .check-slot {
+    opacity: 1;
+  }
   .pop-item {
     display: flex;
     align-items: center;
@@ -988,7 +1015,8 @@
     padding: 9px 12px;
     font-size: 13px;
     border: none;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     color: inherit;
     text-align: left;
     cursor: pointer;
@@ -1198,6 +1226,29 @@
   .allday-chip.cont {
     border: 1px dashed color-mix(in srgb, var(--c) 45%, transparent);
     background: color-mix(in srgb, var(--c) 8%, var(--surface));
+  }
+  /* Wrap del chip + check: ocupa el mismo hueco flex que ocupaba el chip */
+  .allday-row .chip-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex-shrink: 1;
+    max-width: 100%;
+  }
+  .allday-row .check-slot {
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .allday-row .chip-wrap:hover .check-slot,
+  .allday-row .chip-wrap:focus-within .check-slot,
+  .allday-row .chip-wrap.done .check-slot {
+    opacity: 1;
   }
   .allday-more {
     font-size: 10px;
