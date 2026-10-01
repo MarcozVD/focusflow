@@ -10,7 +10,7 @@
 
 | # | Tema | Decisión |
 |---|------|----------|
-| D1 | Alcance de completadas | Visibles en **todo el calendario**: semana, día, mes y popup del día. Widget (Ahora/Siguiente), contadores del Sidebar, selector de StudyForm, Sugerencias, `studyConflicts` y guard de conflicto de clase **siguen excluyéndolas**. |
+| D1 | Alcance de completadas | Visibles en **todo el calendario**: semana, día, mes y popup del día. Widget (Ahora/Siguiente), contadores del Sidebar, selector de StudyForm, Sugerencias, `studyConflicts` y guard de conflicto de clase **siguen excluyéndolas**. **Excepción multi-día:** una completada de varios días solo se ve en su día de inicio y en su día de fin; en los intermedios no aparece (si no, el calendario se llenaba de repeticiones grises). Feedback del usuario al probar en Tauri. |
 | D2 | Look de completada | **Hundida gris**: fondo `--surface-2`, sombra `--shadow-inset` (más profunda que la `--shadow-inset-sm` de las pendientes), borde izquierdo `--text-3`, título tachado en `--text-2` (contenido esencial: `--text-3` es solo para meta, ACCESSIBILITY.md §5; hora y descripción sí en `--text-3`), icono ✓. **Sin `opacity` global** (legibilidad). Sin hover-lift. |
 | D3 | Interacción | **Solo click** (abre TaskDrawer → "Reabrir"). Sin arrastrar ni redimensionar. z-index por debajo de las pendientes. |
 | D4 | Completar desde calendario | **Check al hover/focus**: círculo neumórfico en bloques no compactos, chips de la fila superior y filas del popup. Click = completar/reabrir sin abrir el drawer. Bloques compactos (<36 px) y minichips del mes: solo vía drawer. En una completada el check queda **siempre visible** (hace de indicador ✓). |
@@ -74,7 +74,8 @@ Paso 0 (orquestador): capturas **antes** (ver §5).
 - Nuevo comparador puro y estable `pendingFirst(a, b)`: no-completadas antes que completadas, sin alterar el orden relativo dentro de cada grupo.
 - Aplicarlo en `monthChipsOn` y `topChipsOn` (sobre el resultado concatenado).
 - `agendaDays` / `groupAgenda`: **no tocar** (D13).
-- Tests (`taskDayLogic.test.ts`): invertir l.128 ("tasksOnDay **incluye** completadas"); nuevos: orden pendientes-primero en `monthChipsOn` y `topChipsOn`, estabilidad del orden cronológico dentro de cada grupo, multi-día completada en chips intermedios. El test l.192 (agenda) se mantiene.
+- **Excepción multi-día:** las completadas multi-día solo se ven el día de inicio y el de fin; en los intermedios no. Se resuelve en `tasksOnDay` con un helper puro `isMiddleDay(t, d)` (reutilizado luego en `multiDayChipsOn`, que ya tenía ese cálculo inline): `isMultiDay(t) && !sameDay(t.start, d) && !sameDay(new Date(lastCoveredDayMs(t)), d)`. El `lastCoveredDayMs` es lo que hace que un fin a medianoche cuente como día de fin y no como intermedio. Las pendientes multi-día no cambian.
+- Tests (`taskDayLogic.test.ts`): invertir l.128 ("tasksOnDay **incluye** completadas"); nuevos: orden pendientes-primero en `monthChipsOn` y `topChipsOn`, estabilidad del orden cronológico dentro de cada grupo, `isMiddleDay` (inicio/intermedio/tarea de un día/fin a medianoche) y la ausencia de completadas multi-día con horario y all-day en los intermedios, con una pendiente multi-día como control. El test l.192 (agenda) se mantiene.
 
 **Aceptación:** `npm test` verde.
 

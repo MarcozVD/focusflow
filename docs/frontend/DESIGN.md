@@ -166,6 +166,8 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 **Regla de oro:** el color nunca es el único indicador de estado. Vencida = fondo tintado + borde punteado + texto; completada = tachado + superficie hundida gris + ✓; prioridad = badge + punto.
 
 > Las completadas son **plenamente visibles en el calendario** (semana, día, mes y popup): hundidas en gris, nunca difuminadas con `opacity`. El título usa `--text-2` y no `--text-3` porque es contenido esencial (ver ACCESSIBILITY §5); `--text-3` queda para hora, descripción y punto de categoría.
+>
+> **Excepción multi-día:** una completada de varios días solo se ve en su día de inicio y en su día de fin; en los intermedios no aparece, para no repetir la misma tarea en gris cada día.
 
 ---
 

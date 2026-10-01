@@ -110,7 +110,7 @@
 
 - Se derivan automáticamente (no requieren acción del usuario).
 - Visual: borde izquierdo dashed + fondo tintado + badge.
-- El usuario las completa o las mueve. Al completarlas **siguen en el calendario** — hundidas en gris y tachadas, no se borran de un golpe — pero **salen del resto de superficies activas**: widget (Ahora/Siguiente), contadores del Sidebar, Sugerencias, selector de StudyForm y detección de conflictos.
+- El usuario las completa o las mueve. Al completarlas **siguen en el calendario** — hundidas en gris y tachadas, no se borran de un golpe — pero **salen del resto de superficies activas**: widget (Ahora/Siguiente), contadores del Sidebar, Sugerencias, selector de StudyForm y detección de conflictos. Una completada de varios días solo queda visible en su **día de inicio y el de fin**: los intermedios no la muestran, para no repetirla en gris cada día.
 - En Agenda y widget aparecen primero (relevancia).
 
 ---
