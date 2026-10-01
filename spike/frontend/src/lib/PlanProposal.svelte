@@ -321,17 +321,22 @@
   }
   .x {
     border: none;
-    background: transparent;
+    background: var(--surface);
     color: var(--text-3);
     font-size: var(--fs-md);
     cursor: pointer;
     padding: var(--s-1_5);
-    border-radius: var(--r-xs);
+    border-radius: 50%;
+    box-shadow: var(--btn-shadow);
     flex-shrink: 0;
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .x:hover {
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
     color: var(--text-1);
+  }
+  .x:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .body {
     overflow-y: auto;
@@ -398,6 +403,7 @@
     background: color-mix(in srgb, var(--c, var(--primary)) 13%, var(--surface));
     border-radius: var(--r-full);
     padding: var(--s-1) var(--s-2);
+    box-shadow: var(--shadow-raised-sm);
   }
   .chip.src {
     --c: var(--primary);
@@ -444,6 +450,7 @@
     background: color-mix(in srgb, var(--success) 14%, var(--surface));
     border-radius: var(--r-full);
     padding: var(--s-0_5) var(--s-2);
+    box-shadow: var(--shadow-raised-sm);
     flex-shrink: 0;
   }
   .warn {
@@ -453,6 +460,7 @@
     background: color-mix(in srgb, var(--warning) 14%, var(--surface));
     border-radius: var(--r-full);
     padding: var(--s-0_5) var(--s-2);
+    box-shadow: var(--shadow-raised-sm);
     flex-shrink: 0;
   }
   .warn-note {
@@ -494,8 +502,9 @@
     letter-spacing: 0.04em;
     color: var(--warning);
     background: var(--warning-bg);
-    border-radius: var(--r-xs);
+    border-radius: var(--r-full);
     padding: 1px var(--s-1_5);
+    box-shadow: var(--shadow-raised-sm);
   }
   .edit-row {
     display: flex;
@@ -503,32 +512,40 @@
     gap: var(--s-1_5);
   }
   .edit-row input {
-    border: none;
-    background: var(--surface-3);
-    box-shadow: var(--shadow-inset-sm);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-full);
     padding: var(--s-1_5) var(--s-2);
     color: var(--text-1);
     font-family: inherit;
     font-size: var(--fs-sm);
-    outline: none;
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
   .edit-row input:focus {
-    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
+    border-color: var(--primary);
   }
   .arr {
     color: var(--text-3);
   }
   .mini {
     border: none;
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--danger);
-    border-radius: var(--r-xs);
+    box-shadow: var(--btn-shadow);
+    border-radius: 50%;
     width: 26px;
     height: 26px;
     cursor: pointer;
     font-size: var(--fs-sm);
     flex-shrink: 0;
+    transition: box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .mini:hover {
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .mini:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .link {
     align-self: flex-start;
@@ -581,35 +598,36 @@
   }
   .btn {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
-  .btn.primary:hover {
-    background: var(--primary-hover);
+  .btn.primary:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.ghost {
-    background: transparent;
-    box-shadow: none;
+    background: var(--surface);
   }
   .btn.ghost:hover {
-    background: var(--surface-2);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:disabled {
     opacity: 0.5;

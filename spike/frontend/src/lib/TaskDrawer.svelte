@@ -366,8 +366,40 @@
     cursor: pointer;
     padding: var(--s-0_5) 0;
   }
-  label.check input {
-    width: auto;
+  /* Checkbox 'Todo el día' → interruptor visual (misma lógica y accesible) */
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+    margin: 0;
+    border: var(--input-border);
+    border-radius: var(--r-full);
+    background: var(--surface);
+    box-shadow: var(--shadow-inset-sm);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
+  input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  input[type="checkbox"]:checked {
+    background: var(--grad-accent);
+    border-color: transparent;
+  }
+  input[type="checkbox"]:checked::before {
+    transform: translateX(18px);
   }
   input:disabled {
     opacity: 0.45;

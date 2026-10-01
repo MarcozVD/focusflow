@@ -576,18 +576,19 @@
     height: 38px;
     border-radius: var(--r-full);
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
     font-size: var(--fs-lg);
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .back:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .back:active {
-    transform: scale(0.96);
+    box-shadow: var(--btn-shadow-active);
   }
   .back:focus-visible {
     outline: 2px solid var(--primary);
@@ -703,15 +704,14 @@
     color: var(--text-2);
   }
   .inp {
-    border: 1px solid transparent;
-    background: var(--surface-3);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    box-shadow: var(--shadow-inset-sm);
+    box-shadow: var(--input-shadow);
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .inp:focus {
@@ -752,7 +752,7 @@
   }
   .pill {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
     border-radius: var(--r-full);
     padding: var(--s-1_5) var(--s-3);
@@ -760,16 +760,17 @@
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .pill:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .pill.on {
-    background: var(--primary-soft);
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
-    color: var(--primary);
+    background: var(--grad-accent);
+    color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
   .pill:focus-visible {
     outline: 2px solid var(--primary);
@@ -881,37 +882,39 @@
   }
   .btn {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-1);
     border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-6);
     font-size: var(--fs-base);
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
   .btn.primary:hover {
-    background: var(--primary-hover);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
+    filter: brightness(1.05);
   }
   .btn.primary:active {
-    background: var(--primary-active);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.ghost {
-    background: transparent;
-    box-shadow: none;
+    background: var(--surface);
   }
   .btn.big {
     padding: var(--s-3) var(--s-8);

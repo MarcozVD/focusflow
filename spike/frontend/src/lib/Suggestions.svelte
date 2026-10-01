@@ -364,6 +364,7 @@
     border-radius: var(--r-full);
     background: var(--surface-3);
     color: var(--text-2);
+    box-shadow: var(--shadow-raised-sm);
   }
   .kind {
     display: inline-flex;
@@ -375,6 +376,7 @@
     border-radius: var(--r-full);
     background: var(--primary-soft);
     color: var(--primary);
+    box-shadow: var(--shadow-raised-sm);
   }
   .kind .kdot {
     width: 7px;
@@ -419,13 +421,12 @@
     flex: 1;
   }
   .btn.ghost {
-    background: transparent;
-    box-shadow: none;
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
     border: none;
   }
   .btn.ghost:hover {
-    background: var(--surface-2);
-    transform: none;
+    box-shadow: var(--btn-shadow-hover);
   }
   .conf {
     margin-left: auto;
@@ -457,6 +458,7 @@
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-radius: var(--r-full);
     padding: var(--s-1) var(--s-2);
+    box-shadow: var(--shadow-raised-sm);
   }
   .prio {
     color: var(--danger);
@@ -482,33 +484,32 @@
   }
   .btn {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.primary {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
-  .btn.primary:hover {
-    background: var(--primary-hover);
+  .btn.primary:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.danger {
     color: var(--danger);
-  }
-  .btn.danger:hover {
-    background: var(--danger-bg);
   }
   .btn:disabled {
     opacity: 0.5;
@@ -516,19 +517,18 @@
   }
   .t {
     width: 100%;
-    border: none;
-    background: var(--surface-3);
-    box-shadow: var(--shadow-inset-sm);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-md);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    transition: box-shadow var(--dur-fast) var(--ease-out);
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
   .t:focus {
-    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
+    border-color: var(--primary);
   }
   textarea {
     resize: vertical;
@@ -549,19 +549,18 @@
   }
   .grid input,
   .grid select {
-    border: none;
-    background: var(--surface-3);
-    box-shadow: var(--shadow-inset-sm);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-2);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    transition: box-shadow var(--dur-fast) var(--ease-out);
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
   .grid input:focus,
   .grid select:focus {
-    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
+    border-color: var(--primary);
   }
   .mt {
     margin: 0;
