@@ -1,7 +1,27 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { toggleTheme, categories, tasks as tasksStore, DAYS_ES, suggestionsPending, bumpClassAdd, studySessions, bumpStudyAdd } from "./data.svelte";
 
   type View = "semana" | "dia" | "mes" | "horario" | "sesiones" | "sugerencias" | "ajustes" | "asistente";
+  type SidebarMode = "auto" | "collapsed" | "expanded";
+
+  const SIDEBAR_KEY = "ff.sidebar";
+
+  function readSidebarMode(): SidebarMode {
+    try {
+      const v = localStorage.getItem(SIDEBAR_KEY);
+      return v === "collapsed" || v === "expanded" ? v : "auto";
+    } catch {
+      return "auto";
+    }
+  }
+  function saveSidebarMode(m: SidebarMode) {
+    try {
+      localStorage.setItem(SIDEBAR_KEY, m);
+    } catch {
+      // sin persistencia (p. ej. almacenamiento bloqueado)
+    }
+  }
 
   let {
     view,
@@ -28,18 +48,52 @@
   const tasks = $derived(tasksStore());
   const pending = $derived(tasks.filter((t) => t.status !== "completada").length);
   const pendingSug = $derived(suggestionsPending());
+
+  // Modo de barra: 'auto' colapsa por debajo de 1200px de ancho.
+  let mode = $state<SidebarMode>(readSidebarMode());
+  let narrow = $state(false);
+  onMount(() => {
+    const mq = window.matchMedia("(max-width: 1199px)");
+    narrow = mq.matches;
+    const onChange = (e: MediaQueryListEvent) => (narrow = e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  });
+
+  const collapsed = $derived(mode === "auto" ? narrow : mode === "collapsed");
+
+  function toggleSidebar() {
+    const next = !collapsed; // estado contrario al actual
+    // si coincide con lo que haría 'auto' ahora, vuelve al modo automático
+    const newMode: SidebarMode = next === narrow ? "auto" : next ? "collapsed" : "expanded";
+    mode = newMode;
+    saveSidebarMode(newMode);
+  }
 </script>
 
-<div class="side">
+<div class="side" class:collapsed>
   <div class="logo-row">
     <div class="logo">F</div>
     <span class="brand">FocusFlow</span>
+    <button
+      class="collapse-btn"
+      onclick={toggleSidebar}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Expandir barra lateral" : "Contraer barra lateral"}
+      title={collapsed ? "Expandir barra lateral" : "Contraer barra lateral"}
+    >
+      <svg class:flip={collapsed} width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <path d="M11 17L6 12L11 7M18 17L13 12L18 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
   </div>
 
   <nav>
     {#each NAV as item}
       <button
         class="nav-item {view === item.id ? 'active' : ''}"
+        title={item.label}
+        aria-label={item.label}
         onclick={() => setView(item.id)}
       >
         <span class="ico">
@@ -63,7 +117,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15A1.65 1.65 0 0 0 21 12.36V11.64A1.65 1.65 0 0 0 19.4 9 1.65 1.65 0 0 0 19.4 6.6 1.65 1.65 0 0 0 17 5.6 1.65 1.65 0 0 0 15 4 1.65 1.65 0 0 0 12.36 5.6H11.64A1.65 1.65 0 0 0 9 4a1.65 1.65 0 0 0-1.4 1.6A1.65 1.65 0 0 0 5.6 6.6 1.65 1.65 0 0 0 4 9a1.65 1.65 0 0 0 1.6 1.4v1.2A1.65 1.65 0 0 0 4 12.36v1.28A1.65 1.65 0 0 0 5.6 15 1.65 1.65 0 0 0 4.6 17.4 1.65 1.65 0 0 0 7 18.4 1.65 1.65 0 0 0 9 20a1.65 1.65 0 0 0 2.64-1.6h1.28A1.65 1.65 0 0 0 15 20a1.65 1.65 0 0 0 1.4-1.6A1.65 1.65 0 0 0 19 17.4a1.65 1.65 0 0 0 1-2Z" stroke="currentColor" stroke-width="2"/></svg>
           {/if}
         </span>
-        {item.label}
+        <span class="nav-label">{item.label}</span>
         {#if item.id === "sugerencias" && pendingSug > 0}
           <span class="badge">{pendingSug}</span>
         {/if}
@@ -71,14 +125,14 @@
     {/each}
   </nav>
 
-  <button class="add-horario" onclick={() => { setView("horario"); bumpClassAdd(); }}>
+  <button class="add-horario" title="Añadir horario" aria-label="Añadir horario" onclick={() => { setView("horario"); bumpClassAdd(); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
-    Añadir horario
+    <span class="add-label">Añadir horario</span>
   </button>
 
-  <button class="add-horario add-study" onclick={() => { setView("sesiones"); bumpStudyAdd(); }}>
+  <button class="add-horario add-study" title="Añadir sesión de estudio" aria-label="Añadir sesión de estudio" onclick={() => { setView("sesiones"); bumpStudyAdd(); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
-    Añadir sesión de estudio
+    <span class="add-label">Añadir sesión de estudio</span>
   </button>
 
   <div class="section-label">Categorías</div>
@@ -98,9 +152,9 @@
     <div class="tb-pending">{pending} pendientes</div>
   </div>
 
-  <button class="theme-btn" onclick={toggleTheme} title="Cambiar tema">
+  <button class="theme-btn" onclick={toggleTheme} title="Cambiar tema" aria-label="Cambiar tema">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-    Tema
+    <span class="theme-label">Tema</span>
   </button>
 </div>
 
@@ -114,12 +168,99 @@
     gap: var(--s-3);
     padding: var(--s-6);
     overflow-y: auto;
+    transition: width var(--dur-base) var(--ease-out), padding var(--dur-base) var(--ease-out);
+  }
+  /* Modo iconos (~72px): etiquetas fuera de flujo (accesibles, sin reflow) */
+  .side.collapsed {
+    width: 72px;
+    padding: var(--s-3) var(--s-2);
+  }
+  .side.collapsed .brand,
+  .side.collapsed .nav-label,
+  .side.collapsed .add-label,
+  .side.collapsed .theme-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .side.collapsed .logo-row {
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--s-2);
+    margin-bottom: var(--s-3);
+  }
+  .side.collapsed .collapse-btn {
+    margin-left: 0;
+  }
+  .side.collapsed .nav-item {
+    justify-content: center;
+    gap: 0;
+    padding: var(--s-2);
+  }
+  .side.collapsed .nav-item .badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin-left: 0;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 var(--s-0_5);
+  }
+  .side.collapsed .add-horario {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    margin: var(--s-2) auto;
+    border-radius: 50%;
+  }
+  .side.collapsed .add-horario.add-study {
+    margin-top: var(--s-2);
+  }
+  .side.collapsed .theme-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    margin: 0 auto;
+    border-radius: 50%;
+  }
+  .side.collapsed .section-label,
+  .side.collapsed .cats,
+  .side.collapsed .today-box {
+    display: none;
   }
   .logo-row {
     display: flex;
     align-items: center;
     gap: var(--s-2);
     margin-bottom: var(--s-5);
+  }
+  .collapse-btn {
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    border-radius: var(--r-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+  .collapse-btn:hover {
+    background: var(--surface-2);
+    color: var(--text-1);
+  }
+  .collapse-btn svg.flip {
+    transform: scaleX(-1);
   }
   .logo {
     width: 34px;
@@ -146,6 +287,7 @@
     gap: var(--s-2);
   }
   .nav-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--s-3);
