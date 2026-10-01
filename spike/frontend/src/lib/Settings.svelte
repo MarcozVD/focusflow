@@ -382,9 +382,9 @@
     <p class="hint">
       El tema y el color de acento se guardan y se aplican a la vez en la app y en el widget.
     </p>
-    <div class="row">
-      <button class="btn {curTheme === 'light' ? 'primary' : ''}" onclick={() => pickTheme("light")}>Claro</button>
-      <button class="btn {curTheme === 'dark' ? 'primary' : ''}" onclick={() => pickTheme("dark")}>Oscuro</button>
+    <div class="switcher" role="group" aria-label="Tema">
+      <button class="sw {curTheme === 'light' ? 'on' : ''}" onclick={() => pickTheme("light")}>Claro</button>
+      <button class="sw {curTheme === 'dark' ? 'on' : ''}" onclick={() => pickTheme("dark")}>Oscuro</button>
     </div>
     <div class="accents">
       {#each ACCENTS as c}
@@ -875,25 +875,60 @@
     align-items: center;
     gap: var(--s-2);
   }
-  input,
+  input:not([type="checkbox"]),
   textarea {
-    border: none;
-    background: var(--surface-3);
-    box-shadow: var(--shadow-inset-sm);
-    border-radius: var(--r-sm);
+    border: var(--input-border);
+    background: var(--input-bg);
+    box-shadow: var(--input-shadow);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
     font-family: inherit;
-    outline: none;
-    transition: box-shadow var(--dur-fast) var(--ease-out);
+    transition: border-color var(--dur-fast) var(--ease-out);
   }
-  input:focus,
+  input:not([type="checkbox"]):focus,
   textarea:focus {
-    box-shadow: var(--shadow-inset-sm), inset 0 0 0 2px var(--primary-soft-2);
+    border-color: var(--primary);
   }
   textarea {
+    border-radius: var(--r-lg);
     resize: vertical;
+  }
+  /* Checkbox → interruptor visual (mismo <input>, misma lógica y accesible) */
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+    margin: 0;
+    border: var(--input-border);
+    border-radius: var(--r-full);
+    background: var(--surface);
+    box-shadow: var(--shadow-inset-sm);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
+  input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  input[type="checkbox"]:checked {
+    background: var(--grad-accent);
+    border-color: transparent;
+  }
+  input[type="checkbox"]:checked::before {
+    transform: translateX(18px);
   }
   .row {
     display: flex;
@@ -907,6 +942,36 @@
     color: var(--text-2);
     margin-bottom: var(--s-1);
   }
+  /* Selector Claro/Oscuro: riel hundido + opción activa elevada (como TopBar) */
+  .switcher {
+    display: inline-flex;
+    width: fit-content;
+    background: var(--surface);
+    border-radius: var(--r-full);
+    box-shadow: var(--shadow-inset-sm);
+    padding: var(--s-1);
+    gap: var(--s-0_5);
+  }
+  .sw {
+    border: none;
+    background: transparent;
+    border-radius: var(--r-full);
+    padding: var(--s-1_5) var(--s-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-3);
+    font-family: inherit;
+    cursor: pointer;
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+  .sw:hover {
+    color: var(--text-1);
+  }
+  .sw.on {
+    background: var(--grad-accent);
+    color: #fff;
+    box-shadow: var(--btn-shadow);
+  }
   .accents {
     display: flex;
     gap: var(--s-2);
@@ -918,6 +983,7 @@
     border-radius: 50%;
     border: none;
     background: var(--sw);
+    box-shadow: var(--btn-shadow);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -927,47 +993,42 @@
   }
   .swatch:hover {
     transform: scale(1.12);
+    box-shadow: var(--btn-shadow-hover);
   }
   .swatch.on {
-    box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--sw);
+    box-shadow: var(--btn-shadow), 0 0 0 3px var(--surface), 0 0 0 5px var(--sw);
     transform: scale(1.08);
   }
   .btn {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
+    box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-5);
     font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .btn:hover {
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
   }
-  .btn.primary {
-    background: var(--primary);
-    color: #fff;
-  }
-  .btn.primary:hover {
-    background: var(--primary-hover);
-  }
+  .btn.primary,
   .btn.primary-solid {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
-  .btn.primary-solid:hover {
-    background: var(--primary-hover);
+  .btn.primary:active,
+  .btn.primary-solid:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .btn.danger {
     color: var(--danger);
-  }
-  .btn.danger:hover {
-    background: var(--danger-bg);
   }
   .btn:disabled {
     opacity: 0.5;
@@ -980,7 +1041,7 @@
   }
   .pill {
     border: none;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text-2);
     border-radius: var(--r-full);
     padding: var(--s-1_5) var(--s-3);
@@ -988,16 +1049,17 @@
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .pill:hover {
     color: var(--primary);
-    background: var(--surface-3);
+    box-shadow: var(--btn-shadow-hover);
   }
   .pill.on {
-    background: var(--primary-soft);
-    box-shadow: inset 0 0 0 2px var(--primary-soft-2);
-    color: var(--primary);
+    background: var(--grad-accent);
+    color: #fff;
+    box-shadow: var(--btn-primary-shadow);
   }
   .sync-run {
     background: var(--surface-2);
