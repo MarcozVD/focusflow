@@ -86,11 +86,12 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--s-5);
+    /* tarjeta: gap y padding un escalón por encima (aire) */
+    gap: var(--s-6);
     background: var(--surface);
     border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
-    border-radius: 24px;
-    padding: var(--s-8);
+    border-radius: var(--r-lg);
+    padding: var(--s-10);
     box-shadow: var(--shadow-raised-lg);
   }
   .logo {
@@ -98,7 +99,7 @@
     height: 64px;
     display: grid;
     place-items: center;
-    border-radius: 18px;
+    border-radius: var(--r-md);
     background: var(--surface-2, var(--surface));
   }
   .logo img {
@@ -107,7 +108,7 @@
   }
   h1 {
     margin: 0;
-    font-size: 1.6rem;
+    font-size: var(--fs-xl);
   }
   .sub {
     color: var(--text-dim, inherit);
@@ -117,12 +118,12 @@
   .btn.google {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--s-2);
     background: #fff;
     color: #1f1f1f;
     border: 1px solid rgba(0, 0, 0, 0.15);
-    padding: 12px 22px;
-    border-radius: 999px;
+    padding: var(--s-3) var(--s-6);
+    border-radius: var(--r-full);
     font-weight: 600;
     cursor: pointer;
   }
@@ -135,10 +136,10 @@
   }
   .err {
     color: var(--danger, #dc2626);
-    font-size: 0.85rem;
+    font-size: var(--fs-base);
   }
   .hint {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--text-dim, inherit);
     line-height: 1.5;
     margin: 0;
@@ -148,12 +149,12 @@
     border: none;
     padding: 0;
     font: inherit;
-    font-size: 0.8rem;
-    color: var(--primary, #4f46e5);
+    font-size: var(--fs-sm);
+    color: var(--primary);
     text-decoration: underline;
     cursor: pointer;
   }
   .linklike:hover {
-    opacity: 0.85;
+    color: var(--primary-hover);
   }
 </style>
