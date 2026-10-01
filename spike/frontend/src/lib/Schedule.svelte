@@ -244,15 +244,22 @@
               {@const m = blockMetrics(ins)}
               <button
                 type="button"
-                class="cls-block"
+                class="cls-block {m.height < 36 ? 'compact' : ''}"
                 style="top: {m.top}px; height: {m.height}px; left: calc({(ins.lane * 100) / ins.lanes}% + 3px); width: calc({100 / ins.lanes}% - 6px);"
                 title="{formatMinutes((ins.start_at - ins.date_ms) / 60_000)}–{formatMinutes((ins.end_at - ins.date_ms) / 60_000)} · clic para editar"
                 onclick={(e) => { e.stopPropagation(); openEdit(ins.class_id); }}
               >
-                <span class="cb-title">{ins.title}</span>
-                <span class="cb-time"
-                  >{formatMinutes((ins.start_at - ins.date_ms) / 60_000)} – {formatMinutes((ins.end_at - ins.date_ms) / 60_000)}</span
-                >
+                {#if m.height < 36}
+                  <span class="cb-inline">
+                    <span class="cb-time">{formatMinutes((ins.start_at - ins.date_ms) / 60_000)}</span>
+                    <span class="cb-title">{ins.title}</span>
+                  </span>
+                {:else}
+                  <span class="cb-title">{ins.title}</span>
+                  <span class="cb-time"
+                    >{formatMinutes((ins.start_at - ins.date_ms) / 60_000)} – {formatMinutes((ins.end_at - ins.date_ms) / 60_000)}</span
+                  >
+                {/if}
               </button>
             {/each}
           </div>
@@ -299,7 +306,8 @@
   .week-head {
     display: flex;
     padding: var(--s-4) var(--s-4) var(--s-2);
-    gap: 6px;
+    /* cabecera de la vista: gap un escalón por encima (aire) */
+    gap: var(--s-2);
     flex-shrink: 0;
   }
   .gutter-spacer {
@@ -311,11 +319,11 @@
     border: none;
     background: transparent;
     border-radius: var(--r-md);
-    padding: 6px 0;
+    padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: var(--s-0_5);
     transition: background var(--dur-fast) var(--ease-out);
     min-width: 0;
   }
@@ -327,15 +335,15 @@
     color: #fff;
   }
   .dow {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
   }
   .num {
-    font-size: 15px;
-    font-weight: 700;
+    font-size: var(--fs-lg);
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
     width: 30px;
     height: 30px;
@@ -351,8 +359,9 @@
     display: flex;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0 var(--s-4) var(--s-4);
-    gap: 6px;
+    /* el hueco superior deja sitio a la etiqueta '6 a' (translateY -6px) */
+    padding: var(--s-1_5) var(--s-4) var(--s-4);
+    gap: var(--s-2);
     min-height: 0;
   }
   .gutter {
@@ -370,7 +379,7 @@
   .hour {
     position: absolute;
     right: 10px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-3);
     transform: translateY(-6px);
@@ -406,8 +415,8 @@
     flex: 1 1 0;
     min-height: 28px;
     border-top: 1px solid var(--border);
-    margin-left: 2px;
-    margin-right: 2px;
+    margin-left: var(--s-0_5);
+    margin-right: var(--s-0_5);
   }
   .now-line {
     position: absolute;
@@ -420,17 +429,20 @@
     pointer-events: none;
   }
 
-  /* Bloque de clase: misma silueta que .evt (EventBlock) en color primario. */
+  /* Bloque de clase: misma silueta que .evt (EventBlock) en color primario.
+     Contenido arriba: si no cabe, solo se recorta por abajo. */
   .cls-block {
     position: absolute;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: var(--s-0_5);
     background: color-mix(in srgb, var(--primary) 13%, var(--surface));
     border: none;
     border-left: 3px solid var(--primary);
     border-radius: var(--r-sm);
-    padding: 4px 8px;
+    padding: var(--s-1) var(--s-2);
     text-align: left;
     overflow: hidden;
     z-index: 1;
@@ -445,16 +457,36 @@
     box-shadow: var(--e1);
     z-index: 3;
   }
+  .cb-inline {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    min-width: 0;
+  }
+  .cb-inline .cb-time {
+    flex-shrink: 0;
+  }
+  .cb-inline .cb-title {
+    min-width: 0;
+  }
   .cb-title {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-1);
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
+  }
+  /* Compacto (< 36px): hora + título en UNA línea */
+  .cls-block.compact .cb-title {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
   }
   .cb-time {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -471,18 +503,18 @@
     color: var(--text-2);
     flex: 1;
   }
-  .empty p { margin: 0; max-width: 420px; font-size: 13px; }
-  .empty strong { font-size: 15px; color: var(--text-1); }
+  .empty p { margin: 0; max-width: 420px; font-size: var(--fs-base); }
+  .empty strong { font-size: var(--fs-lg); color: var(--text-1); }
   .add {
     font: inherit;
-    font-size: 13px;
+    font-size: var(--fs-base);
     font-weight: 600;
     margin-top: var(--s-2);
     background: var(--primary);
     color: #fff;
     border: none;
     border-radius: var(--r-md);
-    padding: 8px 14px;
+    padding: var(--s-2) var(--s-3);
     cursor: pointer;
     box-shadow: var(--e1);
     transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
@@ -490,8 +522,8 @@
   .add:hover { background: var(--primary-hover); transform: translateY(-1px); }
 
   @media (max-width: 860px) {
-    .hour { font-size: 10px; }
-    .cls-block { padding: 3px 5px; }
+    .hour { font-size: var(--fs-2xs); }
+    .cls-block { padding: var(--s-0_5) var(--s-1); }
     .cb-time { display: none; }
   }
 </style>

@@ -217,7 +217,7 @@
     padding: var(--s-4);
   }
   .modal {
-    width: min(440px, 100%);
+    width: min(480px, 100%);
     background: var(--surface);
     border-radius: var(--r-lg);
     box-shadow: var(--e3);
