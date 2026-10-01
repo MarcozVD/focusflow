@@ -191,11 +191,12 @@
   .qa {
     display: flex;
     align-items: center;
-    gap: 10px;
+    /* contenedor: gap y padding un escalón por encima (aire) */
+    gap: var(--s-3);
     background: var(--surface-3);
-    border-radius: 15px;
+    border-radius: var(--r-md);
     height: 44px;
-    padding: 0 var(--s-4);
+    padding: 0 var(--s-5);
     box-shadow: var(--shadow-inset);
     border: 1px solid transparent;
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
@@ -205,7 +206,7 @@
     box-shadow: var(--shadow-inset), inset 0 0 0 2px var(--primary-soft-2);
   }
   .qa.expanded {
-    border-radius: 15px 15px 10px 10px;
+    border-radius: var(--r-md) var(--r-md) var(--r-sm) var(--r-sm);
   }
   .bolt {
     color: var(--primary);
@@ -218,7 +219,7 @@
     border: none;
     background: transparent;
     outline: none;
-    font-size: 13.5px;
+    font-size: var(--fs-base);
     line-height: 1.4;
     color: var(--text-1);
     font-family: inherit;
@@ -226,16 +227,16 @@
   }
   input::placeholder {
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-base);
   }
   kbd {
-    font-size: 10px;
+    font-size: var(--fs-2xs);
     font-weight: 600;
     font-family: inherit;
     color: var(--text-3);
     background: var(--surface);
-    border-radius: 7px;
-    padding: 2px 7px;
+    border-radius: var(--r-xs);
+    padding: var(--s-0_5) var(--s-2);
     box-shadow: var(--e1);
     white-space: nowrap;
     flex-shrink: 0;
@@ -250,25 +251,26 @@
     border-radius: var(--r-md);
     box-shadow: var(--e3);
     border: 1px solid var(--border);
-    padding: var(--s-3) var(--s-4);
+    /* contenedor: padding y gap un escalón por encima (aire) */
+    padding: var(--s-4) var(--s-5);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--s-3);
+    gap: var(--s-4);
     z-index: 30;
   }
   .chips {
     display: flex;
-    gap: 6px;
+    gap: var(--s-1_5);
     flex-wrap: wrap;
   }
   .chip {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-radius: var(--r-full);
-    padding: 4px 10px;
+    padding: var(--s-1) var(--s-2);
     border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
     white-space: nowrap;
   }
@@ -276,9 +278,9 @@
     background: var(--primary);
     color: #fff;
     border: none;
-    border-radius: 12px;
-    padding: 8px 16px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-4);
+    font-size: var(--fs-base);
     font-weight: 600;
     font-family: inherit;
     transition: all var(--dur-fast) var(--ease-out);
@@ -298,22 +300,22 @@
   .slow {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-top: 8px;
+    gap: var(--s-2);
+    margin-top: var(--s-2);
     background: var(--surface);
     box-shadow: var(--e2);
     border-radius: var(--r-md);
-    padding: 8px 12px;
-    font-size: 12.5px;
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-sm);
     color: var(--text-2);
   }
   .slow-btn {
     border: none;
     background: var(--primary);
     color: #fff;
-    border-radius: 10px;
-    padding: 6px 12px;
-    font-size: 12px;
+    border-radius: var(--r-sm);
+    padding: var(--s-1_5) var(--s-3);
+    font-size: var(--fs-sm);
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
@@ -333,13 +335,13 @@
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--s-2);
     background: var(--surface);
     border-left: 3px solid var(--success);
     border-radius: var(--r-md);
     box-shadow: var(--e2);
-    padding: 10px 18px;
-    font-size: 13px;
+    padding: var(--s-2) var(--s-5);
+    font-size: var(--fs-base);
     font-weight: 600;
     color: var(--text-1);
     z-index: 60;
@@ -348,7 +350,7 @@
   .toast svg {
     background: var(--success);
     border-radius: 50%;
-    padding: 2px;
+    padding: var(--s-0_5);
     flex-shrink: 0;
   }
 </style>

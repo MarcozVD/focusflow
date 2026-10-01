@@ -212,14 +212,14 @@
     padding: var(--s-4);
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
+    gap: var(--s-1_5);
+    font-size: var(--fs-base);
   }
   .head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--s-2);
     cursor: grab;
     user-select: none;
   }
@@ -229,18 +229,18 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 13.5px;
+    gap: var(--s-2);
+    font-weight: 600;
+    font-size: var(--fs-base);
   }
   .logo {
     width: 20px;
     height: 20px;
-    border-radius: 7px;
+    border-radius: var(--r-xs);
     background: var(--primary);
     color: #fff;
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -249,8 +249,8 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 5px;
-    font-size: 10px;
+    gap: var(--s-1);
+    font-size: var(--fs-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -271,7 +271,7 @@
   .body {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--s-1_5);
     max-height: 320px;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -280,11 +280,11 @@
   .sec {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--s-0_5);
   }
   .sec-label {
-    font-size: 9.5px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--text-3);
@@ -295,12 +295,12 @@
   .task {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--s-2);
     border: none;
     background: transparent;
     border-radius: var(--r-sm);
-    padding: 5px 8px;
-    font-size: 12.5px;
+    padding: var(--s-1) var(--s-2);
+    font-size: var(--fs-sm);
     font-family: inherit;
     color: var(--text-1);
     text-align: left;
@@ -328,12 +328,12 @@
     text-overflow: ellipsis;
   }
   .remaining {
-    font-size: 10.5px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     color: var(--primary);
     background: var(--primary-soft);
     border-radius: var(--r-full);
-    padding: 2px 9px;
+    padding: var(--s-0_5) var(--s-2);
     flex-shrink: 0;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
@@ -343,12 +343,12 @@
     align-items: center;
     justify-content: center;
     min-width: 56px;
-    font-size: 10.5px;
+    font-size: var(--fs-2xs);
     font-weight: 600;
     color: var(--text-2);
     background: var(--surface-3);
     border-radius: var(--r-full);
-    padding: 2px 9px;
+    padding: var(--s-0_5) var(--s-2);
     flex-shrink: 0;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
@@ -359,8 +359,8 @@
   }
   .qa {
     display: flex;
-    gap: 6px;
-    padding-left: 8px;
+    gap: var(--s-1_5);
+    padding-left: var(--s-2);
   }
   .qa-btn {
     width: 22px;
@@ -369,7 +369,7 @@
     background: var(--surface-3);
     color: var(--text-2);
     border-radius: var(--r-full);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1;
     cursor: pointer;
     transition: all var(--dur-fast) var(--ease-out);
@@ -389,29 +389,29 @@
     border-color: var(--success);
   }
   .empty {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
-    padding: 10px 8px;
+    padding: var(--s-2);
     text-align: center;
   }
   .foot {
     display: flex;
-    gap: 6px;
+    gap: var(--s-1_5);
     justify-content: flex-end;
     border-top: 1px solid var(--border);
-    padding-top: 6px;
+    padding-top: var(--s-1_5);
   }
   .foot-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--s-1);
     border: none;
     background: transparent;
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     cursor: pointer;
-    padding: 3px 8px;
+    padding: var(--s-1) var(--s-2);
     border-radius: var(--r-full);
     transition: all var(--dur-fast) var(--ease-out);
   }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fade } from "svelte/transition";
+  import { fade, fly } from "svelte/transition";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import TitleBar from "./lib/TitleBar.svelte";
@@ -16,7 +16,7 @@
   import Settings from "./lib/Settings.svelte";
   import Onboarding from "./lib/Onboarding.svelte";
   import Login from "./lib/Login.svelte";
-  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies } from "./lib/data.svelte";
+  import { init, loadSuggestions, loadAiConfig, loadEmailConfig, loadSyncStatus, loadGeneralSettings, loadNotifPrefs, loadOnboardingStatus, loadAuthStatus, authUser, ensureRange, taskDetail, openTaskDetail, closeTaskDetail, applySavedTheme, loadUiPrefs, applyUiPrefs, tasks, aiConfig, setAssistantDraft, onboarding, loadStudies, nlToast } from "./lib/data.svelte";
   import TaskDrawer from "./lib/TaskDrawer.svelte";
   import ContextualToast from "./lib/ContextualToast.svelte";
 
@@ -49,6 +49,12 @@
   });
 
   const onboardingPending = $derived(showOnboarding || onboarding()?.completed === false);
+
+  // Toast global de data.svelte (setNlToast): errores de acciones rápidas
+  // (crear/actualizar tarea…) que antes no se pintaba en ningún sitio.
+  const nlToastMsg = $derived(nlToast());
+  const reduceMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   $effect(() => {
     if (onboarding()?.completed) showOnboarding = false;
@@ -238,6 +244,17 @@
       <TaskDrawer />
     {/if}
     <ClassConflictDialog />
+    {#if nlToastMsg}
+      <div
+        class="nl-toast"
+        class:error={nlToastMsg.source === "error"}
+        role={nlToastMsg.source === "error" ? "alert" : "status"}
+        aria-live={nlToastMsg.source === "error" ? "assertive" : "polite"}
+        transition:fly={{ y: 12, duration: reduceMotion ? 0 : 200 }}
+      >
+        {nlToastMsg.text}
+      </div>
+    {/if}
     {#if !isWidget}
       <ContextualToast onplan={planFromNotif} />
     {/if}
@@ -301,27 +318,52 @@
     z-index: 120;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--s-3);
     max-width: min(640px, calc(100vw - 40px));
     background: var(--surface);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-raised-lg, 0 12px 32px rgba(0, 0, 0, 0.18));
-    padding: 10px 14px;
-    font-size: 13px;
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     font-weight: 600;
   }
   .fatal button {
     border: none;
     background: var(--danger);
     color: #fff;
-    border-radius: 8px;
-    padding: 5px 12px;
-    font-size: 12px;
-    font-weight: 700;
+    border-radius: var(--r-xs);
+    padding: var(--s-1) var(--s-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
+  }
+  /* Toast global (nlToast): abajo al centro, fuera de la esquina de
+     ContextualToast (abajo a la derecha). `margin-inline: auto` centra sin
+     transform propio: Svelte fly anima transform y pisaría un translateX. */
+  .nl-toast {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    margin-inline: auto;
+    width: fit-content;
+    max-width: min(520px, calc(100vw - 40px));
+    z-index: 90;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--e2);
+    padding: var(--s-3) var(--s-4);
+    color: var(--text-1);
+    font-size: var(--fs-base);
+    font-weight: 500;
+  }
+  .nl-toast.error {
+    border-left-color: var(--danger);
   }
   :global([data-widget] html) {
     background: transparent;

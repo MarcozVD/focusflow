@@ -121,8 +121,8 @@
   async function toggleDone() {
     const t = detail;
     if (!t) return;
-    await completeTask(t.id);
-    feedback = t.status === "completada" ? "Reabierta" : "Completada ✓";
+    const done = await completeTask(t.id);
+    feedback = done === null ? "No se pudo actualizar" : done ? "Completada ✓" : "Reabierta";
   }
 
   async function duplicate() {
@@ -287,7 +287,7 @@
     bottom: 0;
     width: min(400px, 100vw);
     background: var(--surface);
-    box-shadow: -12px 0 36px -8px rgba(31, 41, 55, 0.25);
+    box-shadow: var(--e3);
     z-index: 95;
     display: flex;
     flex-direction: column;
@@ -304,10 +304,11 @@
   .head-info {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--s-2);
   }
   .head-info strong {
-    font-size: 15px;
+    font-size: var(--fs-lg);
+    font-weight: 600;
   }
   .cat-dot {
     width: 12px;
@@ -322,8 +323,8 @@
     border: none;
     background: var(--surface-2);
     color: var(--text-2);
-    border-radius: 10px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-base);
     transition: all var(--dur-fast) var(--ease-out);
   }
   .x:hover {
@@ -335,15 +336,16 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: var(--s-3);
-    padding: var(--s-4) var(--s-5);
+    /* contenedor: gap entre campos y padding un escalón por encima (aire) */
+    gap: var(--s-4);
+    padding: var(--s-5) var(--s-6);
   }
   label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: 11.5px;
-    font-weight: 700;
+    gap: var(--s-1);
+    font-size: var(--fs-xs);
+    font-weight: 600;
     color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -351,14 +353,14 @@
   label.check {
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: var(--s-2);
     text-transform: none;
     letter-spacing: normal;
-    font-size: 13px;
+    font-size: var(--fs-base);
     font-weight: 600;
     color: var(--text-1);
     cursor: pointer;
-    padding: 2px 0;
+    padding: var(--s-0_5) 0;
   }
   label.check input {
     width: auto;
@@ -372,9 +374,9 @@
   textarea {
     border: 1px solid var(--border);
     background: var(--surface-3);
-    border-radius: 11px;
-    padding: 9px 12px;
-    font-size: 13.5px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     color: var(--text-1);
     font-family: inherit;
     outline: none;
@@ -401,29 +403,30 @@
   }
   .foot {
     border-top: 1px solid var(--border);
-    padding: var(--s-4) var(--s-5);
+    /* contenedor: padding y gap entre acciones un escalón por encima (aire) */
+    padding: var(--s-5) var(--s-6);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--s-3);
     flex-shrink: 0;
   }
   .fb {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
   }
   .actions {
     display: flex;
-    gap: 8px;
+    gap: var(--s-2);
     flex-wrap: wrap;
   }
   .btn {
     border: none;
     background: var(--surface-3);
     color: var(--text-1);
-    border-radius: 12px;
-    padding: 9px 14px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     font-weight: 600;
     transition: all var(--dur-fast) var(--ease-out);
     flex: 1;
@@ -456,14 +459,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: var(--s-6);
   }
   .dlg {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 18px;
-    box-shadow: 0 18px 48px -10px rgba(15, 18, 24, 0.45);
-    padding: 24px 26px;
+    border-radius: var(--r-md);
+    box-shadow: var(--e3);
+    padding: var(--s-6);
     width: min(320px, 100%);
     text-align: center;
     animation: pop var(--dur-fast) var(--ease-out);
@@ -486,20 +489,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    margin: 0 auto 12px;
+    font-size: var(--fs-xl);
+    margin: 0 auto var(--s-3);
   }
   .dlg h3 {
-    margin: 0 0 6px;
-    font-size: 16px;
+    margin: 0 0 var(--s-1_5);
+    font-size: var(--fs-lg);
   }
   .dlg p {
-    margin: 0 0 4px;
-    font-size: 13px;
+    margin: 0 0 var(--s-1);
+    font-size: var(--fs-base);
     color: var(--text-2);
   }
   .dlg-title-name {
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-1);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -507,8 +510,8 @@
   }
   .dlg-actions {
     display: flex;
-    gap: 10px;
-    margin-top: 18px;
+    gap: var(--s-2);
+    margin-top: var(--s-5);
   }
   .btn.danger-solid {
     background: var(--danger);

@@ -42,7 +42,7 @@
 
 - **Crear:** QuickAdd (lenguaje natural) es la vía principal; el backend deriva categoría/prioridad por palabras clave.
 - **Editar:** clic en cualquier tarea → **TaskDrawer** (panel derecho, 400 px): título, descripción, categoría, prioridad, todo-el-día, inicio/fin (fecha + hora), recordatorio, etiquetas, notas, enlaces.
-- **Acciones del drawer:** Completar/Reabrir, Duplicar, Eliminar (con diálogo de confirmación), Guardar.
+- **Acciones del drawer:** Completar/Reabrir, Duplicar, Eliminar (con diálogo de confirmación), Guardar. Completar y reabrir **también** se hace desde el check rápido del calendario (`TaskCheck`), que aplica el cambio sin abrir el drawer.
 - **Reglas de validación:** fin ≤ inicio → fin = inicio + 1 h; all-day ignora horas; guardado con feedback ("Guardado ✓").
 - **Duplicar** crea copia inmediata en caché.
 - **Eliminar** pide confirmación explícita (dialog con nombre de la tarea).
@@ -58,6 +58,7 @@
 - **Auto-scroll:** cerca de bordes superior/inferior del área, el scroll avanza solo.
 - **Conflictos:** el backend valida. Por defecto **permite con aviso** ("Movida con aviso: se solapa con «X»"); en modo estricto (Ajustes) **bloquea**.
 - **Errores de drag:** toast "No se pudo mover: conflicto de horario".
+- **Completadas:** no se pueden mover ni redimensionar; el clic abre el drawer para reabrirlas.
 
 ---
 
@@ -70,7 +71,7 @@
 | **Ocupado** | Bloque con color de categoría al 13 % + borde izquierdo de 3 px |
 | **Libre** | Slots vacíos con línea `--border` |
 | **Urgente** | Punto/barra `--danger`, badge prioridad alta |
-| **Completado** | Tachado + opacidad 50 % |
+| **Completado** | Superficie hundida gris (`--surface-2` + `--shadow-inset`) + tachado + ✓ |
 | **All-day** | Fila superior "Todo el día" con chips |
 | **Pasado** | Eventos vencidos con borde izquierdo **dashed** + opacidad |
 | **Futuro/próximo** | Línea "ahora" (`--primary` con punto) separa pasado/futuro |
@@ -79,7 +80,7 @@
 ### 6.2 Reglas de legibilidad
 
 - Grid horario dinámico 6–22 h (se expande si hay tareas fuera).
-- Semana: máx. 8 eventos visibles + "+N más" → clic abre el día completo.
+- Semana: máx. 8 eventos visibles + "+N más" → clic abre el día completo. Cuando hay completadas, el recorte elige **pendientes primero** (y el "+N" cuenta todas).
 - Mes: chips truncados antes que "+N más"; fuera de mes opacity 0.4.
 - La **línea "ahora"** es la única referencia temporal absoluta: todo lo demás es relativo a ella.
 - Números y horas siempre tabulares — el tiempo se lee, no se descifra.
@@ -109,7 +110,7 @@
 
 - Se derivan automáticamente (no requieren acción del usuario).
 - Visual: borde izquierdo dashed + fondo tintado + badge.
-- El usuario las completa o las mueve; al completarlas se "limpian" del flujo.
+- El usuario las completa o las mueve. Al completarlas **siguen en el calendario** — hundidas en gris y tachadas, no se borran de un golpe — pero **salen del resto de superficies activas**: widget (Ahora/Siguiente), contadores del Sidebar, Sugerencias, selector de StudyForm y detección de conflictos. Una completada de varios días solo queda visible en su **día de inicio y el de fin**: los intermedios no la muestran, para no repetirla en gris cada día.
 - En Agenda y widget aparecen primero (relevancia).
 
 ---

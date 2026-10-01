@@ -110,47 +110,50 @@
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--s-2);
-    padding: var(--s-5);
+    /* contenedor: padding y gap entre secciones un escalón por encima (aire) */
+    gap: var(--s-3);
+    padding: var(--s-6);
     overflow-y: auto;
   }
   .logo-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--s-2);
     margin-bottom: var(--s-5);
   }
   .logo {
     width: 34px;
     height: 34px;
-    border-radius: 12px;
+    border-radius: var(--r-sm);
     background: var(--primary);
     color: #fff;
-    font-weight: 700;
-    font-size: 16px;
+    font-weight: 600;
+    font-size: var(--fs-lg);
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
   .brand {
-    font-size: 17px;
-    font-weight: 700;
+    font-size: var(--fs-lg);
+    font-weight: 600;
     letter-spacing: -0.01em;
   }
   nav {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    /* el padding del item bajó a --s-2 (grid 4px): el gap compensa para
+       conservar el paso original entre items (~43px) */
+    gap: var(--s-2);
   }
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--s-3);
     border: none;
     background: transparent;
-    border-radius: 14px;
-    padding: 10px 12px;
-    font-size: 14px;
+    border-radius: var(--r-md);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-md);
     font-weight: 500;
     color: var(--text-2);
     transition: all var(--dur-fast) var(--ease-out);
@@ -171,21 +174,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--s-2);
     margin: var(--s-2) 0 var(--s-4);
-    padding: 10px 14px;
+    padding: var(--s-2) var(--s-3);
     border: 1.5px dashed var(--primary);
-    border-radius: 12px;
+    border-radius: var(--r-sm);
     background: transparent;
     color: var(--primary);
-    font-size: 13px;
+    font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
     transition: all var(--dur-fast) var(--ease-out);
   }
   /* Sesiones de estudio: mismo componente, color propio (no son tareas) */
   .add-horario.add-study {
-    margin-top: -8px;
+    margin-top: calc(-1 * var(--s-2));
     border-color: var(--study);
     color: var(--study);
   }
@@ -205,38 +208,38 @@
     margin-left: auto;
     background: var(--primary);
     color: #fff;
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     min-width: 20px;
     height: 20px;
     border-radius: var(--r-full);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 6px;
+    padding: 0 var(--s-1_5);
   }
   .section-label {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--text-3);
-    margin: var(--s-5) 0 4px var(--s-3);
+    margin: var(--s-5) 0 var(--s-1) var(--s-3);
   }
   .cats {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--s-0_5);
   }
   .cat-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--s-2);
     border: none;
     background: transparent;
-    border-radius: 12px;
-    padding: 8px 12px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     font-weight: 500;
     color: var(--text-2);
     transition: background var(--dur-fast) var(--ease-out);
@@ -253,50 +256,50 @@
   }
   .count {
     margin-left: auto;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-3);
     background: var(--surface-2);
     border-radius: var(--r-full);
-    padding: 1px 8px;
+    padding: 1px var(--s-2);
   }
   .today-box {
     margin-top: auto;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--s-2);
     background: var(--surface);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-raised);
-    padding: 10px 14px;
+    padding: var(--s-2) var(--s-3);
   }
   .tb-day {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     text-transform: uppercase;
     color: var(--text-3);
   }
   .tb-num {
-    font-size: 18px;
-    font-weight: 700;
+    font-size: var(--fs-lg);
+    font-weight: 600;
     color: var(--primary);
     font-variant-numeric: tabular-nums;
   }
   .tb-pending {
     margin-left: auto;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
   }
   .theme-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--s-2);
     border: none;
     background: transparent;
-    border-radius: 14px;
-    padding: 9px;
-    font-size: 13px;
+    border-radius: var(--r-md);
+    padding: var(--s-2);
+    font-size: var(--fs-base);
     font-weight: 500;
     color: var(--text-2);
     transition: background var(--dur-fast) var(--ease-out);

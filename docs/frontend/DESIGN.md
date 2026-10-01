@@ -1,6 +1,6 @@
 # DESIGN.md — Sistema visual de FocusFlow
 
-**Estado:** Documento vivo · **Última actualización:** 2026-08-31
+**Estado:** Documento vivo · **Última actualización:** 2026-09-30
 **Fuente:** código real (`spike/frontend/src/app.css` + componentes `.svelte`). Ningún valor es inventado: todos se extrajeron del código en producción.
 
 ---
@@ -155,7 +155,7 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 
 | Estado | Superficie | Indicador | Texto |
 |--------|-----------|-----------|-------|
-| Completada | — (opacity 0.5–0.55) | — | Título tachado, `--text-2` |
+| Completada | `--surface-2` **hundida** (`--shadow-inset`; chips y minichips con `--shadow-inset-sm`) | ✓ (`TaskCheck` relleno `--text-3`, siempre visible) + borde izquierdo `--text-3` | Título tachado (animado izq→der) en `--text-2`, meta en `--text-3`. **Sin `opacity`** |
 | Vencida | `--danger-bg` | Borde izquierdo **dashed** `--danger` | `--danger` |
 | Prioridad alta | — | Punto/barra `--danger`, badge `--danger-bg` | `--danger` |
 | Prioridad media | — | Badge `--primary-soft` | `--primary` |
@@ -163,7 +163,11 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 | En curso (widget) | — | Etiqueta "Ahora" `--primary` | — |
 | Conflicto (drag) | toast `--danger` | — | blanco |
 
-**Regla de oro:** el color nunca es el único indicador de estado. Vencida = fondo tintado + borde punteado + texto; completada = tachado + opacidad; prioridad = badge + punto.
+**Regla de oro:** el color nunca es el único indicador de estado. Vencida = fondo tintado + borde punteado + texto; completada = tachado + superficie hundida gris + ✓; prioridad = badge + punto.
+
+> Las completadas son **plenamente visibles en el calendario** (semana, día, mes y popup): hundidas en gris, nunca difuminadas con `opacity`. El título usa `--text-2` y no `--text-3` porque es contenido esencial (ver ACCESSIBILITY §5); `--text-3` queda para hora, descripción y punto de categoría.
+>
+> **Excepción multi-día:** una completada de varios días solo se ve en su día de inicio y en su día de fin; en los intermedios no aparece, para no repetir la misma tarea en gris cada día.
 
 ---
 
@@ -171,45 +175,69 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 
 **Familia real:** `"Inter", "Segoe UI", system-ui, sans-serif` — Inter es parte de la identidad (licencia libre, excelente en 13–14 px, disponible en Windows). **No cambiar sin un estudio previo.**
 
-### 4.1 Escala real usada en el código
+### 4.1 Escala de tokens (`app.css`)
 
-| Rol | Tamaño | Peso | Track | Uso real |
-|-----|--------|------|-------|----------|
-| Pantalla (onboarding hero) | 38 px | 800 | -0.03em | h1 de onboarding |
-| Título de pantalla | 20–22 px | 700 | -0.02em | TopBar, encabezados de página |
-| Título de sección | 17 px | 700 | — | h2 en Ajustes/Sugerencias |
-| Título de card | 15 px | 700 | — | h3 propuestas, drawer |
-| Cuerpo | 13–14 px | 400–500 | — | Base de la app |
-| Nombre de tarea | 11.5–14 px | 500–600 | — | EventBlock / TaskCard |
-| Meta/horas | 10–12.5 px | 600 | — | `tabular-nums` SIEMPRE |
-| Overline | 9.5–11 px | 700 | +0.06–0.1em, uppercase | Etiquetas de sección, días |
-| Hora del calendario | 11 px | 600 | — | gutter, tabular-nums |
-| Placeholder | 13–13.5 px | 400 | — | `--text-3` |
+| Token | Tamaño | Uso |
+|-------|--------|-----|
+| `--fs-2xs` | 10 px | Overlines, hora mini, contadores pequeños |
+| `--fs-xs` | 11 px | Meta, horas, chips, gutter |
+| `--fs-sm` | 12 px | Secundario, labels, widget |
+| `--fs-base` | 13 px | Cuerpo UI (base de la escala) |
+| `--fs-md` | 14 px | Inputs, cuerpo destacado — **lo usa `body`** |
+| `--fs-lg` | 16 px | Título de card/sección |
+| `--fs-xl` | 20 px | Título de pantalla (TopBar) |
+| `--fs-2xl` | 32 px | Hero de onboarding |
 
-### 4.2 Reglas tipográficas
+**Mapeo de literales a tokens** (al migrar): `9–10.5 → 2xs` · `11–11.5 → xs` · `12–12.5 → sm` · `13–13.5 → base` · `14–14.5 → md` · `15–18 → lg` · `20–27 → xl` · `38 → 2xl`. `body { font-size: var(--fs-md) }` mantiene los 14 px actuales.
+
+### 4.2 Roles tipográficos reales
+
+| Rol | Token | Peso | Track | Uso real |
+|-----|-------|------|-------|----------|
+| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding — **objetivo, hoy sigue en 38 px/800** |
+| Título de pantalla | `--fs-xl` | 700 | -0.02em | TopBar |
+| Título de sección / card | `--fs-lg` | 600 | — | h3 de propuesta y drawer; el h2 de Ajustes es **objetivo** (hoy 17 px literal) |
+| Cuerpo | `--fs-base`–`--fs-md` | 400–500 | — | Base de la app, inputs |
+| Nombre de tarea | `--fs-xs`–`--fs-md` | 500–600 | — | EventBlock / TaskCard |
+| Meta/horas | `--fs-2xs`–`--fs-sm` | 600 | — | `tabular-nums` SIEMPRE |
+| Overline | `--fs-2xs` | 600 | +0.06–0.1em, uppercase | Etiquetas de sección, días |
+| Hora del calendario | `--fs-xs` | 600 | — | gutter, tabular-nums |
+| Placeholder | `--fs-base` | 400 | — | `--text-3` |
+
+> **Alcance de la migración:** la tabla describe el sistema **objetivo**. `Onboarding.svelte` (hero, pasos) y `Settings.svelte` (h2 de sección, 22 px/700 del título de pantalla) aún tienen tamaños y pesos literales: entran en la **fase 2** (spec 18 §4, T10–T15).
+
+### 4.3 Regla de pesos
+
+400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 queda **pendiente de eliminar** (hoy Onboarding y Settings aún lo usan; su conversión a 700 es objetivo de la fase 2, T11). Los overlines van en 600 manteniendo uppercase + tracking.
+
+### 4.4 Reglas tipográficas
 
 1. **Números y horas siempre `font-variant-numeric: tabular-nums`** (calendario, contadores, widget).
 2. Jerarquía por tamaño + peso + tinte; el título nunca en gris (`--text-1`).
 3. Títulos cortos: 1 línea con ellipsis; descripciones máx. 2–3 líneas con `-webkit-line-clamp`.
 4. `text-wrap: balance` en titulares largos (onboarding).
 5. Texto nunca se difumina: color plano, peso ≥ 400.
-6. Inter 400/500/600/700/800 — sin pesos menores a 400 en texto legible.
+6. **Ningún `font-size` literal:** todo sale de `--fs-*`. Ya se cumple en el **núcleo diario** — `Calendar`, `EventBlock`, `TaskCheck`, `TopBar`, `Sidebar`, `TitleBar`, `App`, `TaskDrawer`, `QuickAdd` y `Widget` —; el resto de pantallas (Ajustes, Onboarding, Login, Asistente, Sugerencias, sesiones de estudio, agenda) se migra en la fase 2.
 
 ---
 
 ## 5. Spacing
 
-Escala real de tokens (base 4 px):
+Escala real de tokens (grid de 4 px + micro-gaps):
 
 ```css
---s-1: 4px  --s-2: 8px  --s-3: 12px --s-4: 16px --s-5: 20px
+--s-0_5: 2px  --s-1: 4px  --s-1_5: 6px  --s-2: 8px  --s-3: 12px --s-4: 16px --s-5: 20px
 --s-6: 24px --s-8: 32px --s-10: 40px --s-12: 48px --s-16: 64px
 ```
 
+**Regla de aire:** en **contenedores** (cards, paneles, drawer, sidebar, topbar, popup) el padding y el gap suben **un escalón** respecto al contenido que alojan. En **contenido denso** (EventBlock, chips, minichips, celdas del mes) no se sube nada: se conserva la densidad para que quepa más información en el mismo espacio. `--s-0_5` y `--s-1_5` cubren los micro-gaps internos (gap de una lista de chips, separación label/valor).
+
+Los hairlines de `1px`/`1.5px` en bordes y outlines quedan literales; no son espaciado.
+
 **Convenciones reales:**
-- Padding de cards: `--s-5` (20 px) en sugerencias, `--s-3/--s-4` en TaskCard (12/16 px), `--s-6` (24 px) en secciones de ajustes.
+- Padding de cards: `--s-5`/`--s-6` en contenedores grandes, `--s-4`/`--s-5` en medianos.
 - Gap entre tarjetas: `--s-4`–`--s-6` (16–24 px). Nunca apilar superficies sin aire.
-- Gap interno de filas: 6–10 px.
+- Gap interno de filas: `--s-1_5`–`--s-2` (6–8 px).
 - Altura mínima de interacción: 44 px (QuickAdd 44, botones 36–44).
 - Sidebar: 232 px fija. Calendario contenido: padding 0 `--s-8`.
 
@@ -218,18 +246,21 @@ Escala real de tokens (base 4 px):
 ## 6. Radius
 
 ```css
---r-sm: 10px   --r-md: 16px   --r-lg: 22px   --r-xl: 28px   --r-full: 999px
+--r-xs: 6px   --r-sm: 10px  --r-md: 16px  --r-lg: 22px  --r-xl: 28px  --r-full: 999px
 ```
 
 | Token | Uso real |
 |-------|----------|
-| `--r-sm` (10 px) | EventBlocks, chips de calendario, botones pequeños, kbd |
-| `--r-md` (16 px) | Celdas de mes, tarjetas de agenda, day-head, secciones |
-| `--r-lg` (22 px) | Contenedor del calendario, cards de sugerencias, modales, inputs de QuickAdd |
+| `--r-xs` (6 px) | Elementos pequeños y densos: minichips y chips del calendario, `.prio-dot`, `kbd`, checks, botones muy pequeños |
+| `--r-sm` (10 px) | EventBlocks, botones, filas del popup, notas de diálogo |
+| `--r-md` (16 px) | Celdas de mes, tarjetas de agenda, day-head, input del QuickAdd, icon-button |
+| `--r-lg` (22 px) | Contenedor del calendario, cards de sugerencias, modales, dialogs |
 | `--r-xl` (28 px) | Widget, toast contextual |
-| `--r-full` | Checkboxes, badges, pills, swatches, avatares |
+| `--r-full` | Checkboxes, badges, pills, swatches, avatares, TaskCheck |
 
-**Regla:** radios ≥ 10 px en todo; sin esquinas rectas. Pero **no todo es pill**: el calendario usa 10–22 px, los event blocks 10 px. Los pills se reservan para badges/chips/checkbox.
+**Mapeo de literales:** `≤ 9px → --r-xs` · `10–12px → --r-sm` · `14–18px → --r-md` · `22–24px → --r-lg` · `28px → --r-xl` · `999px → --r-full`. `50%` (círculos) se queda literal.
+
+**Regla:** sin esquinas rectas y **no todo es pill**: los pills se reservan para badges/chips/checkbox; el contenido denso del calendario baja a `--r-xs`/`--r-sm` y los contenedores usan `--r-md`/`--r-lg`.
 
 ---
 
@@ -252,7 +283,7 @@ Escala real de tokens (base 4 px):
 | Cambio de vista calendario | 160 | fade | `transition:fade` de Svelte, `{#key view}` |
 | Apertura drawer | 200 | slide x | `transition:slide` |
 | Modal / overlay | 120–160 | fade | overlays + pop (scale 0.94→1 + translateY) |
-| Completar tarea | 200–250 | spring | check + "pop" (scale 0.98) en TaskCard |
+| Completar tarea | 250 | ease-out | hundir + tachar en el calendario (`--dur-slow`: sombra, fondo y color); el ✓ del `TaskCheck` hace scale(0.92) al pulsar |
 | Toast contextual | 250 | ease-out | rise (translateY 12px → 0) |
 | Preview QuickAdd | 200 | cubic ease | `transition:scale` |
 | Mensajes del asistente | 160 | fade | entrada de mensajes AI |
@@ -291,11 +322,11 @@ Escala real de tokens (base 4 px):
 - Hover universal: translateY(-1px) + sombra un nivel arriba, 150 ms.
 
 ### 9.2 Inconsistencias detectadas (deuda visual — registrar, no "arreglar" sin plan)
-1. **Radios de botón inconsistentes:** 12 px (TaskDrawer, Suggestions, Settings), 15 px (QuickAdd), 10 px (ContextualToast), 999 px (pills de Onboarding).
+1. **Radios de botón inconsistentes:** el núcleo diario ya usa tokens (`--r-sm` en TaskDrawer, `--r-md` en QuickAdd), pero quedan literales en Suggestions, Settings, ContextualToast y los pills de Onboarding (fase 2).
 2. **`.btn` duplicado con variantes locales:** cada componente redefine su `.btn` (Suggestions, Settings, TaskDrawer, ContextualToast, PlanProposal) con diferencias sutiles (padding 8/16 vs 9/14 vs 7/12). No existe un `Button.svelte` global — el componente está **propuesto**.
 3. **Foco:** `:focus-visible` global define outline 2 px `--primary-soft-2`, pero TaskDrawer y Settings usan `box-shadow: 0 0 0 3px var(--primary-soft)` en inputs — dos idiomas de foco.
 4. **Overlines:** la mayoría usa `text-transform: uppercase` + `letter-spacing 0.06–0.1em`, pero algunas etiquetas (día del popup, título del drawer) usan `text-transform: capitalize` — mezcla de convenciones.
-5. **Sombras de drawer vs modal:** el drawer usa sombra lateral dura (`-12px 0 36px rgba(31,41,55,0.25)`) que no es ninguna de las elevaciones tokenizadas.
+5. ~~Sombras de drawer vs modal~~ **resuelto:** el drawer y su diálogo de borrado usan ya `--e3`, la misma elevación que los modales.
 6. **Drag toast vs toast contextual:** dos sistemas de toast distintos (`.drag-toast` en Calendar, `.toast` en ContextualToast, `.toast` en QuickAdd) con estilos diferentes.
 7. **`.ghost` (sin fondo)** y **`.danger`** como variantes de botón solo existen en algunos componentes.
 

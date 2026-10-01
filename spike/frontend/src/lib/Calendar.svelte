@@ -24,9 +24,11 @@
     topChipsOn,
     monthChipsOn,
     layoutMetrics,
+    pendingFirst,
     type Segment,
   } from "./taskDayLogic";
   import { studiesOnDay, studySegment, type StudySession } from "./studyLogic";
+  import TaskCheck from "./TaskCheck.svelte";
 
   let {
     view,
@@ -160,7 +162,7 @@
     let hi = DEFAULT_END;
     for (const d of days) {
       for (const t of tasks) {
-        if (t.allDay || t.status === "completada") continue;
+        if (t.allDay) continue;
         const seg = segmentFor(t, d);
         if (!seg) continue;
         lo = Math.min(lo, seg.start.getHours());
@@ -210,7 +212,7 @@
   function layoutDay(d: Date, maxCount = 999): Placed[] {
     const items: { t: Task; seg: Segment; s: number; e: number }[] = [];
     for (const t of tasks) {
-      if (t.status === "completada" || t.allDay) continue;
+      if (t.allDay) continue;
       const seg = segmentFor(t, d);
       if (!seg) continue;
       // minutos relativos al día del inicio del segmento (mismo criterio que
@@ -272,10 +274,16 @@
     return m;
   });
 
-  /** Layout visible (día → todos; semana → primeros 8 + botón "+N más"). */
+  /** Recorte a 8 visibles en semana: pendientes primero, conservando el
+   *  orden y las posiciones (top/left/width) ya calculados en layoutDay. */
+  function visibleWeekPlaced(all: Placed[]): Placed[] {
+    return [...all].sort((a, b) => pendingFirst(a.t, b.t)).slice(0, 8);
+  }
+
+  /** Layout visible (día → todos; semana → primeros 8 pendientes-primero + botón "+N más"). */
   function placedOf(d: Date): Placed[] {
     const all = fullLayouts.get(d.toDateString()) ?? [];
-    return view === "dia" ? all : all.slice(0, 8);
+    return view === "dia" ? all : visibleWeekPlaced(all);
   }
 
   /**
@@ -348,7 +356,7 @@
 
   /** Borde inferior del último evento visible (para el botón "+N más"). */
   function lastShownBottom(d: Date): number {
-    const placed = (fullLayouts.get(d.toDateString()) ?? []).slice(0, 8);
+    const placed = visibleWeekPlaced(fullLayouts.get(d.toDateString()) ?? []);
     if (placed.length === 0) return (grid.hi - grid.lo) * pxH;
     const last = Math.max(...placed.map((p) => p.top + p.height));
     return Math.min(last + 4, (grid.hi - grid.lo) * pxH);
@@ -653,13 +661,16 @@
             <p class="pop-empty">Sin tareas este día.</p>
           {/if}
           {#each monthChipsOf(popupDay) as t (t.id)}
-            <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
-              <span class="pop-dot"></span>
-              <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipTextFor(t, popupDay)}</span>
-              <span class="pop-time">
-                {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
-              </span>
-            </button>
+            <div class="chip-wrap" class:done={t.status === "completada"}>
+              <span class="check-slot"><TaskCheck task={t} /></span>
+              <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
+                <span class="pop-dot"></span>
+                <span class="pop-title {t.status === 'completada' ? 'done' : ''}"><span class="strike">{chipTextFor(t, popupDay)}</span></span>
+                <span class="pop-time">
+                  {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
+                </span>
+              </button>
+            </div>
           {/each}
         </div>
         <button class="pop-go" onclick={() => { if (popupDay) onSelectDate(popupDay); popupDay = null; }}>
@@ -691,15 +702,18 @@
           <div class="allday-row" bind:this={alldayEls[di]}>
             {#if view !== "semana"}<span class="allday-label">Todo el día</span>{/if}
             {#each visibleTopChipsOf(d) as t (t.id)}
-              <button
-                type="button"
-                class="allday-chip {!t.allDay ? 'cont' : ''}"
-                style="--c: {cat(t.categoryId).color}"
-                title={sameDay(t.start, t.end)
-                  ? t.title
-                  : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
-                onclick={() => openTaskDetail(t)}
-              >{chipTextFor(t, d)}</button>
+              <div class="chip-wrap" class:done={t.status === "completada"}>
+                <button
+                  type="button"
+                  class="allday-chip {!t.allDay ? 'cont' : ''} {t.status === 'completada' ? 'done' : ''}"
+                  style="--c: {cat(t.categoryId).color}"
+                  title={sameDay(t.start, t.end)
+                    ? t.title
+                    : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
+                  onclick={() => openTaskDetail(t)}
+                ><span class="strike">{chipTextFor(t, d)}</span></button>
+                <span class="check-slot"><TaskCheck task={t} size={14} /></span>
+              </div>
             {/each}
             {#if restTopChipsOf(d) > 0}
               <span class="allday-more">+{restTopChipsOf(d)}</span>
@@ -816,8 +830,8 @@
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     padding: var(--s-4) var(--s-4) var(--s-2);
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
@@ -831,18 +845,19 @@
     grid-template-columns: repeat(7, 1fr);
     grid-template-rows: repeat(6, 80px);
     min-height: 0;
-    gap: 6px;
+    /* contenedor: un escalón por encima del gap base (aire) */
+    gap: var(--s-2);
     padding: 0 var(--s-4) var(--s-4);
   }
   .cell {
     background: var(--surface-2);
     border: none;
     border-radius: var(--r-md);
-    padding: 4px 5px;
+    padding: var(--s-1) var(--s-1);
     text-align: left;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--s-0_5);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     overflow: hidden;
     min-width: 0;
@@ -859,7 +874,7 @@
     box-shadow: inset 0 0 0 2px var(--primary-soft-2);
   }
   .daynum {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-2);
     width: 18px;
@@ -877,18 +892,19 @@
   .chips {
     display: flex;
     flex-direction: column;
-    gap: 1.5px;
+    gap: var(--s-0_5);
     overflow: hidden;
     min-height: 0;
   }
   .minichip {
-    font-size: 9.5px;
+    font-size: var(--fs-2xs);
     font-weight: 500;
     line-height: 1.25;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
-    border-radius: 7px;
-    padding: 1px 6px;
+    border: none;
+    border-radius: var(--r-xs);
+    padding: 1px var(--s-1_5);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -897,17 +913,20 @@
     min-height: 0;
   }
   .minichip.done {
+    background: var(--surface-2);
+    color: var(--text-2);
     text-decoration: line-through;
-    opacity: 0.55;
+    text-decoration-color: var(--text-3);
+    box-shadow: var(--shadow-inset-sm);
   }
   .more {
-    font-size: 9.5px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     color: var(--primary);
     background: var(--primary-soft);
     border: none;
     border-radius: var(--r-full);
-    padding: 1px 7px;
+    padding: 1px var(--s-2);
     flex-shrink: 0;
     cursor: pointer;
     transition: all var(--dur-fast) var(--ease-out);
@@ -930,10 +949,11 @@
     border-radius: var(--r-lg);
     box-shadow: var(--e3);
     border: 1px solid var(--border);
-    padding: var(--s-5);
+    /* contenedor: padding y gaps un escalón por encima (aire) */
+    padding: var(--s-6);
     display: flex;
     flex-direction: column;
-    gap: var(--s-3);
+    gap: var(--s-4);
     z-index: 50;
     overflow: hidden;
   }
@@ -941,7 +961,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--s-3);
+    gap: var(--s-4);
     text-transform: capitalize;
   }
   .pop-close {
@@ -950,8 +970,8 @@
     border: none;
     background: var(--surface-2);
     color: var(--text-2);
-    border-radius: 10px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-base);
     transition: all var(--dur-fast) var(--ease-out);
     flex-shrink: 0;
   }
@@ -962,26 +982,47 @@
   .pop-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--s-2);
     overflow-y: auto;
     min-height: 0;
   }
   .pop-empty {
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-base);
     text-align: center;
     margin: var(--s-3) 0;
+  }
+  /* Wrap del popup: check a la izquierda EN FLUJO (reserva su espacio aunque
+     esté oculto) y la fila ocupa el resto */
+  .pop-list .chip-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    min-width: 0;
+  }
+  .pop-list .check-slot {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .pop-list .chip-wrap:hover .check-slot,
+  .pop-list .chip-wrap:focus-within .check-slot,
+  .pop-list .chip-wrap.done .check-slot {
+    opacity: 1;
   }
   .pop-item {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: var(--s-2);
     background: var(--surface-2);
-    border-radius: 12px;
-    padding: 9px 12px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--fs-base);
     border: none;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     color: inherit;
     text-align: left;
     cursor: pointer;
@@ -996,6 +1037,7 @@
     border-radius: 50%;
     background: var(--c);
     flex-shrink: 0;
+    transition: background var(--dur-slow) var(--ease-out);
   }
   .pop-title {
     flex: 1;
@@ -1003,13 +1045,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: color var(--dur-slow) var(--ease-out);
   }
   .pop-title.done {
-    text-decoration: line-through;
-    opacity: 0.55;
+    color: var(--text-2);
+  }
+  .pop-list .chip-wrap.done .pop-dot {
+    background: var(--text-3);
+  }
+  .pop-list .chip-wrap.done .pop-time {
+    color: var(--text-3);
   }
   .pop-time {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
@@ -1018,9 +1066,9 @@
     border: none;
     background: var(--primary);
     color: #fff;
-    border-radius: 12px;
-    padding: 10px;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    padding: var(--s-2);
+    font-size: var(--fs-base);
     font-weight: 600;
     transition: all var(--dur-fast) var(--ease-out);
   }
@@ -1032,7 +1080,7 @@
   .week-head {
     display: flex;
     padding: var(--s-4) var(--s-4) var(--s-2);
-    gap: 6px;
+    gap: var(--s-2);
     flex-shrink: 0;
   }
   .gutter-spacer {
@@ -1044,11 +1092,11 @@
     border: none;
     background: transparent;
     border-radius: var(--r-md);
-    padding: 6px 0;
+    padding: var(--s-1_5) 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: var(--s-0_5);
     transition: background var(--dur-fast) var(--ease-out);
     min-width: 0;
   }
@@ -1060,15 +1108,15 @@
     color: #fff;
   }
   .dow {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--fs-xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
   }
   .num {
-    font-size: 15px;
-    font-weight: 700;
+    font-size: var(--fs-lg);
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
     width: 30px;
     height: 30px;
@@ -1085,7 +1133,7 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding: 0 var(--s-4) var(--s-4);
-    gap: 6px;
+    gap: var(--s-2);
     min-height: 0;
   }
   .gutter {
@@ -1100,7 +1148,7 @@
   .allday-spacer {
     flex-shrink: 0;
     min-height: 30px;
-    padding: 5px 4px;
+    padding: var(--s-1) var(--s-1);
     border-bottom: 1px solid transparent;
   }
   .hours-area {
@@ -1111,7 +1159,7 @@
   .hour {
     position: absolute;
     right: 10px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-3);
     transform: translateY(-6px);
@@ -1139,8 +1187,8 @@
   .allday-row {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px 4px;
+    gap: var(--s-1);
+    padding: var(--s-1) var(--s-1);
     min-height: 30px;
     border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface-2) 55%, transparent);
@@ -1153,22 +1201,22 @@
     background: color-mix(in srgb, var(--primary-soft) 55%, var(--surface-2));
   }
   .allday-label {
-    font-size: 9px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
-    margin-right: 2px;
+    margin-right: var(--s-0_5);
     flex-shrink: 0;
   }
   .allday-chip {
-    font-size: 10px;
+    font-size: var(--fs-2xs);
     font-weight: 600;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 14%, var(--surface));
     border: none;
-    border-radius: 7px;
-    padding: 2px 7px;
+    border-radius: var(--r-xs);
+    padding: var(--s-0_5) var(--s-2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1177,7 +1225,12 @@
     cursor: pointer;
     flex-shrink: 1;
     min-width: 0;
-    transition: filter var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+    transition:
+      filter var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out),
+      background var(--dur-slow) var(--ease-out),
+      color var(--dur-slow) var(--ease-out),
+      border-color var(--dur-slow) var(--ease-out);
   }
   .allday-chip:hover {
     filter: brightness(1.06);
@@ -1192,9 +1245,60 @@
     border: 1px dashed color-mix(in srgb, var(--c) 45%, transparent);
     background: color-mix(in srgb, var(--c) 8%, var(--surface));
   }
+  /* Completada: hundida gris, sin hover-lift. Sin borde (el chip base no lo
+     tiene): el tamaño no cambia respecto al pendiente; solo .cont lo lleva. */
+  .allday-chip.done {
+    background: var(--surface-2);
+    color: var(--text-2);
+    box-shadow: var(--shadow-inset-sm);
+  }
+  .allday-chip.done.cont {
+    border: 1px dashed color-mix(in srgb, var(--text-3) 40%, transparent);
+  }
+  .allday-chip.done:hover {
+    filter: none;
+    transform: none;
+  }
+  /* En completadas el check está siempre visible y tapa el final del texto:
+     reserva su espacio (en pendientes el check es solo hover) */
+  .chip-wrap.done .allday-chip {
+    padding-right: var(--s-5);
+  }
+  /* Tachado animado izq→der (mismo lenguaje que EventBlock) */
+  .strike {
+    background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0% 1.5px;
+    transition: background-size var(--dur-slow) var(--ease-out);
+  }
+  .allday-chip.done .strike,
+  .pop-title.done .strike {
+    background-size: 100% 1.5px;
+  }
+  /* Wrap del chip + check: ocupa el mismo hueco flex que ocupaba el chip */
+  .allday-row .chip-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex-shrink: 1;
+    max-width: 100%;
+  }
+  .allday-row .check-slot {
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .allday-row .chip-wrap:hover .check-slot,
+  .allday-row .chip-wrap:focus-within .check-slot,
+  .allday-row .chip-wrap.done .check-slot {
+    opacity: 1;
+  }
   .allday-more {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     color: var(--text-3);
   }
   .slots {
@@ -1207,8 +1311,8 @@
     flex: 1 1 0;
     min-height: 28px;
     border-top: 1px solid var(--border);
-    margin-left: 2px;
-    margin-right: 2px;
+    margin-left: var(--s-0_5);
+    margin-right: var(--s-0_5);
   }
   .now-line {
     position: absolute;
@@ -1227,15 +1331,15 @@
     right: 2px;
     background: var(--primary-soft);
     border-left: 2px solid var(--primary);
-    border-radius: 6px;
+    border-radius: var(--r-xs);
     z-index: 0;
     pointer-events: none;
     overflow: hidden;
   }
   .class-strip-label {
     display: block;
-    padding: 1px 6px;
-    font-size: 10px;
+    padding: 1px var(--s-1_5);
+    font-size: var(--fs-2xs);
     font-weight: 600;
     color: var(--primary);
     opacity: 0.75;
@@ -1258,7 +1362,7 @@
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-left: 3px solid var(--c);
     border-radius: var(--r-sm);
-    padding: 3px 7px;
+    padding: var(--s-1) var(--s-2);
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -1294,9 +1398,9 @@
     transform: translateX(-50%);
     background: var(--danger);
     color: #fff;
-    padding: 9px 16px;
-    border-radius: 12px;
-    font-size: 13px;
+    padding: var(--s-2) var(--s-4);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-base);
     font-weight: 600;
     box-shadow: var(--e2);
     z-index: 60;
@@ -1322,14 +1426,14 @@
     background: color-mix(in srgb, var(--c) 18%, var(--surface));
   }
   .evt-time {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     color: var(--text-2);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .evt-title {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-1);
     white-space: nowrap;
@@ -1344,10 +1448,10 @@
     border: none;
     background: var(--surface-3);
     color: var(--text-2);
-    font-size: 10.5px;
-    font-weight: 700;
-    border-radius: 8px;
-    padding: 3px 0;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    border-radius: var(--r-xs);
+    padding: var(--s-1) 0;
     z-index: 4;
     transition: all var(--dur-fast) var(--ease-out);
   }
