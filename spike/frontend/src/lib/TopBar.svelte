@@ -1,5 +1,6 @@
 <script lang="ts">
   import { MONTHS_ES } from "./data.svelte";
+  import { capitalizeFirst } from "./dateUtils";
   import QuickAdd from "./QuickAdd.svelte";
 
   let {
@@ -18,11 +19,7 @@
     setHmode?: (m: "semana" | "dia") => void;
   } = $props();
 
-  /** Mayúscula SOLO en la primera letra (en español "miércoles, 30 de
-   *  septiembre" no debe ir con cada palabra capitalizada). */
-  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-  const title = $derived(cap(
+  const title = $derived(capitalizeFirst(
     view === "mes"
       ? `${MONTHS_ES[date.getMonth()]} ${date.getFullYear()}`
       : view === "dia"

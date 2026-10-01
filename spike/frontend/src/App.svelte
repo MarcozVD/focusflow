@@ -324,7 +324,7 @@
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
     border-radius: var(--r-md);
-    box-shadow: var(--shadow-raised-lg, 0 12px 32px rgba(0, 0, 0, 0.18));
+    box-shadow: var(--e3);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     font-weight: 600;

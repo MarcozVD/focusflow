@@ -1210,7 +1210,7 @@
     color: var(--danger);
   }
   .vdot {
-    font-weight: 700;
+    font-weight: 600;
     font-size: var(--fs-md);
   }
   .vname {
