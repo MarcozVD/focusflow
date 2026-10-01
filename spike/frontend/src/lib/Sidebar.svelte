@@ -246,18 +246,22 @@
     height: 28px;
     flex-shrink: 0;
     border: none;
-    background: transparent;
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
     color: var(--text-3);
-    border-radius: var(--r-sm);
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .collapse-btn:hover {
-    background: var(--surface-2);
+    box-shadow: var(--btn-shadow-hover);
     color: var(--text-1);
+  }
+  .collapse-btn:active {
+    box-shadow: var(--btn-shadow-active);
   }
   .collapse-btn svg.flip {
     transform: scaleX(-1);
@@ -293,19 +297,22 @@
     gap: var(--s-3);
     border: none;
     background: transparent;
-    border-radius: var(--r-md);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-md);
     font-weight: 500;
     color: var(--text-2);
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
   }
   .nav-item:hover {
-    background: var(--surface-2);
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
     color: var(--text-1);
   }
   .nav-item.active {
     background: var(--primary-soft);
+    box-shadow: var(--shadow-inset-sm);
     color: var(--primary);
     font-weight: 600;
   }
@@ -319,36 +326,30 @@
     gap: var(--s-2);
     margin: var(--s-2) 0 var(--s-4);
     padding: var(--s-2) var(--s-3);
-    border: 1.5px dashed var(--primary);
-    border-radius: var(--r-sm);
-    background: transparent;
+    border: none;
+    border-radius: var(--r-full);
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
     color: var(--primary);
     font-size: var(--fs-base);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+  .add-horario:hover {
+    box-shadow: var(--btn-shadow-hover);
+  }
+  .add-horario:active {
+    box-shadow: var(--btn-shadow-active);
   }
   /* Sesiones de estudio: mismo componente, color propio (no son tareas) */
   .add-horario.add-study {
     margin-top: calc(-1 * var(--s-2));
-    border-color: var(--study);
     color: var(--study);
-  }
-  .add-horario.add-study:hover {
-    background: color-mix(in srgb, var(--study) 12%, transparent);
-    border-style: solid;
-  }
-  .add-horario:hover {
-    background: var(--primary-soft);
-    border-style: solid;
-  }
-  /* el hover genérico no debe pisar el de las sesiones */
-  .add-horario.add-study:hover {
-    background: color-mix(in srgb, var(--study) 12%, transparent);
   }
   .badge {
     margin-left: auto;
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
     font-size: var(--fs-xs);
     font-weight: 600;
@@ -438,15 +439,20 @@
     justify-content: center;
     gap: var(--s-2);
     border: none;
-    background: transparent;
-    border-radius: var(--r-md);
+    background: var(--surface);
+    box-shadow: var(--btn-shadow);
+    border-radius: var(--r-full);
     padding: var(--s-2);
     font-size: var(--fs-base);
     font-weight: 500;
     color: var(--text-2);
-    transition: background var(--dur-fast) var(--ease-out);
+    transition: box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .theme-btn:hover {
-    background: var(--surface-2);
+    box-shadow: var(--btn-shadow-hover);
+    color: var(--text-1);
+  }
+  .theme-btn:active {
+    box-shadow: var(--btn-shadow-active);
   }
 </style>

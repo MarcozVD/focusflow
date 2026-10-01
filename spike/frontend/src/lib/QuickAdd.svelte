@@ -193,20 +193,20 @@
     align-items: center;
     /* contenedor: gap y padding un escalón por encima (aire) */
     gap: var(--s-3);
-    background: var(--surface-3);
-    border-radius: var(--r-md);
+    background: var(--input-bg);
+    border-radius: var(--r-full);
     height: 44px;
     padding: 0 var(--s-5);
-    box-shadow: var(--shadow-inset);
-    border: 1px solid transparent;
+    box-shadow: var(--input-shadow);
+    border: var(--input-border);
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .qa:focus-within {
     border-color: var(--primary);
-    box-shadow: var(--shadow-inset), inset 0 0 0 2px var(--primary-soft-2);
+    box-shadow: var(--input-shadow), inset 0 0 0 2px var(--primary-soft-2);
   }
   .qa.expanded {
-    border-radius: var(--r-md) var(--r-md) var(--r-sm) var(--r-sm);
+    border-radius: var(--r-full) var(--r-full) var(--r-sm) var(--r-sm);
   }
   .bolt {
     color: var(--primary);
@@ -234,10 +234,10 @@
     font-weight: 600;
     font-family: inherit;
     color: var(--text-3);
-    background: var(--surface);
+    background: var(--surface-2);
     border-radius: var(--r-xs);
     padding: var(--s-0_5) var(--s-2);
-    box-shadow: var(--e1);
+    box-shadow: var(--shadow-inset-sm);
     white-space: nowrap;
     flex-shrink: 0;
     letter-spacing: 0.02em;
@@ -271,27 +271,29 @@
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
     border-radius: var(--r-full);
     padding: var(--s-1) var(--s-2);
-    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    border: none;
+    box-shadow: var(--btn-shadow);
     white-space: nowrap;
   }
   .create {
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
     border: none;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
     padding: var(--s-2) var(--s-4);
     font-size: var(--fs-base);
     font-weight: 600;
     font-family: inherit;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-primary-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out);
     flex-shrink: 0;
   }
   .create:hover {
-    background: var(--primary-hover);
+    filter: brightness(1.05);
   }
   .create:active {
-    background: var(--primary-active);
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
+    filter: brightness(0.97);
   }
   .create:disabled {
     opacity: 0.6;
@@ -311,22 +313,24 @@
   }
   .slow-btn {
     border: none;
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-full);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all var(--dur-fast) var(--ease-out);
+    box-shadow: var(--btn-primary-shadow);
+    transition: box-shadow var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out);
     flex-shrink: 0;
   }
   .slow-btn:hover {
-    background: var(--primary-hover);
+    filter: brightness(1.05);
   }
   .slow-btn:active {
-    transform: scale(0.98);
+    box-shadow: var(--btn-shadow-active);
+    filter: brightness(0.97);
   }
   .toast {
     position: fixed;
