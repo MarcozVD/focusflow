@@ -192,9 +192,9 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 
 | Rol | Token | Peso | Track | Uso real |
 |-----|-------|------|-------|----------|
-| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding |
+| Pantalla (onboarding hero) | `--fs-2xl` | 700 | -0.03em | h1 de onboarding — **objetivo, hoy sigue en 38 px/800** |
 | Título de pantalla | `--fs-xl` | 700 | -0.02em | TopBar |
-| Título de sección / card | `--fs-lg` | 600 | — | h2 en Ajustes, h3 de propuesta, drawer |
+| Título de sección / card | `--fs-lg` | 600 | — | h3 de propuesta y drawer; el h2 de Ajustes es **objetivo** (hoy 17 px literal) |
 | Cuerpo | `--fs-base`–`--fs-md` | 400–500 | — | Base de la app, inputs |
 | Nombre de tarea | `--fs-xs`–`--fs-md` | 500–600 | — | EventBlock / TaskCard |
 | Meta/horas | `--fs-2xs`–`--fs-sm` | 600 | — | `tabular-nums` SIEMPRE |
@@ -202,9 +202,11 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 | Hora del calendario | `--fs-xs` | 600 | — | gutter, tabular-nums |
 | Placeholder | `--fs-base` | 400 | — | `--text-3` |
 
+> **Alcance de la migración:** la tabla describe el sistema **objetivo**. `Onboarding.svelte` (hero, pasos) y `Settings.svelte` (h2 de sección, 22 px/700 del título de pantalla) aún tienen tamaños y pesos literales: entran en la **fase 2** (spec 18 §4, T10–T15).
+
 ### 4.3 Regla de pesos
 
-400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 queda eliminado (el hero pasó de 800 a 700). Los overlines van en 600 manteniendo uppercase + tracking.
+400 / 500 / 600 son la escala normal. **700 solo en el título de pantalla y el hero de onboarding**; el peso 800 queda **pendiente de eliminar** (hoy Onboarding y Settings aún lo usan; su conversión a 700 es objetivo de la fase 2, T11). Los overlines van en 600 manteniendo uppercase + tracking.
 
 ### 4.4 Reglas tipográficas
 
@@ -213,7 +215,7 @@ Acento configurable (Ajustes → Apariencia): `#2563EB, #7C3AED, #EC4899, #F59E0
 3. Títulos cortos: 1 línea con ellipsis; descripciones máx. 2–3 líneas con `-webkit-line-clamp`.
 4. `text-wrap: balance` en titulares largos (onboarding).
 5. Texto nunca se difumina: color plano, peso ≥ 400.
-6. **Ningún `font-size` literal:** todo sale de `--fs-*`.
+6. **Ningún `font-size` literal:** todo sale de `--fs-*`. Ya se cumple en el **núcleo diario** — `Calendar`, `EventBlock`, `TaskCheck`, `TopBar`, `Sidebar`, `TitleBar`, `App`, `TaskDrawer`, `QuickAdd` y `Widget` —; el resto de pantallas (Ajustes, Onboarding, Login, Asistente, Sugerencias, sesiones de estudio, agenda) se migra en la fase 2.
 
 ---
 
