@@ -111,7 +111,7 @@
     {#if tall && isStudy && study!.notes}
       <span class="evt-desc">{study!.notes}</span>
     {/if}
-    {#if !tall && !isStudy && task.priority === "alta"}
+    {#if !tall && height >= 50 && !isStudy && task.priority === "alta"}
       <span class="evt-title" aria-hidden="true">
         <span class="prio-bar"></span>
       </span>
@@ -166,7 +166,8 @@
     flex-direction: column;
     gap: var(--s-0_5);
     overflow: hidden;
-    z-index: 1;
+    /* Orden de apilado: sesión 0 · completada 1 · pendiente 2 · hover 4 */
+    z-index: 2;
     /* pendientes: relieve mínimo elevado sobre el tinte de categoría */
     box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
     transition:
@@ -183,10 +184,17 @@
   .evt:hover {
     transform: translateY(-1px) scale(1.01);
     box-shadow: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
-    z-index: 3;
+    z-index: 4;
   }
   .evt:active {
     cursor: grabbing;
+  }
+  /* Sesión de estudio: por debajo de las tareas */
+  .evt.study {
+    z-index: 0;
+  }
+  .evt.study:hover {
+    z-index: 4;
   }
   .evt.overdue {
     border-left-style: dashed;
@@ -201,19 +209,20 @@
   .evt.fin {
     background: color-mix(in srgb, var(--c) 18%, var(--surface));
   }
-  /* Completada: hundida gris, sin hover-lift, por debajo de las pendientes.
-     Va DESPUÉS de .inicio/.fin (misma especificidad): el gris debe ganar. */
+  /* Completada: hundida gris, sin hover-lift, por debajo de las pendientes
+     (pero por encima de las sesiones). Va DESPUÉS de .inicio/.fin (misma
+     especificidad): el gris debe ganar. */
   .evt.done {
     background: var(--surface-2);
     border-left-color: var(--text-3);
     box-shadow: var(--shadow-inset);
-    z-index: 0;
+    z-index: 1;
     cursor: pointer;
   }
   .evt.done:hover {
     transform: none;
     box-shadow: var(--shadow-inset);
-    z-index: 0;
+    z-index: 4;
   }
   .evt.done:active {
     cursor: pointer;

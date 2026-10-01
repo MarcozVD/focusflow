@@ -1349,7 +1349,8 @@
     height: 2px;
     background: var(--primary);
     border-radius: var(--r-full);
-    z-index: 2;
+    /* por encima de bloques (2) y del hover (4) */
+    z-index: 5;
     pointer-events: none;
   }
   /* Regla 8: franja tenue de clase bajo las tareas (día/semana) */
@@ -1395,7 +1396,8 @@
     flex-direction: column;
     gap: 1px;
     overflow: hidden;
-    z-index: 1;
+    /* misma escala de apilado que EventBlock (fantasma: 5) */
+    z-index: 2;
     box-shadow: var(--shadow-inset-sm);
     transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
     min-width: 0;
@@ -1405,7 +1407,7 @@
   .evt:hover {
     transform: translateY(-1px) scale(1.01);
     box-shadow: var(--e1);
-    z-index: 3;
+    z-index: 4;
   }
   .evt.overdue {
     border-left-style: dashed;
@@ -1415,7 +1417,8 @@
     pointer-events: none;
     opacity: 0.55;
     border-left-style: dashed;
-    z-index: 4;
+    /* el fantasma del arrastre va por encima de todo lo del día */
+    z-index: 5;
     transition: none;
     will-change: top, height;
   }
