@@ -43,6 +43,14 @@
   --r-xl: 28px;
   --r-full: 999px;
 
+  /* Forma (S1, por defecto rectangular suave). data-shape="round" = redondeado */
+  --r-control: 10px; /* botones, inputs, selects, segmentados */
+  --r-chip: 8px;     /* chips, badges, pills pequeñas, kbd */
+  --r-card: 18px;    /* tarjetas, paneles, modales, sidebar, drawer, calendario */
+  --r-well: 12px;    /* pozos: columnas de semana, celdas del mes, fichas */
+  --r-icon: 10px;    /* botones de icono, círculo de hoy, logo */
+  --r-check: 5px;    /* TaskCheck */
+
   /* Neumorfismo (claro): sombra oscura + luz; el modo oscuro solo cambia los dos neu-* */
   --neu-dark: rgba(163, 177, 198, 0.6);
   --neu-light: rgba(255, 255, 255, 0.9);
@@ -85,6 +93,16 @@
   /* Espaciado: grid 4px + micro-gaps (0_5 y 1_5) */
   --s-0_5: 2px; --s-1: 4px; --s-1_5: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
   --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
+}
+
+/* Forma redondeada (opción en Ajustes → Apariencia): píldoras y círculos */
+:root[data-shape="round"] {
+  --r-control: 999px;
+  --r-chip: 999px;
+  --r-card: 28px;
+  --r-well: 16px;
+  --r-icon: 50%;
+  --r-check: 50%;
 }
 
 [data-theme="dark"] {

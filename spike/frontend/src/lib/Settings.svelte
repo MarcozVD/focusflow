@@ -23,6 +23,7 @@
     setUiPrefs,
     uiTheme,
     uiAccent,
+    uiShape,
     notifPrefs,
     loadNotifPrefs,
     saveNotifPrefs,
@@ -41,10 +42,12 @@
 
   let curTheme = $state<"light" | "dark">("light");
   let curAccent = $state("#2563EB");
+  let curShape = $state<"soft" | "round">("soft");
 
   $effect(() => {
     curTheme = uiTheme() === "dark" ? "dark" : "light";
     curAccent = uiAccent();
+    curShape = uiShape();
   });
 
   function pickTheme(t: "light" | "dark") {
@@ -54,6 +57,10 @@
   function pickAccent(c: string) {
     curAccent = c;
     setUiPrefs({ accent: c });
+  }
+  function pickShape(s: "soft" | "round") {
+    curShape = s;
+    setUiPrefs({ shape: s });
   }
 
   let saving = $state(false);
@@ -385,6 +392,13 @@
     <div class="switcher" role="group" aria-label="Tema">
       <button class="sw {curTheme === 'light' ? 'on' : ''}" onclick={() => pickTheme("light")}>Claro</button>
       <button class="sw {curTheme === 'dark' ? 'on' : ''}" onclick={() => pickTheme("dark")}>Oscuro</button>
+    </div>
+    <div>
+      <span class="lbl">Forma</span>
+      <div class="switcher" role="group" aria-label="Forma">
+        <button class="sw {curShape === 'soft' ? 'on' : ''}" onclick={() => pickShape("soft")}>Rectangular</button>
+        <button class="sw {curShape === 'round' ? 'on' : ''}" onclick={() => pickShape("round")}>Redondeada</button>
+      </div>
     </div>
     <div class="accents">
       {#each ACCENTS as c}
@@ -834,7 +848,7 @@
   }
   section {
     background: var(--surface);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-card);
     box-shadow: var(--shadow-raised);
     /* tarjeta: padding y gap interno un escalón por encima (aire) */
     padding: var(--s-8);
@@ -880,7 +894,7 @@
     border: var(--input-border);
     background: var(--input-bg);
     box-shadow: var(--input-shadow);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-2) var(--s-3);
     font-size: var(--fs-base);
     color: var(--text-1);
@@ -892,7 +906,7 @@
     border-color: var(--primary);
   }
   textarea {
-    border-radius: var(--r-lg);
+    border-radius: var(--r-card);
     resize: vertical;
   }
   /* Checkbox → interruptor visual (mismo <input>, misma lógica y accesible) */
@@ -947,7 +961,7 @@
     display: inline-flex;
     width: fit-content;
     background: var(--surface);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--shadow-inset-sm);
     padding: var(--s-1);
     gap: var(--s-0_5);
@@ -955,7 +969,7 @@
   .sw {
     border: none;
     background: transparent;
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -980,7 +994,7 @@
   .swatch {
     width: 30px;
     height: 30px;
-    border-radius: 50%;
+    border-radius: var(--r-icon);
     border: none;
     background: var(--sw);
     box-shadow: var(--btn-shadow);
@@ -1003,7 +1017,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-1);
-    border-radius: var(--r-full);
+    border-radius: var(--r-control);
     box-shadow: var(--btn-shadow);
     padding: var(--s-2) var(--s-5);
     font-size: var(--fs-base);
@@ -1043,7 +1057,7 @@
     border: none;
     background: var(--surface);
     color: var(--text-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1_5) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -1063,7 +1077,7 @@
   }
   .sync-run {
     background: var(--surface-2);
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     padding: var(--s-4);
     display: flex;
     flex-direction: column;
@@ -1071,7 +1085,7 @@
   }
   .progress-track {
     height: 8px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: var(--surface-2);
     box-shadow: var(--shadow-inset-sm);
     overflow: hidden;
@@ -1080,14 +1094,14 @@
     height: 100%;
     width: 100%;
     transform-origin: left center;
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 60%, var(--success)));
     transition: transform var(--dur-base) var(--ease-out);
   }
   .sync-summary {
     background: color-mix(in srgb, var(--success) 8%, var(--surface));
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     padding: var(--s-4);
     display: flex;
     flex-direction: column;
@@ -1100,7 +1114,7 @@
   }
   .sum-item {
     background: var(--surface-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     padding: var(--s-3);
     display: flex;
     flex-direction: column;
@@ -1160,7 +1174,7 @@
     align-items: center;
     gap: var(--s-1_5);
     background: var(--surface-3);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     padding: var(--s-1) var(--s-3);
     font-size: var(--fs-sm);
     font-weight: 600;
@@ -1187,7 +1201,7 @@
   .res {
     font-weight: 600;
     padding: var(--s-0_5) var(--s-2);
-    border-radius: var(--r-full);
+    border-radius: var(--r-chip);
     background: var(--surface-3);
     font-size: var(--fs-xs);
   }
@@ -1209,7 +1223,7 @@
   }
   .stat {
     background: var(--surface-2);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-well);
     box-shadow: var(--shadow-inset-sm);
     padding: var(--s-3);
     display: flex;
@@ -1234,7 +1248,7 @@
   .errbox {
     background: var(--danger-bg);
     border: none;
-    border-radius: var(--r-md);
+    border-radius: var(--r-well);
     padding: var(--s-2) var(--s-3);
   }
   .errbox p {
@@ -1262,7 +1276,7 @@
     gap: var(--s-2);
     font-size: var(--fs-base);
     padding: var(--s-2) var(--s-3);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-well);
     background: var(--surface-3);
   }
   .vline.ok {
