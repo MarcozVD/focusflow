@@ -6,3 +6,9 @@ export function localIsoDate(d: Date | number): string {
   const x = typeof d === "number" ? new Date(d) : d;
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 }
+
+/** Mayúscula SOLO en la primera letra (en español "miércoles, 30 de
+ *  septiembre" no debe ir con cada palabra capitalizada). */
+export function capitalizeFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

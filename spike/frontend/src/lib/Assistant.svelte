@@ -436,7 +436,7 @@
   .task-ref-level {
     margin: 0;
     font-size: var(--fs-xs);
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.08em;
     padding: var(--s-1) var(--s-2);
     border-radius: var(--r-full);

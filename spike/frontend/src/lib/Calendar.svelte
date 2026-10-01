@@ -14,6 +14,7 @@
     type Task,
   } from "./data.svelte";
   import { classConflictsIn, DAY_MS } from "./classLogic";
+  import { capitalizeFirst } from "./dateUtils";
   import EventBlock from "./EventBlock.svelte";
   import {
     sameDay,
@@ -653,7 +654,7 @@
     {#if popupDay}
         <div class="day-popup">
         <div class="pop-head">
-          <strong>{popupDay.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</strong>
+          <strong>{capitalizeFirst(popupDay.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" }))}</strong>
           <button class="pop-close" onclick={() => (popupDay = null)} aria-label="Cerrar">✕</button>
         </div>
         <div class="pop-list">
@@ -962,7 +963,6 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--s-4);
-    text-transform: capitalize;
   }
   .pop-close {
     width: 30px;
