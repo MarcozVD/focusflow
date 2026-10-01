@@ -665,7 +665,7 @@
               <span class="check-slot"><TaskCheck task={t} /></span>
               <button class="pop-item" style="--c: {cat(t.categoryId).color}" onclick={() => { openTaskDetail(t); popupDay = null; }}>
                 <span class="pop-dot"></span>
-                <span class="pop-title {t.status === 'completada' ? 'done' : ''}">{chipTextFor(t, popupDay)}</span>
+                <span class="pop-title {t.status === 'completada' ? 'done' : ''}"><span class="strike">{chipTextFor(t, popupDay)}</span></span>
                 <span class="pop-time">
                   {t.allDay ? "Todo el día" : `${fmtTime(t.start)}–${fmtTime(t.end)}`}
                 </span>
@@ -705,13 +705,13 @@
               <div class="chip-wrap" class:done={t.status === "completada"}>
                 <button
                   type="button"
-                  class="allday-chip {!t.allDay ? 'cont' : ''}"
+                  class="allday-chip {!t.allDay ? 'cont' : ''} {t.status === 'completada' ? 'done' : ''}"
                   style="--c: {cat(t.categoryId).color}"
                   title={sameDay(t.start, t.end)
                     ? t.title
                     : `${t.title} (del ${t.start.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} al ${t.end.toLocaleDateString("es-ES", { day: "numeric", month: "short" })})`}
                   onclick={() => openTaskDetail(t)}
-                >{chipTextFor(t, d)}</button>
+                ><span class="strike">{chipTextFor(t, d)}</span></button>
                 <span class="check-slot"><TaskCheck task={t} size={14} /></span>
               </div>
             {/each}
@@ -901,6 +901,7 @@
     line-height: 1.25;
     color: color-mix(in srgb, var(--c) 60%, var(--text-1));
     background: color-mix(in srgb, var(--c) 13%, var(--surface));
+    border: none;
     border-radius: 7px;
     padding: 1px 6px;
     white-space: nowrap;
@@ -911,8 +912,11 @@
     min-height: 0;
   }
   .minichip.done {
+    background: var(--surface-2);
+    color: var(--text-2);
     text-decoration: line-through;
-    opacity: 0.55;
+    text-decoration-color: var(--text-3);
+    box-shadow: var(--shadow-inset-sm);
   }
   .more {
     font-size: 9.5px;
@@ -1031,6 +1035,7 @@
     border-radius: 50%;
     background: var(--c);
     flex-shrink: 0;
+    transition: background var(--dur-slow) var(--ease-out);
   }
   .pop-title {
     flex: 1;
@@ -1038,10 +1043,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: color var(--dur-slow) var(--ease-out);
   }
   .pop-title.done {
-    text-decoration: line-through;
-    opacity: 0.55;
+    color: var(--text-2);
+  }
+  .pop-list .chip-wrap.done .pop-dot {
+    background: var(--text-3);
+  }
+  .pop-list .chip-wrap.done .pop-time {
+    color: var(--text-3);
   }
   .pop-time {
     font-size: 11px;
@@ -1212,7 +1223,12 @@
     cursor: pointer;
     flex-shrink: 1;
     min-width: 0;
-    transition: filter var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+    transition:
+      filter var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out),
+      background var(--dur-slow) var(--ease-out),
+      color var(--dur-slow) var(--ease-out),
+      border-color var(--dur-slow) var(--ease-out);
   }
   .allday-chip:hover {
     filter: brightness(1.06);
@@ -1226,6 +1242,34 @@
   .allday-chip.cont {
     border: 1px dashed color-mix(in srgb, var(--c) 45%, transparent);
     background: color-mix(in srgb, var(--c) 8%, var(--surface));
+  }
+  /* Completada: hundida gris, sin hover-lift. Sin borde (el chip base no lo
+     tiene): el tamaño no cambia respecto al pendiente; solo .cont lo lleva. */
+  .allday-chip.done {
+    background: var(--surface-2);
+    color: var(--text-2);
+    box-shadow: var(--shadow-inset-sm);
+  }
+  .allday-chip.done.cont {
+    border: 1px dashed color-mix(in srgb, var(--text-3) 40%, transparent);
+  }
+  .allday-chip.done:hover {
+    filter: none;
+    transform: none;
+  }
+  /* En completadas el check está siempre visible y tapa el final del texto:
+     reserva su espacio (en pendientes el check es solo hover) */
+  .chip-wrap.done .allday-chip {
+    padding-right: 18px;
+  }
+  /* Tachado animado izq→der (mismo lenguaje que EventBlock) */
+  .strike {
+    background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0% 1.5px;
+    transition: background-size var(--dur-slow) var(--ease-out);
+  }
+  .allday-chip.done .strike,
+  .pop-title.done .strike {
+    background-size: 100% 1.5px;
   }
   /* Wrap del chip + check: ocupa el mismo hueco flex que ocupaba el chip */
   .allday-row .chip-wrap {
