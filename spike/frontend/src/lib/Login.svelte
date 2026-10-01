@@ -90,9 +90,9 @@
     gap: var(--s-6);
     background: var(--surface);
     border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
     padding: var(--s-10);
-    box-shadow: var(--shadow-raised-lg);
+    box-shadow: var(--shadow-raised);
   }
   .logo {
     width: 64px;

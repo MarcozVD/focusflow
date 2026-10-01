@@ -72,6 +72,7 @@
 </script>
 
 <div class="side" class:collapsed>
+  <div class="side-scroll">
   <div class="logo-row">
     <div class="logo">F</div>
     <span class="brand">FocusFlow</span>
@@ -156,6 +157,7 @@
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     <span class="theme-label">Tema</span>
   </button>
+  </div>
 </div>
 
 <style>
@@ -165,12 +167,42 @@
     display: flex;
     flex-direction: column;
     /* contenedor: padding y gap entre secciones un escalón por encima (aire) */
-    gap: var(--s-3);
     padding: var(--s-6);
-    overflow-y: auto;
+    /* panel elevado, separado de los bordes de la ventana */
+    margin: var(--s-4) 0 var(--s-4) var(--s-4);
+    background: var(--surface);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised);
     transition: width var(--dur-base) var(--ease-out), padding var(--dur-base) var(--ease-out);
   }
-  /* Modo iconos (~72px): etiquetas fuera de flujo (accesibles, sin reflow) */
+  /* Zona scrolleable del panel: fundido arriba/abajo (16px) y padding para
+     que el último elemento no toque el borde redondeado */
+  .side-scroll {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-3);
+    overflow-y: auto;
+    /* top = alto del fundido (el primer elemento empieza ya opaco);
+       bottom > fundido para que el último no quede atenuado ni toque el borde */
+    padding: var(--s-4) 0 var(--s-5);
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+  }
+  /* Modo iconos: 72px de ancho total, padding interno incluido */
   .side.collapsed {
     width: 72px;
     padding: var(--s-3) var(--s-2);
@@ -411,9 +443,10 @@
     display: flex;
     align-items: center;
     gap: var(--s-2);
-    background: var(--surface);
+    background: var(--surface-2);
     border-radius: var(--r-md);
-    box-shadow: var(--shadow-raised);
+    /* pozo hundido sutil */
+    box-shadow: var(--shadow-inset-sm);
     padding: var(--s-2) var(--s-3);
   }
   .tb-day {

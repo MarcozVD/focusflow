@@ -396,14 +396,14 @@
   }
   .msg.user {
     align-self: flex-end;
-    background: var(--primary);
+    background: var(--grad-accent);
     color: #fff;
     border-bottom-right-radius: var(--r-xs);
   }
   .msg.ai {
     align-self: flex-start;
     background: var(--surface);
-    box-shadow: var(--shadow-raised);
+    box-shadow: var(--shadow-raised-sm);
     border-bottom-left-radius: var(--r-xs);
   }
   .msg.ai.typing {
@@ -513,6 +513,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--s-1_5);
+    /* tarjeta de acción propuesta */
+    background: var(--surface);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-raised);
+    padding: var(--s-4);
   }
   .mini-row {
     display: flex;
