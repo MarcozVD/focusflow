@@ -166,8 +166,10 @@
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    /* contenedor: padding y gap entre secciones un escalón por encima (aire) */
-    padding: var(--s-6);
+    /* contenedor: padding y gap entre secciones un escalón por encima (aire).
+       El padding horizontal vive en .side-scroll para que la caja de recorte
+       del scroll llegue al borde del panel y las sombras no se corten */
+    padding: var(--s-6) 0;
     /* panel elevado, separado de los bordes de la ventana */
     margin: var(--s-4) 0 var(--s-4) var(--s-4);
     background: var(--surface);
@@ -185,8 +187,9 @@
     gap: var(--s-3);
     overflow-y: auto;
     /* top = alto del fundido (el primer elemento empieza ya opaco);
-       bottom > fundido para que el último no quede atenuado ni toque el borde */
-    padding: var(--s-4) 0 var(--s-5);
+       bottom > fundido para que el último no quede atenuado ni toque el borde;
+       horizontal = aire para que la sombra no se recorte en el borde del scroll */
+    padding: var(--s-4) var(--s-6) var(--s-5);
     -webkit-mask-image: linear-gradient(
       to bottom,
       transparent 0,
@@ -205,7 +208,10 @@
   /* Modo iconos: 72px de ancho total, padding interno incluido */
   .side.collapsed {
     width: 72px;
-    padding: var(--s-3) var(--s-2);
+    padding: var(--s-3) 0;
+  }
+  .side.collapsed .side-scroll {
+    padding-inline: var(--s-2);
   }
   .side.collapsed .brand,
   .side.collapsed .nav-label,
@@ -233,7 +239,10 @@
   .side.collapsed .nav-item {
     justify-content: center;
     gap: 0;
-    padding: var(--s-2);
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    margin-inline: auto;
   }
   .side.collapsed .nav-item .badge {
     position: absolute;
