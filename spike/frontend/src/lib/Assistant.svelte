@@ -332,8 +332,6 @@
 
 <style>
   .ast {
-    max-width: 780px;
-    margin: 0 auto;
     display: flex;
     flex-direction: column;
     height: 100%;
