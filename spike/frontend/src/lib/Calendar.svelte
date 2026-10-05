@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import {
     DAYS_ES,
     tasks as tasksStore,
@@ -118,7 +119,14 @@
   }
 
   // ---- utilidades ----
-  const isToday = $derived((d: Date) => sameDay(d, new Date()));
+  // Reloj reactivo (mismo patrón que Schedule/StudySessions): sin esto, la
+  // línea de "ahora" no se recalculaba mientras el componente estaba montado.
+  let nowMs = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (nowMs = Date.now()), 60_000);
+    return () => clearInterval(t);
+  });
+  const isToday = $derived((d: Date) => sameDay(d, new Date(nowMs)));
 
   function weekDays(anchor: Date): Date[] {
     const s = startOfDay(anchor);
@@ -196,7 +204,7 @@
   const minTimeAreaH = $derived(hours.length * 28);
 
   const nowInRange = $derived.by(() => {
-    const n = new Date();
+    const n = new Date(nowMs);
     const mins = n.getHours() * 60 + n.getMinutes();
     return mins >= grid.lo * 60 && mins <= grid.hi * 60;
   });
@@ -204,8 +212,8 @@
   function dayStartOf(d: Date): number {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   }
-  function nowTop(): number {
-    const n = new Date();
+  function nowTop(ms: number = nowMs): number {
+    const n = new Date(ms);
     const mins = n.getHours() * 60 + n.getMinutes();
     return (mins - grid.lo * 60) * (pxH / 60);
   }
@@ -398,7 +406,9 @@
   let bodyEl: HTMLElement | null = $state(null);
   $effect(() => {
     if (view !== "mes" && bodyEl) {
-      const top = Math.max(0, nowTop() - 40);
+      // untrack solo de nowMs: el scroll inicial no debe re-dispararse cada
+      // minuto, pero sí cuando cambian grid/pxH (p. ej. al medir el alto real)
+      const top = Math.max(0, nowTop(untrack(() => nowMs)) - 40);
       bodyEl.scrollTop = top;
     }
   });
