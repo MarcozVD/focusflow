@@ -26,7 +26,7 @@
 | D7 | Modo oscuro | **Neumorfismo oscuro** con el mismo sistema (superficie = fondo gris oscuro, sombra negra profunda, luz casi imperceptible). Se arregla el bug del acento: el acento elegido se aplica como estilo inline y pisa el azul aclarado del tema oscuro, así que en oscuro botones y enlaces quedan sin contraste. En oscuro se usa una versión aclarada del acento elegido. |
 | D8 | Modales | Panel neumórfico sobre un **overlay claro desenfocado** (el mismo gris translúcido + `backdrop-filter: blur`), como el "Pop Up" de la imagen 1. Así se conserva el arreglo del halo (no hay luz blanca sobre fondo oscuro). En oscuro el overlay es oscuro y la luz del relieve es casi nula. |
 | D9 | Scroll | **Todo scrollea junto:** la TopBar sube con el contenido y nada pasa "por debajo" de una barra. Excepción: la conversación del Asistente tiene scroll propio, con un fundido superior. Los paddings de los contenedores cubren el alcance de la sombra, así que nada se recorta. |
-| D10 | Ventana grande | El contenido (TopBar y vista) se limita a ~1680 px y se centra. Las vistas de lectura (Ajustes, Sugerencias, Asistente) se limitan a ~880 px, centradas. Paddings y gaps de contenedor con `clamp()` hasta un tope; la tipografía queda fija. El calendario **llena el alto**. |
+| D10 | Ventana grande | El contenido (TopBar y vista) se limita a ~1680 px y se centra. Las vistas de lectura (Ajustes, Sugerencias, Asistente) usan ese mismo ancho y espaciado, sin columna estrecha propia. Paddings y gaps de contenedor con `clamp()` hasta un tope; la tipografía queda fija. El calendario **llena el alto**. |
 | D11 | Ventana chica | Por debajo de 1200 px de ancho la barra lateral pasa sola a una **columna de iconos** (~72 px). Además hay un **botón manual** para colapsar o expandir a cualquier tamaño, que guarda la preferencia. El mínimo de ventana sube de 800×600 a **960×640** (`tauri.conf.json`). |
 | D12 | Columna de iconos | Iconos del nav con tooltip, contador de Sugerencias sobre su icono, "Añadir horario" y "Añadir sesión" como botones circulares, botón de tema y botón para expandir. Se ocultan las categorías y la tarjeta "MIÉ 30 · pendientes". |
 | D13 | Tipografía | Se mantiene **Inter**. Sobre el gris, `--text-2` → `#5B6472` y `--text-3` → `#7C8594` para mantener AA (título ≥ 4.5:1; `--text-3` solo para meta). |
@@ -84,7 +84,7 @@ Paso 0 (orquestador): capturas **antes** en claro y oscuro a 1024×640, 1440×90
 - **Vistas que llenan el alto** (semana, día, mes, horario, sesiones, asistente): ocupan el alto disponible y solo scrollean (junto con la TopBar) si su alto mínimo no cabe.
 - **Asistente:** la conversación conserva su scroll interno con el input fijo abajo, y lleva un fundido superior (`mask-image`) de ~24 px.
 - **Calendario que llena el alto:** el wrapper de la transición `{#key}` de `App.svelte` debe propagar la cadena flex (`display: flex; flex-direction: column; flex: 1; min-height: 0`). Aceptación: a 2560×1440, `.cal` ≈ alto disponible.
-- **Ancho máximo:** contenido ≤ 1680 px centrado; Ajustes, Sugerencias y Asistente ≤ 880 px centrados.
+- **Ancho máximo:** contenido ≤ 1680 px centrado; Ajustes, Sugerencias y Asistente usan ese mismo ancho.
 - Padding y gap de contenedor: `clamp(var(--s-6), 2.5vw, var(--s-12))` o equivalente. Horizontal ≥ `--shadow-reach` cuando haya overflow.
 - Sin scrollbars horizontales a 960, 1440 y 2560 px.
 
