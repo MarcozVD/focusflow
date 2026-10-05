@@ -55,9 +55,6 @@
 
   const onboardingPending = $derived(showOnboarding || onboarding()?.completed === false);
 
-  // Vistas de lectura: columna más estrecha (~880px) centrada con la TopBar.
-  const reading = $derived(view === "sugerencias" || view === "asistente" || view === "ajustes");
-
   // Scroll unificado: al cambiar de vista o de submodo (horario/sesiones) la
   // columna vuelve arriba; las flechas de fecha dentro de la misma vista no.
   let contentEl = $state<HTMLElement | null>(null);
@@ -217,7 +214,7 @@
     <div class="body">
       <Sidebar {view} {setView} {navigate} />
       <main class="content" bind:this={contentEl}>
-        <div class="content-inner" class:reading>
+        <div class="content-inner">
           <TopBar {date} {view} {navigate} {goToday} {hmode} {setHmode} />
           {#if view === "sesiones"}
             <div class="cal-wrap">
@@ -318,9 +315,6 @@
     margin-inline: auto;
     min-width: 0;
     padding: 0 clamp(var(--s-10), 3vw, var(--s-16)) clamp(var(--s-6), 2.5vw, var(--s-12));
-  }
-  .content-inner.reading {
-    max-width: 880px;
   }
   /* La TopBar vive dentro de la columna: su padding horizontal lo pone el contenedor */
   .content-inner :global(.top.top) {
